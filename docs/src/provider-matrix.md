@@ -248,6 +248,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `openrouter` | `anthropic/claude-fable-5.2` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `openai/gpt-6.1-terra` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `openai/gpt-6.1-terra-pro` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `openrouter` | `openrouter/perplexity/pplx-decider-v1.3:free \| perplexity/pplx-decider-v1.3:free` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `openrouter` | `openrouter/typesafe/jev*` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `openrouter` | `openai/gpt-5.4-nano \| openai/gpt-5.4-mini` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `openrouter` | `openrouter/respan/span-02 \| openrouter/nace-ai/drex-v1.5 \| openrouter/nace-ai/drex-v2.0` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
@@ -732,6 +733,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `openrouter/openai/gpt-6-luna-decisions` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `openrouter/perplexity/pplx-decider-latest` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `openrouter/perplexity/pplx-decider-v1.1-27b` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `openrouter/perplexity/pplx-decider-v1.3:free` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `openrouter/respan/span-02` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `openrouter/scaledown/classify-1` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `openrouter/togethercomputer/tev1-4b-experimental` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |

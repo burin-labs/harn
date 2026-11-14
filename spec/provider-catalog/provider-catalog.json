@@ -32123,6 +32123,69 @@
       "row_kind": "snapshot"
     },
     {
+      "id": "openrouter/perplexity/pplx-decider-v1.3:free",
+      "name": "Decider 1.3 (OpenRouter, free)",
+      "operations": [
+        "decision"
+      ],
+      "display_name": "Decider 1.3",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 262144,
+      "wire_model": "perplexity/pplx-decider-v1.3:free",
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": false,
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "none",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "effort_levels": [],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.0,
+        "output_per_mtok": 0.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming"
+      ],
+      "family": "perplexity-decider",
+      "lineage": "openrouter",
+      "tier": "small",
+      "open_weight": true,
+      "row_kind": "snapshot"
+    },
+    {
       "id": "openrouter/respan/span-02",
       "name": "Span 02 (OpenRouter)",
       "operations": [
@@ -49295,6 +49358,18 @@
       "base_url": "https://openrouter.ai/api/v1",
       "secret_env": "OPENROUTER_API_KEY",
       "label": "Decider 1.1 27B (OpenRouter)",
+      "family": "perplexity-decider",
+      "capabilities": [
+        "streaming",
+        "structured_output_mode:none"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "perplexity/pplx-decider-v1.3:free",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Decider 1.3 (OpenRouter, free)",
       "family": "perplexity-decider",
       "capabilities": [
         "streaming",

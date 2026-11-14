@@ -12918,6 +12918,21 @@ wire_model = "perplexity/pplx-decider-v1.1-27b"
 input_per_mtok = 0.02
 output_per_mtok = 0.0
 
+[models."openrouter/perplexity/pplx-decider-v1.3:free"]
+context_window = 262144
+family = "perplexity-decider"
+name = "Decider 1.3 (OpenRouter, free)"
+open_weight = true
+operations = ["decision"]
+provider = "openrouter"
+row_kind = "snapshot"
+tier = "small"
+wire_model = "perplexity/pplx-decider-v1.3:free"
+
+[models."openrouter/perplexity/pplx-decider-v1.3:free".pricing]
+input_per_mtok = 0.0
+output_per_mtok = 0.0
+
 [models."openrouter/respan/span-02"]
 context_window = 131072
 family = "respan-span"

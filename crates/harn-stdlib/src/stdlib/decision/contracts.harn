@@ -1,0 +1,79 @@
+import {
+  BooleanQuestion,
+  ChoiceQuestion,
+  ConfidenceKind,
+  EvaluationOutcome,
+  EvaluationPolicy,
+} from "std/predicate"
+import { SchemaContract, SchemaContractFailure } from "std/schema/contracts"
+
+pub type DecisionRoute<T, R> = {
+  name: string,
+  meaning: string,
+  minimum_probability: float,
+  handle: fn(Harness, T, DecisionEvidence) -> R,
+}
+
+pub type DecisionPolicy = {
+  evaluation: EvaluationPolicy,
+  applicability_accept: float,
+  applicability_reject: float,
+  minimum_margin: float,
+}
+
+pub type DecisionRouteDefinition = {name: string, meaning: string, minimum_probability: float}
+
+pub type DecisionDefinition = {
+  id: string,
+  digest: string,
+  input_schema_digest: string,
+  routes: list<DecisionRouteDefinition>,
+  questions: {applicable: BooleanQuestion, route: ChoiceQuestion},
+  policy: DecisionPolicy,
+}
+
+pub type DecisionState = {
+  definition_id: string,
+  definition_digest: string,
+  input_json: string,
+  available_routes: dict<string, string>,
+}
+
+pub type DecisionEvidence = {
+  definition_id: string,
+  definition_digest: string,
+  receipt: string,
+  applicability_probability: float,
+  applicability_confidence_kind: ConfidenceKind,
+  route: string,
+  route_probability: float,
+  route_confidence_kind: ConfidenceKind,
+  margin: float,
+}
+
+pub type DecisionUncertainReason = "applicability" | "route_probability" | "route_margin"
+
+pub type DecisionNonMatch = {kind: "invalid_input", error: SchemaContractFailure} \
+  | {kind: "evaluation_failed", evaluation: EvaluationOutcome} \
+  | {kind: "unmatched", evidence: DecisionEvidence} \
+  | {kind: "uncertain", reason: DecisionUncertainReason, evidence: DecisionEvidence}
+
+pub type DecisionAssessment<T> = {kind: "matched", input: T, evidence: DecisionEvidence} \
+  | DecisionNonMatch
+
+pub type DecisionDispatch<R> = {kind: "dispatched", value: R, evidence: DecisionEvidence} \
+  | DecisionNonMatch
+
+pub type DecisionRouter<T, R> = {
+  definition: DecisionDefinition,
+  assess: fn(HarnessLlm, unknown) -> DecisionAssessment<T>,
+  dispatch: fn(Harness, unknown) -> DecisionDispatch<R>,
+}
+
+pub type DecisionRouterOptions<T, R> = {
+  id: string,
+  input: SchemaContract<T>,
+  instructions: string,
+  routes: list<DecisionRoute<T, R>>,
+  policy: DecisionPolicy,
+}

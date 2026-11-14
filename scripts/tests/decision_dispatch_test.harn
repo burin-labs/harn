@@ -1,0 +1,286 @@
+import { DecisionEvidence, DecisionPolicy, DecisionRouter, router, state } from "std/decision"
+import { schema_contract } from "std/schema"
+import { EvaluationFixture, with_evaluation_fixtures } from "std/testing"
+
+type Request = {message: string}
+
+type Reply = {handler: string, message: string, receipt: string}
+
+fn policy() -> DecisionPolicy {
+  return {
+    evaluation: {
+      backend: "native_decision",
+      provider: "openrouter",
+      model: "openrouter/typesafe/jev-1.14",
+      threshold: 0.0,
+      evaluation_cost_limit: 0.001,
+    },
+    applicability_accept: 0.9,
+    applicability_reject: 0.1,
+    minimum_margin: 0.1,
+  }
+}
+
+fn handled(
+  runtime: HarnessRuntime,
+  request: Request,
+  evidence: DecisionEvidence,
+  name: string,
+) -> Reply {
+  const calls = runtime.store_get("decision.test.calls") ?? []
+  runtime.store_set("decision.test.calls", calls + [name])
+  if request.message == "handler throws" {
+    throw "handler failure"
+  }
+  return {handler: name, message: request.message, receipt: evidence.receipt}
+}
+
+fn make_router(settings: DecisionPolicy = policy()) -> DecisionRouter<Request, Reply> {
+  return router(
+    {
+      id: "test.orders.v1",
+      input: schema_contract(schema_of(Request), []),
+      instructions: "Route an order request.",
+      routes: [
+        {
+          name: "lookup",
+          meaning: "Read an order status without modifying it",
+          minimum_probability: 0.9,
+          handle: { harness: Harness, request: Request, evidence: DecisionEvidence ->
+            handled(harness.runtime, request, evidence, "lookup")
+          },
+        },
+        {
+          name: "review",
+          meaning: "Request an order cancellation for review",
+          minimum_probability: 0.99,
+          handle: { harness: Harness, request: Request, evidence: DecisionEvidence ->
+            handled(harness.runtime, request, evidence, "review")
+          },
+        },
+      ],
+      policy: settings,
+    },
+  )
+}
+
+fn fixture(
+  app: DecisionRouter<Request, Reply>,
+  request: Request,
+  applicable: bool = true,
+  applicability_confidence: float = 1.0,
+  selected: string = "lookup",
+  route_confidence: float = 1.0,
+) -> EvaluationFixture {
+  return {
+    site_id: "stdlib.decision.dispatch.v1",
+    state: state(app.definition, json_stringify(request)),
+    questions: app.definition.questions,
+    policy: app.definition.policy.evaluation,
+    answers: {
+      applicable: {
+        kind: "boolean",
+        verdict: applicable,
+        confidence: applicability_confidence,
+        evidence: "declared applicability",
+      },
+      route: {
+        kind: "choice",
+        choice: selected,
+        confidence: route_confidence,
+        evidence: "declared route",
+      },
+    },
+  }
+}
+
+pipeline test_dispatch_invokes_exactly_the_selected_typed_handler(harness: Harness) {
+  const app = make_router()
+  const request = {message: "Where is order A42?"}
+  with_evaluation_fixtures(
+    harness,
+    [fixture(app, request)],
+    { ->
+      const result = app.dispatch(harness, request)
+      assert_eq(result.kind, "dispatched")
+      if result.kind == "dispatched" {
+        assert_eq(result.value.handler, "lookup")
+        assert_eq(result.value.message, request.message)
+        assert_eq(result.value.receipt, result.evidence.receipt)
+        const accounting = harness.llm.evaluation_receipt(result.evidence.receipt)
+        assert_eq(accounting.kind, "retained")
+        if accounting.kind == "retained" {
+          assert_eq(accounting.receipt.physical_attempts, 0)
+        }
+      }
+    },
+  )
+  assert_eq(harness.runtime.store_get("decision.test.calls"), ["lookup"])
+}
+
+pipeline test_confident_forced_choice_cannot_dispatch_an_unmatched_request(harness: Harness) {
+  const app = make_router()
+  const request = {message: "Write a birthday poem"}
+  with_evaluation_fixtures(
+    harness,
+    [fixture(app, request, false)],
+    { ->
+      const result = app.dispatch(harness, request)
+      assert_eq(result.kind, "unmatched")
+      if result.kind == "unmatched" {
+        assert_eq(result.evidence.route_probability, 1.0)
+        assert_eq(result.evidence.applicability_probability, 0.0)
+      }
+    },
+  )
+  assert_eq(harness.runtime.store_get("decision.test.calls"), nil)
+}
+
+pipeline test_uncertain_applicability_and_route_each_leave_handlers_untouched(harness: Harness) {
+  const app = make_router()
+  const request = {message: "Take care of order A42"}
+  const fixtures = [
+    fixture(app, request, true, 0.65),
+    fixture(app, request, true, 1.0, "lookup", 0.8),
+  ]
+  with_evaluation_fixtures(
+    harness,
+    fixtures,
+    { ->
+      const applicability = app.dispatch(harness, request)
+      assert_eq(applicability.kind, "uncertain")
+      if applicability.kind == "uncertain" {
+        assert_eq(applicability.reason, "applicability")
+      }
+      const route = app.dispatch(harness, request)
+      assert_eq(route.kind, "uncertain")
+      if route.kind == "uncertain" {
+        assert_eq(route.reason, "route_probability")
+      }
+    },
+  )
+  assert_eq(harness.runtime.store_get("decision.test.calls"), nil)
+}
+
+pipeline test_each_route_owns_its_consequence_threshold(harness: Harness) {
+  const app = make_router()
+  const request = {message: "Order A42"}
+  const fixtures = [
+    fixture(app, request, true, 1.0, "lookup", 0.95),
+    fixture(app, request, true, 1.0, "review", 0.95),
+  ]
+  with_evaluation_fixtures(
+    harness,
+    fixtures,
+    { ->
+      const read = app.dispatch(harness, request)
+      assert_eq(read.kind, "dispatched")
+      const change = app.dispatch(harness, request)
+      assert_eq(change.kind, "uncertain")
+    },
+  )
+  assert_eq(harness.runtime.store_get("decision.test.calls"), ["lookup"])
+}
+
+pipeline test_margin_can_abstain_even_after_route_probability_accepts(harness: Harness) {
+  const app = make_router(policy() + {minimum_margin: 0.99})
+  const request = {message: "Where is order A42?"}
+  with_evaluation_fixtures(
+    harness,
+    [fixture(app, request, true, 1.0, "lookup", 0.95)],
+    { ->
+      const result = app.dispatch(harness, request)
+      assert_eq(result.kind, "uncertain")
+      if result.kind == "uncertain" {
+        assert_eq(result.reason, "route_margin")
+      }
+    },
+  )
+  assert_eq(harness.runtime.store_get("decision.test.calls"), nil)
+}
+
+pipeline test_assessment_and_invalid_input_never_invoke_handlers(harness: Harness) {
+  const app = make_router()
+  const request = {message: "Where is order A42?"}
+  with_evaluation_fixtures(
+    harness,
+    [fixture(app, request)],
+    { ->
+      const selected = app.assess(harness.llm, request)
+      assert_eq(selected.kind, "matched")
+      if selected.kind == "matched" {
+        assert_eq(selected.input.message, request.message)
+      }
+      const invalid = app.dispatch(harness, {message: 42})
+      assert_eq(invalid.kind, "invalid_input")
+    },
+  )
+  assert_eq(harness.runtime.store_get("decision.test.calls"), nil)
+}
+
+pipeline test_missing_fixture_is_a_failure_with_no_handler_fallback(harness: Harness) {
+  const app = make_router()
+  const result = try {
+    with_evaluation_fixtures(
+      harness,
+      [],
+      { ->
+        const selected = app.dispatch(harness, {message: "Where is A42?"})
+        assert_eq(selected.kind, "dispatched")
+      },
+    )
+  }
+  assert_eq(is_err(result), true)
+  assert_eq(harness.runtime.store_get("decision.test.calls"), nil)
+}
+
+pipeline test_unsupported_native_options_preserve_failure_and_zero_attempts(harness: Harness) {
+  const settings = policy()
+  const app = make_router(settings + {evaluation: settings.evaluation + {temperature: 0.5}})
+  const result = app.dispatch(harness, {message: "Where is A42?"})
+  assert_eq(result.kind, "evaluation_failed")
+  if result.kind == "evaluation_failed" {
+    assert_eq(result.evaluation.kind, "unavailable")
+    if result.evaluation.kind == "unavailable" {
+      assert_eq(result.evaluation.reason, "unsupported_options")
+    }
+    const accounting = harness.llm.evaluation_receipt(result.evaluation.receipt)
+    assert_eq(accounting.kind, "retained")
+    if accounting.kind == "retained" {
+      assert_eq(accounting.receipt.physical_attempts, 0)
+    }
+  }
+  assert_eq(harness.runtime.store_get("decision.test.calls"), nil)
+}
+
+pipeline test_handler_failure_does_not_retry_or_invoke_another_handler(harness: Harness) {
+  const app = make_router()
+  const request = {message: "handler throws"}
+  with_evaluation_fixtures(
+    harness,
+    [fixture(app, request)],
+    { ->
+      const failed = try {
+        const result = app.dispatch(harness, request)
+        assert_eq(result.kind, "dispatched")
+      }
+      assert_eq(is_err(failed), true)
+    },
+  )
+  assert_eq(harness.runtime.store_get("decision.test.calls"), ["lookup"])
+}
+
+pipeline test_definition_identity_tracks_meanings_and_selection_policy() {
+  const first = make_router()
+  const same = make_router()
+  assert_eq(first.definition.digest, same.definition.digest)
+  let settings = policy()
+  settings.minimum_margin = 0.8
+  const changed = make_router(settings)
+  assert_ne(first.definition.digest, changed.definition.digest)
+  assert_eq(first.definition.questions.route.criteria.lookup, first.definition.routes[0]?.meaning)
+  const rejected = try {
+    make_router(settings + {applicability_accept: 0.4})
+  }
+  assert_eq(is_err(rejected), true)
+}

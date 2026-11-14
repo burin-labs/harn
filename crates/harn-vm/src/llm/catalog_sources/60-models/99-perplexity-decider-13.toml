@@ -1,0 +1,26 @@
+# Route indexes read 2026-11-14:
+# https://openrouter.ai/api/v1/models?output_modalities=decisions
+# https://ai-gateway.vercel.sh/v1/models
+# OpenRouter lists only the :free 1.3 route; the unserved unqualified ID is absent.
+# The Perplexity direct Decisions API has no Harn native transport adapter.
+# Vercel lists this model, but the live Harn request returned HTTP 400 under
+# required privacy filters with no answers or served identity. Its route is
+# withheld until that contract can be verified; see the recorded route probe.
+[models."openrouter/perplexity/pplx-decider-v1.3:free"]
+name = "Decider 1.3 (OpenRouter, free)"
+provider = "openrouter"
+wire_model = "perplexity/pplx-decider-v1.3:free"
+operations = ["decision"]
+context_window = 262144
+pricing = { input_per_mtok = 0.0, output_per_mtok = 0.0 }
+tier = "small"
+family = "perplexity-decider"
+row_kind = "snapshot"
+open_weight = true
+
+[models."openrouter/perplexity/pplx-decider-v1.3:free".registration.request]
+# Live 2026-11-14: boolean=true, choice=inspection, score=major; served
+# perplexity/pplx-decider-v1.3-20261112. Text/JSON only in Harn.
+decision_protocol = "openrouter_decisions"
+decision_question_kinds = ["boolean", "choice", "score"]
+decision_limits = { max_choice_options = 255, score_levels_min = 2, score_levels_max = 10, state_window_tokens = 262144, request_window_tokens = 262144 }

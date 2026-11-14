@@ -12,6 +12,10 @@ see [Coming from elsewhere](./sota-comparison.md).
 **LLM call.** One request to a language model. Smallest unit. Produced by
 `harness.llm.call`.
 
+**Semantic dispatch.** Selecting one typed handler by meaning under explicit
+probability thresholds, with separate unmatched and uncertain outcomes. Owned
+by [`std/decision`](../stdlib/decision.md).
+
 **Token reference.** One token ID paired with its exact tokenizer vocabulary.
 Harn's `TokenRef` prevents a bare integer from crossing into a model that gives
 that integer another meaning. See [Exact token references](../llm/tokenizer.md).

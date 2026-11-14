@@ -1,0 +1,67 @@
+import { analyze } from "../../examples/semantic-dispatch/analyze"
+
+fn repository_path(fs: HarnessFs, path: string) -> string {
+  return path_join(fs.source_dir(), "..", "..", path)
+}
+
+fn study(fs: HarnessFs, rows: list) -> string {
+  const root = fs.mkdtemp_in_workspace("semantic-study-")
+  const observations = path_join(root, "observations.jsonl")
+  fs.write_text(observations, rows.map({ row -> json_stringify(row) }).join("\n"))
+  const manifest = path_join(root, "manifest.json")
+  fs.write_text(
+    manifest,
+    json_stringify(
+      {
+        repetitions: 2,
+        corpus: repository_path(fs, "examples/semantic-dispatch/cases.json"),
+        arms: [
+          {model: "openrouter/typesafe/jev-1.14", backend: "native_decision", path: observations},
+        ],
+      },
+    ),
+  )
+  return manifest
+}
+
+fn observations(fs: HarnessFs) -> list {
+  return fs.read_text(repository_path(fs, "experiments/semantic-dispatch/observations/jev.jsonl"))
+    .lines()
+    .filter({ line -> trim(line) != "" })
+    .map({ line -> json_parse(line) })
+    .to_list()
+}
+
+pipeline test_semantic_study_reports_actual_rows_and_refuses_partial_or_duplicate_measurements(
+  harness: Harness,
+) {
+  const rows = observations(harness.fs)
+  const complete = analyze(harness.fs, study(harness.fs, rows))
+  const arm = complete.arms["openrouter/typesafe/jev-1.14"]
+  assert_eq(arm.pending, 0)
+  assert_eq(arm.development.rows + arm.holdout.rows, 24)
+  for invalid in [rows.slice(0, 23), rows + [rows[0]], []] {
+    const refused = try {
+      analyze(harness.fs, study(harness.fs, invalid))
+    }
+    assert_eq(is_err(refused), true)
+  }
+}
+
+pipeline test_semantic_study_refuses_zero_attempts_and_preserves_unknown_cost(harness: Harness) {
+  let rows = observations(harness.fs)
+  rows[0].accounting.receipt.cost_usd = nil
+  const report = analyze(harness.fs, study(harness.fs, rows))
+  const development = report.arms["openrouter/typesafe/jev-1.14"].development
+  assert_eq(development.measured_cost_rows, 11)
+  assert_eq(development.cost_usd, nil)
+  rows[0].accounting.receipt.physical_attempts = 0
+  assert_eq(
+    is_err(
+      try {
+        analyze(harness.fs, study(harness.fs, rows))
+      },
+    ),
+    true,
+  )
+}
