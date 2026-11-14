@@ -405,6 +405,10 @@ struct WaiterContext {
     progress_max_inline_bytes: usize,
     snapshot_binding: Option<harn_vm::value::DictMap>,
     output_feed: Arc<OutputFeed>,
+    private_filter: harn_vm::session_inputs::OutputFilter,
+    /// The command grant's private directory, kept until the waiter has
+    /// reaped the child and returns.
+    _granted: Option<harn_vm::stdlib::process::GrantedSpawn>,
 }
 
 struct ProgressThreadContext {
@@ -479,24 +483,43 @@ pub(crate) fn spawn_long_running_with_options(
     let effective_cwd = proc::resolve_effective_cwd(builtin, cwd.as_deref())?;
     let sandbox_reporting = harn_vm::process_sandbox::ProcessSandboxReportingContext::current();
     let sandbox_report = sandbox_reporting.report();
+    // Registered before the grant resolves, so the granted value is filtered
+    // from this command's output.
+    let private_filter = harn_vm::session_inputs::OutputFilter::capture_for_spawn();
+    let granted = proc::command_grant(
+        builtin,
+        &program,
+        &args,
+        &effective_cwd,
+        &env,
+        options.env_mode,
+    )?;
     let mut env = env;
     proc::apply_toolchain_path(Some(&effective_cwd), &mut env, options.env_mode);
+    let mut env_remove = options.env_remove.clone();
+    if let Some(granted) = &granted {
+        proc::apply_command_grant(granted, &mut env, &mut env_remove);
+    }
     let spec = SpawnSpec {
         builtin,
-        program: program.clone(),
+        program: granted
+            .as_ref()
+            .map_or_else(|| program.clone(), |granted| granted.program.clone()),
         args: args.clone(),
         cwd: Some(effective_cwd.clone()),
         env,
-        env_remove: options.env_remove.clone(),
+        env_remove,
         env_mode: options.env_mode,
         use_stdin: false,
         configure_process_group: true,
         owner_death: OwnerDeathPolicy::KillContainment,
         output_capture: process_handle::OutputCapture::Pipe,
     };
+    let launching = granted.as_ref().map(|granted| granted.launching());
     let handle = process_handle::spawn_process(spec).map_err(|error| {
         proc::process_error_to_hostlib(builtin, requested_cwd.as_deref(), &effective_cwd, error)
     })?;
+    drop(launching);
 
     let pid = handle.pid().unwrap_or(0);
     let process_group_id = handle.process_group_id();
@@ -565,6 +588,8 @@ pub(crate) fn spawn_long_running_with_options(
         progress_max_inline_bytes: options.progress_max_inline_bytes,
         snapshot_binding: options.snapshot_binding.clone(),
         output_feed,
+        private_filter,
+        _granted: granted,
     };
     let waiter_thread_name = waiter_context.handle_id.clone();
     let capture = options.capture;
@@ -721,7 +746,16 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
             .state
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        (state.stdout.clone(), state.stderr.clone())
+        (
+            context
+                .private_filter
+                .redact_bytes(&state.stdout)
+                .into_owned(),
+            context
+                .private_filter
+                .redact_bytes(&state.stderr)
+                .into_owned(),
+        )
     };
     if let Err(error) = waited.as_ref() {
         stderr

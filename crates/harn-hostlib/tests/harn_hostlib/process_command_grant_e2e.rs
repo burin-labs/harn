@@ -322,6 +322,14 @@ fn run(request: harn_vm::value::DictMap) -> Result<Output, String> {
             Some(provider),
             async move {
                 harn_vm::orchestration::run_blocking_with_ambient(move || {
+                    // A long-running command starts under the owner-death
+                    // guardian, which re-enters this test binary.
+                    let _guardian =
+                        harn_hostlib::process::owner_death::install_guardian_reexec_args([
+                            "--exact",
+                            "process_tools_e2e::owner_death_guardian_fixture",
+                            "--nocapture",
+                        ]);
                     call_tool("hostlib_tools_run_command", request)
                 })
                 .await
@@ -402,6 +410,34 @@ fn a_plain_gh_shell_command_receives_the_grant_with_its_exec_paths_closed() {
     );
     // The direction control: argv mode reaches the same grant.
     assert_granted_without_leak(&fixture.argv(&["gh", "issue", "list"], &[]), "argv");
+}
+
+/// An agent's foreground command opens an inline auto-background window, so
+/// it spawns through the long-running path. The grant reaches gh there too,
+/// in both shell and argv form, with its output filtered.
+#[test]
+fn a_command_with_an_auto_background_window_receives_the_grant() {
+    let _env_guard = super::process_tools_e2e::lock_env();
+    let fixture = Fixture::new();
+    let windowed = |mode: &str| {
+        let mut request = fixture.request(fixture.workspace.path());
+        request.insert("mode".into(), vm_string(mode));
+        if mode == "shell" {
+            request.insert("command".into(), vm_string("gh issue list --limit 5"));
+            let mut shell = harn_vm::value::DictMap::new();
+            shell.insert("path".into(), vm_string("/bin/sh"));
+            request.put("shell", VmValue::dict(shell));
+        } else {
+            request.put(
+                "argv",
+                VmValue::list(["gh", "issue", "list"].map(vm_string).to_vec()),
+            );
+        }
+        request.put_int("background_after_ms", 30_000);
+        run(request).unwrap()
+    };
+    assert_granted_without_leak(&windowed("shell").stdout, "auto-background shell");
+    assert_granted_without_leak(&windowed("argv").stdout, "auto-background argv");
 }
 
 #[test]
