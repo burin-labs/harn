@@ -113,6 +113,9 @@ pub struct LlmCallOptions {
     /// own lifecycle events. `None` for raw `harness.llm.call(...)` invocations
     /// from script context — those have no agent session to attach to.
     pub session_id: Option<String>,
+    /// Local transcript routing and capture policy; never provider request fields.
+    pub llm_transcript_dir: Option<String>,
+    pub llm_transcript_raw: Option<bool>,
     /// Semantic stage owned by an orchestration loop for this call. Raw LLM
     /// calls leave this unset so telemetry can distinguish unavailable
     /// attribution from a stage that made no calls.
@@ -335,6 +338,8 @@ impl Default for LlmCallOptions {
             routing_policy: None,
             region: None,
             session_id: None,
+            llm_transcript_dir: None,
+            llm_transcript_raw: None,
             call_stage: None,
             rate_limit_consumer_id: None,
             rate_limit_reroute_on_timeout: false,

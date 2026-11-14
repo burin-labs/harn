@@ -459,6 +459,7 @@ pub const SUB_AGENT_OPTIONS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("turn_end_condition", TY_BOOL_OR_DICT),
     ShapeFieldDescriptor::optional("max_verify_attempts", TY_INT),
     ShapeFieldDescriptor::optional("llm_transcript_dir", TY_STRING),
+    ShapeFieldDescriptor::optional("llm_transcript_raw", TY_BOOL),
     ShapeFieldDescriptor::optional("skills", TY_ANY),
     ShapeFieldDescriptor::optional("skill_registry", TY_ANY),
     ShapeFieldDescriptor::optional("skill_match", TY_DICT),

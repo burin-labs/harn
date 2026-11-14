@@ -664,7 +664,11 @@ fn raw_provider_capture_is_disabled_by_default() {
     let dir_string = dir.to_string_lossy().to_string();
     push_llm_transcript_dir(&dir_string);
 
-    let context = RawProviderCaptureContext::new("call-disabled".to_string(), 2);
+    let context = RawProviderCaptureContext::new(
+        "call-disabled".to_string(),
+        2,
+        super::env_flag_enabled("HARN_LLM_TRANSCRIPT_RAW"),
+    );
     let path = persist_raw_provider_request(
         Some(&context),
         "openai",
@@ -689,7 +693,11 @@ fn raw_provider_capture_writes_sidecars_and_pointer_events() {
     let dir_string = dir.to_string_lossy().to_string();
     push_llm_transcript_dir(&dir_string);
 
-    let context = RawProviderCaptureContext::new("call/raw 1".to_string(), 7);
+    let context = RawProviderCaptureContext::new(
+        "call/raw 1".to_string(),
+        7,
+        super::env_flag_enabled("HARN_LLM_TRANSCRIPT_RAW"),
+    );
     let request_path = persist_raw_provider_request(
         Some(&context),
         "openai",
@@ -756,7 +764,11 @@ fn raw_provider_body_failure_retains_safe_response_identity_and_typed_cause() {
     let dir_string = dir.to_string_lossy().to_string();
     push_llm_transcript_dir(&dir_string);
 
-    let context = RawProviderCaptureContext::new("call-body-failure".to_string(), 5);
+    let context = RawProviderCaptureContext::new(
+        "call-body-failure".to_string(),
+        5,
+        super::env_flag_enabled("HARN_LLM_TRANSCRIPT_RAW"),
+    );
     let error = VmError::CategorizedError {
         message: "openai response body error (timeout): request timed out".to_string(),
         category: ErrorCategory::Timeout,
@@ -813,7 +825,7 @@ fn raw_provider_body_failure_retains_safe_response_identity_and_typed_cause() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn raw_provider_capture_context_scopes_to_current_task() {
-    let context = RawProviderCaptureContext::new("call-context".to_string(), 4);
+    let context = RawProviderCaptureContext::new("call-context".to_string(), 4, false);
     with_raw_provider_capture_context(context.clone(), async {
         assert_eq!(current_raw_provider_capture_context(), Some(context));
     })

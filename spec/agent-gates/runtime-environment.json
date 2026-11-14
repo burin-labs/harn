@@ -52,19 +52,23 @@
   },
   {
     "default": "false",
-    "evidence": "Structural environment access/declaration at crates/harn-vm/src/llm/agent_observe/raw_provider_capture.rs:46; canonical headless use is not observed by a source scan.",
-    "expiry": "2026-09-13",
+    "evidence": "Actual CLI and observed-call HTTP controls prove omitted options preserve environment-disabled and environment-enabled capture, while explicit per-call booleans override either value.",
+    "expiry": "2027-02-14",
     "kind": "environment input",
     "layer": "runner",
     "name": "HARN_LLM_TRANSCRIPT_RAW",
-    "reachability": "unknown",
+    "reachability": "yes",
     "readers": [
       {
-        "file": "crates/harn-vm/src/llm/agent_observe/raw_provider_capture.rs",
+        "file": "crates/harn-vm/src/llm/agent_observe.rs",
+        "reader": "env_flag_enabled"
+      },
+      {
+        "file": "crates/harn-vm/src/llm/agent_observe/retry_tests.rs",
         "reader": "super::env_flag_enabled"
       }
     ],
-    "reason": "The environment registry retains ownership of name/value validation. Keep this consumer input until the corresponding typed configuration boundary is reviewed.",
+    "reason": "Retain the environment as the compatibility fallback for calls without an explicit transcript capture option.",
     "verdict": "KEEP-with-expiry"
   },
   {

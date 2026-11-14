@@ -3,7 +3,7 @@
 use std::future::Future;
 use std::path::PathBuf;
 
-use crate::value::VmError;
+use crate::value::{DictMap, VmDictExt, VmError, VmValue};
 
 use super::{append_llm_transcript_entry_to_dir, chrono_now, current_transcript_dir};
 
@@ -16,14 +16,16 @@ pub(crate) struct RawProviderCaptureContext {
     pub(crate) call_id: String,
     pub(crate) iteration: usize,
     transcript_dir: Option<String>,
+    enabled: bool,
 }
 
 impl RawProviderCaptureContext {
-    pub(super) fn new(call_id: String, iteration: usize) -> Self {
+    pub(super) fn new(call_id: String, iteration: usize, enabled: bool) -> Self {
         Self {
             call_id,
             iteration,
             transcript_dir: current_transcript_dir(),
+            enabled,
         }
     }
 }
@@ -42,15 +44,28 @@ pub(crate) fn current_raw_provider_capture_context() -> Option<RawProviderCaptur
     RAW_PROVIDER_CAPTURE_CONTEXT.try_with(Clone::clone).ok()
 }
 
-fn raw_llm_transcript_enabled() -> bool {
-    super::env_flag_enabled("HARN_LLM_TRANSCRIPT_RAW")
+pub(crate) fn validate_raw_provider_capture_destination(
+    raw: Option<bool>,
+    selected_dir: Option<&str>,
+) -> Result<(), VmError> {
+    if raw == Some(true)
+        && selected_dir.is_none_or(|dir| dir.trim().is_empty())
+        && current_transcript_dir().is_none_or(|dir| dir.trim().is_empty())
+    {
+        let mut error = DictMap::new();
+        error.put_str("category", "configuration");
+        error.put_str("reason_code", "llm_transcript_directory_required");
+        error.put_str(
+            "message",
+            "llm_transcript_raw=true requires llm_transcript_dir or an active transcript directory",
+        );
+        return Err(VmError::Thrown(VmValue::dict(error)));
+    }
+    Ok(())
 }
 
 pub(crate) fn raw_provider_capture_enabled(context: Option<&RawProviderCaptureContext>) -> bool {
-    context
-        .and_then(|context| context.transcript_dir.as_ref())
-        .is_some()
-        && raw_llm_transcript_enabled()
+    context.is_some_and(|context| context.enabled && context.transcript_dir.is_some())
 }
 
 pub(crate) fn persist_raw_provider_request(
@@ -189,7 +204,6 @@ fn write_raw_provider_sidecar(
     crate::redact::current_policy().redact_json_in_place(&mut envelope);
     let dir = context.transcript_dir.as_deref()?;
     let raw_dir = PathBuf::from(&dir).join("raw-provider");
-    std::fs::create_dir_all(&raw_dir).ok()?;
     let call_id = raw_provider_file_id(&context.call_id);
     let attempt_part = attempt
         .map(|attempt| format!("-attempt-{attempt}"))
@@ -197,9 +211,10 @@ fn write_raw_provider_sidecar(
     let filename = format!("{call_id}{attempt_part}-{suffix}.json");
     let relative_path = format!("raw-provider/{filename}");
     let path = raw_dir.join(filename);
-    let encoded = serde_json::to_vec_pretty(&envelope).ok()?;
     static RAW_PROVIDER_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    {
+    let written = (|| -> std::io::Result<()> {
+        std::fs::create_dir_all(&raw_dir)?;
+        let encoded = serde_json::to_vec_pretty(&envelope).map_err(std::io::Error::other)?;
         let _guard = RAW_PROVIDER_WRITE_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -207,13 +222,21 @@ fn write_raw_provider_sidecar(
             .create(true)
             .write(true)
             .truncate(true)
-            .open(path)
-            .ok()?;
+            .open(path)?;
         use std::io::Write;
-        file.write_all(&encoded).ok()?;
-        file.write_all(b"\n").ok()?;
+        file.write_all(&encoded)?;
+        file.write_all(b"\n")
+    })();
+    if let Err(error) = written {
+        report_raw_capture_failure(
+            context,
+            suffix,
+            "sidecar_write_failed",
+            &error.kind().to_string(),
+        );
+        return None;
     }
-    append_llm_transcript_entry_to_dir(
+    let pointer_written = append_llm_transcript_entry_to_dir(
         &serde_json::json!({
             "type": "provider_raw_capture",
             "timestamp": chrono_now(),
@@ -228,7 +251,42 @@ fn write_raw_provider_sidecar(
         }),
         Some(dir),
     );
-    Some(relative_path)
+    if pointer_written {
+        Some(relative_path)
+    } else {
+        report_raw_capture_failure(
+            context,
+            suffix,
+            "transcript_pointer_write_failed",
+            "transcript append failed",
+        );
+        None
+    }
+}
+
+fn report_raw_capture_failure(
+    context: &RawProviderCaptureContext,
+    capture: &str,
+    reason: &str,
+    detail: &str,
+) {
+    let message = crate::egress::redact_diagnostic_text(&format!(
+        "raw provider capture failed: {reason} ({detail}), call {}",
+        context.call_id,
+    ));
+    eprintln!("[harn] warning [provider_raw_capture_failed]: {message}");
+    append_llm_transcript_entry_to_dir(
+        &serde_json::json!({
+            "type": "provider_raw_capture_failed",
+            "timestamp": chrono_now(),
+            "call_id": context.call_id,
+            "iteration": context.iteration,
+            "capture": capture,
+            "reason_code": reason,
+            "message": message,
+        }),
+        context.transcript_dir.as_deref(),
+    );
 }
 
 fn raw_provider_file_id(value: &str) -> String {

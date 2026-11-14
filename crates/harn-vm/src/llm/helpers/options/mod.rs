@@ -120,6 +120,11 @@ pub async fn prepare_llm_options_safe(
 async fn prepare_llm_options_result(
     args: &[VmValue],
 ) -> Result<crate::llm::api::LlmCallOptions, VmError> {
+    let options = crate::llm::cost_route::merge_context_options(
+        args.get(2).and_then(VmValue::as_dict).cloned(),
+    );
+    let (dir, raw) = extract::transcript_options(options.as_ref())?;
+    crate::llm::agent_observe::validate_raw_provider_capture_destination(raw, dir.as_deref())?;
     match extract_llm_options(args) {
         Ok(initial) => {
             let (provider, model) =
