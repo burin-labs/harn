@@ -305,6 +305,13 @@ pub trait ProcessSpawner: Send + Sync {
 #[derive(Clone, Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ProcessError {
+    /// The embedding executable has not registered its guardian entry point.
+    #[error(
+        "process guardian is not initialized: call \
+         harn_hostlib::process::owner_death::run_if_requested at the start of main, \
+         before parsing arguments"
+    )]
+    GuardianNotInitialized,
     /// `argv` was empty or otherwise malformed.
     #[error("invalid argv: {0}")]
     InvalidArgv(String),

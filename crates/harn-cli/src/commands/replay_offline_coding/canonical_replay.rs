@@ -21,21 +21,52 @@ const VOLATILE_FIELDS: &[&str] = &[
     "stdout_path",
 ];
 
+// The owning cleanup report already makes survivor_count null unless a census
+// or guardian proves it. Preserve that outcome instead of hashing the host's
+// chosen proof mechanism or unrelated process population.
+const CLEANUP_VOLATILE_FIELDS: &[&str] = &[
+    "root_pid",
+    "parent_pid",
+    "census_complete",
+    "census_control_read",
+    "census_scanned_processes",
+    "census_unreadable_processes",
+    "guardian_custody_complete",
+];
+
 pub(super) fn canonical_replay_result(value: &JsonValue, workspace: &Path) -> JsonValue {
     let lexical_root = workspace.to_string_lossy().replace('\\', "/");
     let canonical_root = fs::canonicalize(workspace)
         .ok()
         .map(|path| path.to_string_lossy().replace('\\', "/"));
-    normalize(value, &lexical_root, canonical_root.as_deref())
+    normalize(value, &lexical_root, canonical_root.as_deref(), false)
 }
 
-fn normalize(value: &JsonValue, lexical_root: &str, canonical_root: Option<&str>) -> JsonValue {
+fn normalize(
+    value: &JsonValue,
+    lexical_root: &str,
+    canonical_root: Option<&str>,
+    process_cleanup: bool,
+) -> JsonValue {
     match value {
         JsonValue::Object(object) => {
             let mut normalized = object
                 .iter()
                 .filter(|(key, _)| !VOLATILE_FIELDS.contains(&key.as_str()))
-                .map(|(key, value)| (key.clone(), normalize(value, lexical_root, canonical_root)))
+                .filter(|(key, _)| {
+                    !process_cleanup || !CLEANUP_VOLATILE_FIELDS.contains(&key.as_str())
+                })
+                .map(|(key, value)| {
+                    (
+                        key.clone(),
+                        normalize(
+                            value,
+                            lexical_root,
+                            canonical_root,
+                            process_cleanup || key == "process_cleanup",
+                        ),
+                    )
+                })
                 .collect::<serde_json::Map<_, _>>();
             normalize_process_output(object, &mut normalized);
             JsonValue::Object(normalized)
@@ -43,7 +74,7 @@ fn normalize(value: &JsonValue, lexical_root: &str, canonical_root: Option<&str>
         JsonValue::Array(values) => JsonValue::Array(
             values
                 .iter()
-                .map(|value| normalize(value, lexical_root, canonical_root))
+                .map(|value| normalize(value, lexical_root, canonical_root, process_cleanup))
                 .collect(),
         ),
         JsonValue::String(text) => {
@@ -117,6 +148,95 @@ fn normalized_stream(object: &serde_json::Map<String, JsonValue>, field: &str) -
 #[cfg(test)]
 mod tests {
     use super::canonical_replay_result;
+
+    #[test]
+    fn cleanup_identity_normalization_preserves_decision_evidence() {
+        let workspace = tempfile::tempdir().unwrap();
+        let first = serde_json::json!({"process_cleanup": {
+            "root_pid": 10, "census_scanned_processes": 100,
+            "census_unreadable_processes": 0, "census_complete": true,
+            "guardian_custody_complete": false,
+            "survivor_count": 0, "omitted_child_count": 0,
+            "observed_children": [{"pid": 11, "parent_pid": 10,
+                "depth": 1, "command_name": "sleep", "alive_after_cleanup": false}]
+        }});
+        let mut second = first.clone();
+        second["process_cleanup"]["root_pid"] = 20.into();
+        second["process_cleanup"]["census_scanned_processes"] = 200.into();
+        second["process_cleanup"]["census_unreadable_processes"] = 50.into();
+        second["process_cleanup"]["census_complete"] = false.into();
+        second["process_cleanup"]["guardian_custody_complete"] = true.into();
+        second["process_cleanup"]["observed_children"][0]["pid"] = 21.into();
+        second["process_cleanup"]["observed_children"][0]["parent_pid"] = 20.into();
+        let expected = canonical_replay_result(&first, workspace.path());
+        assert_eq!(expected, canonical_replay_result(&second, workspace.path()));
+
+        for (field, value) in [
+            ("survivor_count", serde_json::json!(1)),
+            ("omitted_child_count", serde_json::json!(1)),
+        ] {
+            let mut changed = second.clone();
+            changed["process_cleanup"][field] = value;
+            assert_ne!(
+                expected,
+                canonical_replay_result(&changed, workspace.path()),
+                "{field}"
+            );
+        }
+        let mut unknown = second.clone();
+        unknown["process_cleanup"]["guardian_custody_complete"] = false.into();
+        unknown["process_cleanup"]["survivor_count"] = serde_json::Value::Null;
+        let unknown_result = canonical_replay_result(&unknown, workspace.path());
+        assert_ne!(expected, unknown_result);
+        unknown["process_cleanup"]
+            .as_object_mut()
+            .unwrap()
+            .remove("guardian_custody_complete");
+        assert_eq!(
+            unknown_result,
+            canonical_replay_result(&unknown, workspace.path())
+        );
+        second["process_cleanup"]["observed_children"][0]["alive_after_cleanup"] = true.into();
+        assert_ne!(expected, canonical_replay_result(&second, workspace.path()));
+        assert_ne!(
+            expected,
+            canonical_replay_result(&serde_json::json!({}), workspace.path())
+        );
+        assert_ne!(
+            expected,
+            canonical_replay_result(
+                &serde_json::json!({"process_cleanup": null}),
+                workspace.path()
+            )
+        );
+    }
+
+    #[test]
+    fn absent_null_and_unknown_cleanup_are_distinct() {
+        let workspace = tempfile::tempdir().unwrap();
+        let outcomes = [
+            serde_json::json!({}),
+            serde_json::json!({"process_cleanup": null}),
+            serde_json::json!({"process_cleanup": {"survivor_count": null}}),
+            serde_json::json!({"process_cleanup": {"survivor_count": 0}}),
+        ];
+        for (index, outcome) in outcomes.iter().enumerate() {
+            for other in &outcomes[index + 1..] {
+                assert_ne!(
+                    canonical_replay_result(outcome, workspace.path()),
+                    canonical_replay_result(other, workspace.path()),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn cleanup_metadata_names_remain_data_outside_cleanup_receipts() {
+        let workspace = tempfile::tempdir().unwrap();
+        let value =
+            serde_json::json!({"root_pid": 10, "parent_pid": 9, "census_scanned_processes": 100});
+        assert_eq!(value, canonical_replay_result(&value, workspace.path()));
+    }
 
     #[test]
     fn missing_byte_count_does_not_rewrite_derived_capture_evidence() {

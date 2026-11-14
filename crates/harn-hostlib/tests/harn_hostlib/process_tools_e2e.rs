@@ -1197,7 +1197,7 @@ impl Drop for PidFileCleanup {
 }
 
 #[test]
-fn real_run_command_token_cleanup_reaps_reparented_pipe_holder() {
+fn real_run_command_completion_reaps_reparented_pipe_holder() {
     let Some(python) = python3() else {
         return;
     };
@@ -1229,15 +1229,14 @@ print("parent-exit", flush=True)
             vm_string(&pid_path_arg),
         ]),
     );
-    // The escaped holder keeps the pipe open, so this deadline is what triggers
-    // cleanup and the run always lasts the full budget. The parent must start
-    // Python, spawn the holder and print first: 643 ms worst case at 3.5x CPU
-    // oversubscription, so 5 s leaves margin for a loaded CI runner.
+    // Completion of the direct parent must retire its escaped pipe holder.
+    // Keep the ordinary deadline as an independent fuse, not the cleanup trigger.
     req.put_int("timeout_ms", 5_000);
     let resp = require_dict(call("hostlib_tools_run_command", req).unwrap());
 
-    assert!(require_bool(&resp, "timed_out"));
-    assert_eq!(require_str(&resp, "status"), "timed_out");
+    assert!(!require_bool(&resp, "timed_out"));
+    assert_eq!(require_str(&resp, "status"), "completed");
+    assert_eq!(require_int(&resp, "exit_code"), 0);
     let stdout = require_str(&resp, "stdout");
     assert!(
         stdout.contains("parent-exit"),
@@ -1347,7 +1346,8 @@ print("parent-exit", flush=True)
         stdout.contains("parent-exit"),
         "file capture should preserve direct-run output: {stdout:?}"
     );
-    assert!(resp.get("process_cleanup").is_none());
+    let cleanup = require_nested_dict(&resp, "process_cleanup");
+    completed_cleanup::assert_no_observed_survivors(&cleanup);
     let parent_pid = std::fs::read_to_string(&parent_pid_path)
         .expect("direct parent pid")
         .parse::<i64>()
@@ -1356,6 +1356,14 @@ print("parent-exit", flush=True)
         .expect("escaped pipe holder pid")
         .parse::<i64>()
         .expect("numeric pipe holder pid");
+    assert!(require_list(&cleanup, "observed_children")
+        .iter()
+        .map(as_dict)
+        .any(|child| require_int(&child, "pid") == descendant_pid));
+    assert!(require_list(&cleanup, "reaped_children")
+        .iter()
+        .map(as_dict)
+        .any(|child| require_int(&child, "pid") == descendant_pid));
     assert_process_gone(parent_pid, "direct parent after capture returns");
     assert_process_gone(
         descendant_pid,

@@ -25,6 +25,8 @@ use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::PathBuf;
 #[cfg(unix)]
 use std::process::{Child, ChildStderr, ChildStdin, Command, ExitStatus, Stdio};
+#[cfg(unix)]
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(unix)]
 use serde::{Deserialize, Serialize};
@@ -42,6 +44,8 @@ use journal_cleanup::OwnerJournalCleanup;
 mod output_relay;
 #[cfg(unix)]
 mod owner_pipe;
+#[doc(hidden)]
+pub mod test_reexec;
 #[cfg(unix)]
 pub(crate) use completion_receipt::ReceiptReader;
 #[cfg(unix)]
@@ -77,6 +81,8 @@ fn reexec_executable() -> io::Result<PathBuf> {
 const MODE_ENV: &str = "HARN_INTERNAL_PROCESS_GUARDIAN_MODE";
 #[cfg(unix)]
 const PIPE_MODE: &str = "request-pipe-v1";
+#[cfg(unix)]
+static DISPATCHER_READY: AtomicBool = AtomicBool::new(false);
 #[cfg(unix)]
 const REAPER_ENV: &str = "HARN_INTERNAL_PROCESS_GUARDIAN_REAPER";
 /// The supervisor's pid, which the reaper compares with its parent pid.
@@ -168,6 +174,8 @@ enum GuardianOutputCapture {
 #[derive(Deserialize, Serialize)]
 struct GuardianCommandRequest {
     #[serde(default)]
+    test_reexec: bool,
+    #[serde(default)]
     output_capture: GuardianOutputCapture,
     #[serde(default)]
     cleanup_receipt_fd: Option<i32>,
@@ -215,6 +223,7 @@ struct StartupMessage {
 /// Guardian launch and the parent's completion witness.
 #[cfg(unix)]
 pub(crate) struct PreparedGuardian {
+    pub(crate) test_reexec: bool,
     pub(crate) cleanup_receipt: ReceiptReader,
     #[cfg(target_os = "linux")]
     pub(crate) cancel_request: cancel_request::CancelRequest,
@@ -246,6 +255,13 @@ pub(crate) fn prepare_guardian(
             ));
         }
     };
+    let reexec_args = match REEXEC_ARGS.with(|slot| slot.borrow().clone()) {
+        Some(args) => Some(args),
+        None => test_reexec::arguments()?,
+    };
+    if reexec_args.is_none() && !DISPATCHER_READY.load(Ordering::Acquire) {
+        return Err(ProcessError::GuardianNotInitialized);
+    }
     let mut payload_spec = spec.clone();
     payload_spec.configure_process_group = false;
     payload_spec.owner_death = super::OwnerDeathPolicy::None;
@@ -311,6 +327,7 @@ pub(crate) fn prepare_guardian(
         spec.use_stdin,
     );
     request.output_capture = output_capture;
+    request.test_reexec = reexec_args.is_some();
     #[cfg(target_os = "linux")]
     if let Some(pinned) = pinned.as_ref() {
         if payload.get_program() != std::ffi::OsStr::new(&pinned.program) {
@@ -325,7 +342,7 @@ pub(crate) fn prepare_guardian(
     let executable = reexec_executable()
         .map_err(|error| ProcessError::Spawn(format!("resolve guardian executable: {error}")))?;
     let mut guardian = Command::new(executable);
-    match REEXEC_ARGS.with(|slot| slot.borrow().clone()) {
+    match reexec_args {
         Some(args) => {
             guardian.args(args);
         }
@@ -368,11 +385,13 @@ pub(crate) fn prepare_guardian(
         request.cancel_request_fd = Some(fd);
         cancel_request
     };
+    let test_reexec = request.test_reexec;
     let request = serde_json::to_vec(&request)
         .map_err(|error| ProcessError::Spawn(format!("encode guardian request: {error}")))?;
     harn_vm::op_interrupt::initialize_process_owner_group_journal(&cleanup_token)
         .map_err(|error| ProcessError::Spawn(format!("create owner process journal: {error}")))?;
     Ok(PreparedGuardian {
+        test_reexec,
         cleanup_receipt,
         #[cfg(target_os = "linux")]
         cancel_request,
@@ -543,6 +562,7 @@ impl GuardianCommandRequest {
         payload_stdin: bool,
     ) -> Self {
         Self {
+            test_reexec: false,
             output_capture: GuardianOutputCapture::Pipe,
             cleanup_receipt_fd: None,
             #[cfg(target_os = "linux")]
@@ -655,7 +675,10 @@ fn os_bytes(value: &OsStr) -> Vec<u8> {
 
 /// Read the guardian's spawn handshake without consuming payload stderr.
 #[cfg(unix)]
-pub(crate) fn await_startup(child: &mut Child) -> Result<(ChildStderr, u32, u32), ProcessError> {
+pub(crate) fn await_startup(
+    child: &mut Child,
+    test_output_token: Option<&str>,
+) -> Result<(ChildStderr, u32, u32), ProcessError> {
     let mut stderr = child
         .stderr
         .take()
@@ -690,6 +713,15 @@ pub(crate) fn await_startup(child: &mut Child) -> Result<(ChildStderr, u32, u32)
         let pid = message.pid.ok_or_else(|| {
             ProcessError::Spawn("guardian startup response omitted payload pid".to_string())
         })?;
+        if let Some(token) = test_output_token {
+            let stdout = child
+                .stdout
+                .as_mut()
+                .ok_or_else(|| ProcessError::Spawn("test guardian stdout pipe missing".into()))?;
+            test_reexec::consume_boundary(stdout, token).map_err(|error| {
+                ProcessError::Spawn(format!("test guardian stdout startup: {error}"))
+            })?;
+        }
         Ok((stderr, guardian_pid, pid))
     } else {
         let _ = child.wait();
@@ -723,6 +755,7 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
     let raw = read_request()?;
     let request: GuardianCommandRequest = serde_json::from_slice(&raw)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let separate_test_output = request.test_reexec;
     let receipt_fd = request.cleanup_receipt_fd;
     #[cfg(target_os = "linux")]
     let cancel_fd = request.cancel_request_fd;
@@ -772,6 +805,9 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
         guardian_pid: Some(std::process::id()),
         pid: Some(payload_pid),
     })?;
+    if separate_test_output {
+        test_reexec::write_boundary(&cleanup_token)?;
+    }
 
     let stdout = payload.stdout.take();
     let stderr = payload.stderr.take();
@@ -1045,8 +1081,8 @@ fn run_guardian_reaper() -> ! {
             .env_remove(OWNER_PID_ENV)
             .stdin(Stdio::from(relay_reader))
             .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .process_group(0);
+            .stderr(Stdio::inherit());
+        super::real::configure_background_process_group(&mut guardian);
         guardian.spawn().unwrap_or_else(|error| {
             eprintln!("spawn process guardian: {error}");
             std::process::exit(1);
@@ -1324,6 +1360,7 @@ fn propagate_exit(status: ExitStatus) -> ! {
 /// that do not use the re-exec guardian. Guardian invocations do not return.
 #[cfg(unix)]
 pub fn run_if_requested() -> bool {
+    DISPATCHER_READY.store(true, Ordering::Release);
     if std::env::args_os().nth(1).as_deref() != Some(OsStr::new(GUARDIAN_ARG)) {
         return false;
     }

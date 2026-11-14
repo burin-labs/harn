@@ -14,9 +14,16 @@ include = [
     "data/**/*",
     "tests/**/*",
     "benches/**/*",
+    "examples/**/*",
     "Cargo.toml",
     "README.md",
 ]
+
+[[example]]
+name = "foreground_command"
+path = "examples/foreground_command/main.rs"
+harness = false
+test = false
 
 [features]
 # Full surface, matching the historical (pre-feature) build: every module

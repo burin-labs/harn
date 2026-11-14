@@ -37,6 +37,7 @@ impl ProcessSpawner for RealSpawner {
             }
             let cleanup_token = harn_vm::op_interrupt::new_process_cleanup_token();
             let super::owner_death::PreparedGuardian {
+                test_reexec,
                 mut command,
                 request,
                 missing_program,
@@ -91,30 +92,30 @@ impl ProcessSpawner for RealSpawner {
                 harn_vm::op_interrupt::remove_process_owner_group_journal(&cleanup_token);
                 return Err(error);
             }
-            let (stderr, guardian_pid, payload_pid) =
-                match super::owner_death::await_startup(&mut child) {
-                    Ok(startup) => startup,
-                    Err(error) => {
-                        let _ = harn_vm::op_interrupt::signal_pid_tree_and_group_with_report(
-                            child.id(),
-                            9,
-                        );
-                        let _ = child.wait();
-                        harn_vm::op_interrupt::remove_process_owner_group_journal(&cleanup_token);
-                        if matches!(
-                            error,
-                            ProcessError::SpawnIo {
-                                kind: "not_found",
-                                ..
-                            }
-                        ) {
-                            if let Some(program) = missing_program {
-                                return Err(ProcessError::ProgramNotFound { program });
-                            }
+            let (stderr, guardian_pid, payload_pid) = match super::owner_death::await_startup(
+                &mut child,
+                test_reexec.then_some(cleanup_token.as_str()),
+            ) {
+                Ok(startup) => startup,
+                Err(error) => {
+                    let _ =
+                        harn_vm::op_interrupt::signal_pid_tree_and_group_with_report(child.id(), 9);
+                    let _ = child.wait();
+                    harn_vm::op_interrupt::remove_process_owner_group_journal(&cleanup_token);
+                    if matches!(
+                        error,
+                        ProcessError::SpawnIo {
+                            kind: "not_found",
+                            ..
                         }
-                        return Err(error);
+                    ) {
+                        if let Some(program) = missing_program {
+                            return Err(ProcessError::ProgramNotFound { program });
+                        }
                     }
-                };
+                    return Err(error);
+                }
+            };
             let payload_stdin = if spec.use_stdin {
                 match super::owner_death::payload_stdin(&liveness) {
                     Ok(stdin) => Some(stdin),

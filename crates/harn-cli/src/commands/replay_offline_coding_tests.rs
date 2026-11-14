@@ -239,7 +239,8 @@ fn main(harness: Harness) {
             args_blake3: super::canonical_blake3(&serde_json::json!({
                 "argv":["grep","-n","hello world","note.txt"]
             })),
-            result_blake3: super::canonical_blake3(&serde_json::json!({
+            result_blake3: {
+                let result = serde_json::json!({
                 "byte_count": 14,
                 "cwd": "$WORKSPACE/repo",
                 "denial": null,
@@ -253,7 +254,31 @@ fn main(harness: Harness) {
                 "stdout": "1:hello world\n",
                 "stdout_truncated": false,
                 "timed_out": false
-            })),
+                });
+                #[cfg(unix)]
+                let result = {
+                    let mut result = result;
+                    // Linux proves complete subreaper custody. A normal macOS
+                    // host cannot read every process environment, so its native
+                    // census honestly leaves the survivor outcome unknown.
+                    result["process_cleanup"] = serde_json::json!({
+                        "attempted_signals": ["SIGKILL"],
+                        "observed_child_count": 0,
+                        "reaped_child_count": 0,
+                        "survivor_count": if cfg!(target_os = "linux") {
+                            serde_json::json!(0)
+                        } else {
+                            serde_json::Value::Null
+                        },
+                        "omitted_child_count": 0,
+                        "observed_children": [],
+                        "reaped_children": [],
+                        "surviving_children": []
+                    });
+                    result
+                };
+                super::canonical_blake3(&result)
+            },
             exit_code: Some(0),
         },
     ];

@@ -296,6 +296,10 @@ jobs:
         # macOS-specific surface is exactly what this nightly exists to
         # exercise.
         run: scripts/ci/run_rust_test_lane.sh cargo-nextest nextest run --locked --workspace --exclude harn-wasm --timings --profile ${{ github.event_name == 'workflow_dispatch' && 'native-qualification' || 'ci' }}
+      - name: Verify foreground-only Rust embedding
+        # Qualification can select a main ancestor without this example.
+        if: ${{ github.event_name != 'workflow_dispatch' }}
+        run: make test-hostlib-embedding
       - name: Stress hostlib under the original concurrency and deadline policy
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.hostlib_stress }}
         env:

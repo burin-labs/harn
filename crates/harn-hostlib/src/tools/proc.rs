@@ -325,7 +325,7 @@ pub(crate) fn run_with_filter(
                 signal,
                 sandbox_signal,
                 false,
-                None,
+                handle.cleanup_report(),
             )
         }
         process_handle::WaitOutcome::TimedOut(report) => (
@@ -616,6 +616,10 @@ pub(crate) fn process_error_to_hostlib(
     err: ProcessError,
 ) -> HostlibError {
     match err {
+        error @ ProcessError::GuardianNotInitialized => HostlibError::Backend {
+            builtin,
+            message: error.to_string(),
+        },
         ProcessError::InvalidArgv(message) => HostlibError::InvalidParameter {
             builtin,
             param: "argv",
