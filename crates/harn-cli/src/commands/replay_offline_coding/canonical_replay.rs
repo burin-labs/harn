@@ -32,6 +32,8 @@ const CLEANUP_VOLATILE_FIELDS: &[&str] = &[
     "census_scanned_processes",
     "census_unreadable_processes",
     "guardian_custody_complete",
+    "attempted_signals",
+    "signals",
 ];
 
 pub(super) fn canonical_replay_result(value: &JsonValue, workspace: &Path) -> JsonValue {
@@ -153,12 +155,13 @@ mod tests {
     fn cleanup_identity_normalization_preserves_decision_evidence() {
         let workspace = tempfile::tempdir().unwrap();
         let first = serde_json::json!({"process_cleanup": {
+            "attempted_signals": ["SIGTERM"],
             "root_pid": 10, "census_scanned_processes": 100,
             "census_unreadable_processes": 0, "census_complete": true,
             "guardian_custody_complete": false,
             "survivor_count": 0, "omitted_child_count": 0,
             "observed_children": [{"pid": 11, "parent_pid": 10,
-                "depth": 1, "command_name": "sleep", "alive_after_cleanup": false}]
+                "depth": 1, "command_name": "sleep", "signals": ["SIGTERM"], "alive_after_cleanup": false}]
         }});
         let mut second = first.clone();
         second["process_cleanup"]["root_pid"] = 20.into();
@@ -166,6 +169,9 @@ mod tests {
         second["process_cleanup"]["census_unreadable_processes"] = 50.into();
         second["process_cleanup"]["census_complete"] = false.into();
         second["process_cleanup"]["guardian_custody_complete"] = true.into();
+        second["process_cleanup"]["attempted_signals"] = serde_json::json!(["SIGKILL"]);
+        second["process_cleanup"]["observed_children"][0]["signals"] =
+            serde_json::json!(["SIGKILL"]);
         second["process_cleanup"]["observed_children"][0]["pid"] = 21.into();
         second["process_cleanup"]["observed_children"][0]["parent_pid"] = 20.into();
         let expected = canonical_replay_result(&first, workspace.path());
@@ -233,8 +239,8 @@ mod tests {
     #[test]
     fn cleanup_metadata_names_remain_data_outside_cleanup_receipts() {
         let workspace = tempfile::tempdir().unwrap();
-        let value =
-            serde_json::json!({"root_pid": 10, "parent_pid": 9, "census_scanned_processes": 100});
+        let value = serde_json::json!({"root_pid": 10, "parent_pid": 9, "census_scanned_processes": 100,
+                "signal": "SIGTERM", "signals": ["SIGTERM"], "attempted_signals": ["SIGTERM"]});
         assert_eq!(value, canonical_replay_result(&value, workspace.path()));
     }
 

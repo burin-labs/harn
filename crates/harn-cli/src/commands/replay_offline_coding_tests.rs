@@ -64,6 +64,73 @@ fn fixture() -> OfflineCodingReplayFixture {
     }
 }
 
+fn completed_verifier_result() -> serde_json::Value {
+    serde_json::json!({
+        "byte_count": 14,
+        "cwd": "$WORKSPACE/repo",
+        "denial": null,
+        "exit_code": 0,
+        "line_count": 1,
+        "output_sha256": "sha256:edd98eba7f0634541ba7a5062faec83ab42e51572fdb534054df86a64d55bf15",
+        "signal": null,
+        "status": "completed",
+        "stderr": "",
+        "stderr_truncated": false,
+        "stdout": "1:hello world\n",
+        "stdout_truncated": false,
+        "timed_out": false
+    })
+}
+
+#[cfg(unix)]
+fn verifier_golden_results() -> [serde_json::Value; 2] {
+    [serde_json::json!(0), serde_json::Value::Null].map(|survivor_count| {
+        let mut result = completed_verifier_result();
+        result["process_cleanup"] = serde_json::json!({
+            "observed_child_count": 0,
+            "reaped_child_count": 0,
+            "survivor_count": survivor_count,
+            "omitted_child_count": 0,
+            "observed_children": [],
+            "reaped_children": [],
+            "surviving_children": []
+        });
+        result
+    })
+}
+
+#[cfg(unix)]
+fn select_verifier_golden<'a>(observed: Option<&str>, allowed: &'a [String; 2]) -> Option<&'a str> {
+    allowed
+        .iter()
+        .map(String::as_str)
+        .find(|known| Some(*known) == observed)
+}
+
+#[cfg(unix)]
+#[test]
+fn verifier_calibration_accepts_only_the_two_authored_terminal_results() {
+    let allowed = verifier_golden_results().map(|result| super::canonical_blake3(&result));
+    assert_ne!(allowed[0], allowed[1]);
+    for hash in &allowed {
+        assert!(select_verifier_golden(Some(hash), &allowed).is_some());
+    }
+    assert!(select_verifier_golden(None, &allowed).is_none());
+    let mut null_report = completed_verifier_result();
+    null_report["process_cleanup"] = serde_json::Value::Null;
+    let mut omitted = verifier_golden_results()[0].clone();
+    omitted["process_cleanup"]["omitted_child_count"] = 1.into();
+    let mut surviving = verifier_golden_results()[0].clone();
+    surviving["process_cleanup"]["survivor_count"] = 1.into();
+    surviving["process_cleanup"]["surviving_children"] = serde_json::json!([{
+        "alive_after_cleanup": true,
+    }]);
+    for result in [completed_verifier_result(), null_report, omitted, surviving] {
+        let hash = super::canonical_blake3(&result);
+        assert!(select_verifier_golden(Some(&hash), &allowed).is_none());
+    }
+}
+
 #[test]
 fn comparison_rejects_projection_only_success_when_effects_diverge() {
     let fixture = fixture();
@@ -240,43 +307,10 @@ fn main(harness: Harness) {
                 "argv":["grep","-n","hello world","note.txt"]
             })),
             result_blake3: {
-                let result = serde_json::json!({
-                "byte_count": 14,
-                "cwd": "$WORKSPACE/repo",
-                "denial": null,
-                "exit_code": 0,
-                "line_count": 1,
-                "output_sha256": "sha256:edd98eba7f0634541ba7a5062faec83ab42e51572fdb534054df86a64d55bf15",
-                "signal": null,
-                "status": "completed",
-                "stderr": "",
-                "stderr_truncated": false,
-                "stdout": "1:hello world\n",
-                "stdout_truncated": false,
-                "timed_out": false
-                });
                 #[cfg(unix)]
-                let result = {
-                    let mut result = result;
-                    // Linux proves complete subreaper custody. A normal macOS
-                    // host cannot read every process environment, so its native
-                    // census honestly leaves the survivor outcome unknown.
-                    result["process_cleanup"] = serde_json::json!({
-                        "attempted_signals": ["SIGKILL"],
-                        "observed_child_count": 0,
-                        "reaped_child_count": 0,
-                        "survivor_count": if cfg!(target_os = "linux") {
-                            serde_json::json!(0)
-                        } else {
-                            serde_json::Value::Null
-                        },
-                        "omitted_child_count": 0,
-                        "observed_children": [],
-                        "reaped_children": [],
-                        "surviving_children": []
-                    });
-                    result
-                };
+                let result = verifier_golden_results()[0].clone();
+                #[cfg(not(unix))]
+                let result = completed_verifier_result();
                 super::canonical_blake3(&result)
             },
             exit_code: Some(0),
@@ -307,12 +341,36 @@ fn main(harness: Harness) {
         verifier.exit_code = None;
     }
 
-    let receipt = execute_once(&replay_path, &fixture, 1)
+    // Calibrate only between the two authored terminal receipts. The exact
+    // replay engine then verifies all comparisons in two clean workspaces.
+    #[cfg(unix)]
+    if fixture.expected.tools[2].status == harn_vm::agent_events::ToolCallStatus::Completed {
+        let calibration = execute_once(&replay_path, &fixture, 1)
+            .await
+            .expect("cleanup capability calibration");
+        assert!(calibration.effects.pass && calibration.terminal.pass);
+        assert!(calibration.isolation.provider.pass && calibration.isolation.network.pass);
+        assert_eq!(calibration.pending_count, 0);
+        assert_eq!(calibration.missing_count, 0);
+        let allowed = verifier_golden_results().map(|result| super::canonical_blake3(&result));
+        let observed = calibration
+            .tools
+            .actual
+            .get(2)
+            .and_then(|tool| tool.result_blake3.as_deref());
+        fixture.expected.tools[2].result_blake3 = select_verifier_golden(observed, &allowed)
+            .unwrap_or_else(|| {
+                panic!("verifier result is not an authored terminal receipt: {calibration:#?}")
+            })
+            .to_string();
+    }
+
+    let receipt = execute_once(&replay_path, &fixture, 2)
         .await
         .expect("re-execution setup");
     assert!(receipt.pass, "receipt: {receipt:#?}");
 
-    let clean_repeat = execute_once(&replay_path, &fixture, 2)
+    let clean_repeat = execute_once(&replay_path, &fixture, 3)
         .await
         .expect("second clean-room setup");
     assert!(
@@ -323,7 +381,7 @@ fn main(harness: Harness) {
     #[cfg(target_os = "macos")]
     if fixture.expected.tools[2].status == harn_vm::agent_events::ToolCallStatus::Failed {
         fixture.expected.tools[2].status = harn_vm::agent_events::ToolCallStatus::Completed;
-        let false_success = execute_once(&replay_path, &fixture, 3)
+        let false_success = execute_once(&replay_path, &fixture, 4)
             .await
             .expect("false success control setup");
         assert!(!false_success.pass && !false_success.tools.pass);
@@ -335,7 +393,7 @@ fn main(harness: Harness) {
     }
 
     fixture.expected.effects[0].after_blake3 = Some("projected-only".to_string());
-    let negative = execute_once(&replay_path, &fixture, 4)
+    let negative = execute_once(&replay_path, &fixture, 5)
         .await
         .expect("negative control setup");
     assert!(
