@@ -451,7 +451,10 @@ test('the action entrypoint reaches private receipt creation and refuses dead pa
     fs.writeFileSync(censusFile, JSON.stringify(census));
     fs.writeFileSync(eventFile, JSON.stringify(event));
     fs.writeFileSync(preload, `import fs from 'node:fs';
+      import {readRetry} from ${JSON.stringify(new URL('../lib/consumer-observer.mjs', import.meta.url).href)};
+      readRetry.backoffMs = 0;
       let parentReads = 0;
+      let declarationReads = 0;
       function parentRead() {
         const record = JSON.parse(fs.readFileSync(${JSON.stringify(parentFile)}, 'utf8'));
         return record.fixture_end_after_first_read && ++parentReads > 1
@@ -466,7 +469,10 @@ test('the action entrypoint reaches private receipt creation and refuses dead pa
         if (name !== ${JSON.stringify(observerDeclarationName(context))}) {
           return {total_count: 0, artifacts: []};
         }
-        return JSON.parse(fs.readFileSync(${JSON.stringify(censusFile)}, 'utf8'));
+        const {fixture_empty_reads: lag = 0, ...reading} =
+          JSON.parse(fs.readFileSync(${JSON.stringify(censusFile)}, 'utf8'));
+        fs.appendFileSync(${JSON.stringify(path.join(scratch, 'declaration-reads'))}, 'x');
+        return ++declarationReads <= lag ? {total_count: 0, artifacts: []} : reading;
       }
       globalThis.fetch = async url => ({ok: true,
         arrayBuffer: async () => fs.readFileSync(${JSON.stringify(archiveFile)}),
@@ -492,6 +498,9 @@ test('the action entrypoint reaches private receipt creation and refuses dead pa
     const entry = fileURLToPath(new URL('../ci/consumer-observer-admit.mjs', import.meta.url));
     fs.writeFileSync(parentFile, JSON.stringify(parent));
     fs.writeFileSync(childFile, JSON.stringify(child));
+    // A just-finalized upload can be missing from the list for a moment.
+    const reads = path.join(scratch, 'declaration-reads');
+    fs.writeFileSync(censusFile, JSON.stringify({ ...census, fixture_empty_reads: readRetry.attempts - 1 }));
     const admitted = spawnSync(process.execPath, [entry], { env, encoding: 'utf8' });
     assert.equal(admitted.status, 0, admitted.stderr);
     assert.match(fs.readFileSync(output, 'utf8'), /^owned=true\n/);
@@ -499,6 +508,8 @@ test('the action entrypoint reaches private receipt creation and refuses dead pa
     assert.equal(JSON.parse(fs.readFileSync(receiptFile, 'utf8')).child.run_id, expected.runId);
     assert.equal(fs.statSync(receiptFile).mode & 0o777, 0o600);
     assert.doesNotMatch(admitted.stdout + admitted.stderr, /widget-host|run_id|73/);
+    assert.equal(fs.readFileSync(reads, 'utf8').length, readRetry.attempts, 'empty reads are retried');
+    fs.writeFileSync(censusFile, JSON.stringify(census));
 
     fs.rmSync(receiptFile);
     fs.writeFileSync(output, '');
@@ -512,8 +523,10 @@ test('the action entrypoint reaches private receipt creation and refuses dead pa
     assert.equal(fs.readFileSync(output, 'utf8'), '');
     fs.writeFileSync(childFile, JSON.stringify(child));
     fs.writeFileSync(censusFile, JSON.stringify({ total_count: 0, artifacts: [] }));
+    fs.writeFileSync(reads, '');
     const unissued = spawnSync(process.execPath, [entry], { env, encoding: 'utf8' });
     assert.equal(unissued.status, 1);
+    assert.equal(fs.readFileSync(reads, 'utf8').length, readRetry.attempts, 'a missing declaration is read a bounded number of times');
     assert.match(unissued.stderr, /reason=dispatch_declaration_missing_or_ambiguous/);
     assert.equal(fs.readFileSync(output, 'utf8'), '');
     assert.equal(fs.existsSync(receiptFile), false);
