@@ -158,6 +158,44 @@ test('live-reader positive and missing census controls use the same exact-attemp
   assert.equal((await releaseObservation(fixture({jobs:{42:[]}}).api,request,'candidate',42)).verdict,'blocked');
 });
 
+for(const [phase,id,placeholder] of [['candidate',42,'Build release binaries'],['promotion',43,'Promote release']]) {
+  test(`${phase} waits for a queued run's purpose without treating absence as success`,async()=>{
+    for(const display_title of [undefined,null,'',placeholder]) {
+      const f=fixture({runs:{[id]:{status:'queued',conclusion:null,display_title}}});
+      const result=await releaseObservation(f.api,request,phase,id);
+      assert.equal(result.verdict,'pending');
+      assert.equal(result.observed_jobs,1);
+      assert.deepEqual(result.pending_jobs,[`${phase} purpose has not reported`]);
+    }
+    for(const status of ['completed','unexpected']) {
+      const f=fixture({runs:{[id]:{status,conclusion:status==='completed'?'success':null,display_title:placeholder}}});
+      await assert.rejects(releaseObservation(f.api,request,phase,id));
+    }
+    const mismatched=phase==='candidate'?'Build release binaries [warm]':`Promote release ${merge}`;
+    const f=fixture({runs:{[id]:{status:'queued',conclusion:null,display_title:mismatched}}});
+    await assert.rejects(releaseObservation(f.api,request,phase,id));
+  });
+}
+
+test('a newly dispatched placeholder title is observed again before promotion',async()=>{
+  const f=fixture();
+  const fetch=f.api.fetch;
+  let observations=0;
+  f.api.fetch=async url=>{
+    const response=await fetch(url);
+    if (new URL(url).pathname.endsWith('/runs/42') && observations++===0) {
+      const run=await response.json();
+      return new Response(JSON.stringify({...run,status:'queued',conclusion:null,display_title:'Build release binaries'}));
+    }
+    return response;
+  };
+  const result=await runRequestedRelease(f.api,request,f.execution);
+  assert.equal(result.verdict,'complete');
+  assert.equal(f.dispatches.length,2);
+  assert(f.progress.some(row=>row.verdict==='pending'&&row.pending_jobs.includes('candidate purpose has not reported')));
+  assert(observations>=2);
+});
+
 test('the deployed caller admits only trusted main and uses a typed merged-request selector',async()=>{
   const workflow=load(fs.readFileSync(new URL('../../.github/workflows/release-on-demand.yml',import.meta.url),'utf8'));
   const expressionValue=value=>value==null?new data.Null():typeof value==='string'?new data.StringData(value):
