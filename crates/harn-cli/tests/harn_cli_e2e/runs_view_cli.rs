@@ -57,10 +57,11 @@ fn runs_inspect_bounds_absolute_and_relative_transcript_descriptors() {
     let bundle = root.path().join("bundle");
     let inside = bundle.join("inside/llm_transcript.jsonl");
     let outside = root.path().join("outside/llm_transcript.jsonl");
-    let body =
-        b"{\"type\":\"agent_session_finalized\",\"terminal\":true,\"final_status\":\"done\"}\n";
+    let body = b"{\"type\":\"provider_raw_capture\",\"path\":\"raw-provider/capture.json\"}\n{\"type\":\"agent_session_finalized\",\"terminal\":true,\"final_status\":\"done\"}\n";
     for path in [&inside, &outside] {
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let raw = path.parent().unwrap().join("raw-provider/capture.json");
+        fs::create_dir_all(raw.parent().unwrap()).unwrap();
+        fs::write(raw, b"known captured bytes\n").unwrap();
         fs::write(path, body).unwrap();
     }
     let cases = vec![

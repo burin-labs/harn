@@ -135,16 +135,24 @@ pub fn canonicalize_existing_workspace_path(path: &Path, workspace_root: &Path) 
     canonicalize_existing_workspace_path_checked(path, workspace_root)
         .ok()
         .flatten()
+        .map(|relative| {
+            let path = to_posix(&relative.to_string_lossy());
+            if path.is_empty() {
+                ".".to_string()
+            } else {
+                path
+            }
+        })
 }
 
-/// Resolve an existing contained path while preserving filesystem failures.
+/// Resolve an existing contained path to its native relative path.
 ///
 /// `Ok(None)` means the path is empty, outside the workspace, or the workspace
 /// is not a directory. Missing or unreadable paths return their I/O error.
 pub fn canonicalize_existing_workspace_path_checked(
     path: &Path,
     workspace_root: &Path,
-) -> std::io::Result<Option<String>> {
+) -> std::io::Result<Option<PathBuf>> {
     if path.as_os_str().is_empty() {
         return Ok(None);
     }
@@ -162,12 +170,7 @@ pub fn canonicalize_existing_workspace_path_checked(
     let Ok(relative) = canonical_target.strip_prefix(&canonical_root) else {
         return Ok(None);
     };
-    let workspace_path = to_posix(&relative.to_string_lossy());
-    Ok(Some(if workspace_path.is_empty() {
-        ".".to_string()
-    } else {
-        workspace_path
-    }))
+    Ok(Some(relative.to_path_buf()))
 }
 
 pub fn classify_workspace_path(path: &str, workspace_root: Option<&Path>) -> WorkspacePathInfo {
@@ -805,7 +808,7 @@ mod tests {
         std::fs::write(&inside, "inside").unwrap();
         assert_eq!(
             canonicalize_existing_workspace_path_checked(&inside, root.path()).unwrap(),
-            Some("inside.harn".to_string())
+            Some(PathBuf::from("inside.harn"))
         );
         let outside = tempfile::tempdir().unwrap();
         let file = outside.path().join("outside.harn");
@@ -818,6 +821,18 @@ mod tests {
             canonicalize_existing_workspace_path_checked(Path::new("missing.harn"), root.path())
                 .unwrap_err();
         assert_eq!(missing.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checked_existing_path_preserves_native_filename_components() {
+        let root = tempfile::tempdir().unwrap();
+        let relative = PathBuf::from("inside\\..\\capture.json");
+        std::fs::write(root.path().join(&relative), "captured").unwrap();
+        assert_eq!(
+            canonicalize_existing_workspace_path_checked(&relative, root.path()).unwrap(),
+            Some(relative)
+        );
     }
 
     #[test]

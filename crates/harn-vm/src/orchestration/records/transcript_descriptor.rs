@@ -457,17 +457,13 @@ fn resolve_descriptor_path(
             .map_err(|_| {
                 LlmTranscriptDescriptorError::new("unavailable", "descriptor path is unavailable")
             })?;
-    if contained.is_none() {
-        return Err(LlmTranscriptDescriptorError::new(
+    let contained = contained.ok_or_else(|| {
+        LlmTranscriptDescriptorError::new(
             "path_traversal",
             "descriptor path must stay inside the run directory",
-        ));
-    }
-    Ok(if supplied.is_absolute() {
-        supplied.to_path_buf()
-    } else {
-        parent.join(supplied)
-    })
+        )
+    })?;
+    Ok(parent.join(contained))
 }
 
 #[cfg(test)]
