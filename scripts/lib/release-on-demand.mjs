@@ -40,22 +40,32 @@ async function containsMerge(api, repository, merge, source) {
     || comparison.merge_base_commit?.sha!==merge) refuse('release_source_does_not_contain_merge');
 }
 
+function runPurposePending(run, expected, placeholder, refusal) {
+  if (run.display_title===expected) return false;
+  if (observerRunIsLive(run.status) && run.conclusion===null
+    && [undefined,null,'',placeholder].includes(run.display_title)) return true;
+  refuse(refusal);
+}
+
 /** Read the exact attempt through the shared complete, unique job census. */
 export async function releaseObservation(api, request, phase, id) {
   const run=await githubRecord(api.token,request.repository,String(id),api.fetch);
   if (run.id!==id || run.run_attempt!==1 || run.event!=='workflow_dispatch' || run.head_branch!=='main'
     || run.repository?.full_name!==request.repository || run.head_repository?.full_name!==request.repository
     || run.path!==`.github/workflows/${releaseWorkflows[phase]}` || !sha.test(run.head_sha)) refuse(`${phase}_identity_or_attempt_unmeasured`);
+  const purposePending=phase==='candidate'
+    ? runPurposePending(run,'Build release binaries [source-candidate]','Build release binaries','candidate_purpose_unmeasured')
+    : runPurposePending(run,`Promote release ${request.source_sha}`,'Promote release','promotion_source_unmeasured');
   if (phase==='candidate') {
-    if (run.display_title!=='Build release binaries [source-candidate]') refuse('candidate_purpose_unmeasured');
     await containsMerge(api,request.repository,request.merge_sha,run.head_sha);
-  } else if (run.display_title!==`Promote release ${request.source_sha}`) refuse('promotion_source_unmeasured');
+  }
   const jobs=await githubRunJobs(api.token,request.repository,String(id),1,api.fetch);
   if (jobs.some(job=>job.run_id!==id || job.run_attempt!==1 || job.head_sha!==run.head_sha
     || typeof job.name!=='string' || !job.name
     || !(observerRunIsLive(job.status) && job.conclusion===null
       || job.status==='completed' && observerConclusionIsKnown(job.conclusion)))) refuse(`${phase}_job_identity_or_state_unmeasured`);
   const pending=jobs.filter(job=>observerRunIsLive(job.status)).map(job=>job.name);
+  if (purposePending) pending.push(`${phase} purpose has not reported`);
   const failing=jobs.filter(job=>job.status==='completed' && !['success','skipped'].includes(job.conclusion)).map(job=>job.name);
   const result={phase,run_id:id,source_sha:phase==='candidate'?run.head_sha:request.source_sha,
     status:run.status,conclusion:run.conclusion,observed_jobs:jobs.length,pending_jobs:pending,failing_jobs:failing};
