@@ -340,7 +340,7 @@ pack_consumer_cli_bundle() {
   (
     cd "$staging"
     sha256sum harn manifest > CLI_SHA256SUMS
-    ZSTD_CLEVEL=19 tar --zstd -cf "$output.tmp" harn manifest CLI_SHA256SUMS
+    ZSTD_CLEVEL=10 tar --zstd -cf "$output.tmp" harn manifest CLI_SHA256SUMS
   )
   bytes="$(wc -c < "$output.tmp" | tr -d ' ')"
   limit="${HARN_CONSUMER_CLI_MAX_BYTES:-104857600}"
