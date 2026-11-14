@@ -321,10 +321,14 @@ fn loopback_grant_keeps_managed_proxy_routes_at_both_host_ceilings() {
                         proxy.endpoints().http_port
                     )))));
 
+        // `NO_PROXY` sends loopback names to the command's own servers
+        // directly; a host service the policy allows is asked of the proxy.
         let run = |port, path| {
             Backend::run_to_output(
                 "/usr/bin/curl",
                 &strings([
+                    "--noproxy",
+                    "",
                     "--silent",
                     "--show-error",
                     "--fail",

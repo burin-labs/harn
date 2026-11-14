@@ -197,11 +197,19 @@ start keeps its private reach, so a list can name an internal registry.
 On macOS the child profile admits only the proxy's TCP/IPv4 ports. A Seatbelt
 port rule matches that port at every address of the host, so the proxy holds
 its ports at each local IPv4 address while it runs, and a spawn refuses ports
-that no live proxy in the process holds. A loopback grant behind the proxy keeps
-local listening but not direct local connections: Seatbelt cannot tell the
-command's own listeners from other local services, so a client that ignores the
-proxy settings cannot reach a local server. Harn says so once per process under
-the `sandbox.loopback_behind_proxy` event category.
+that no live proxy in the process holds. A loopback grant behind the proxy also
+lets the command connect directly to local servers this run started: one it
+opens itself, and one an earlier command left running. Seatbelt names a local
+destination only by port, so each spawn reads the host's socket table and denies
+every port that another process listens on at that moment. A server counts as
+this run's when its process carries the run's `HARN_CHILD_LINEAGE` marker, which
+every child behind the proxy inherits. `NO_PROXY` names the loopback addresses,
+so clients that honor it connect directly; a host service that the egress policy
+allows on a loopback address is reached through the proxy only by a client that
+overrides `NO_PROXY`, such as `curl --noproxy ''`. A service that starts listening after
+the command starts is not denied. When the socket table cannot be read and
+checked, the command connects only through the proxy, and Harn says so once per
+process under the `sandbox.loopback_behind_proxy` event category.
 
 The managed boundary is available on macOS, and on Linux when the policy names
 the namespace launcher (`--netns-launcher`). A Linux child then runs in a private

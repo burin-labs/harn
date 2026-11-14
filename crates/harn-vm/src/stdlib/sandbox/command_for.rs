@@ -153,8 +153,8 @@ pub fn std_command_for_with_env_state(
         }
     };
     let (mut command, env_closed) = close_std_command_environment(command, program)?;
-    if let Some(proxy) = active.and_then(|(policy, _)| policy.process_network_proxy) {
-        process_output::apply_managed_proxy_env(&mut command, proxy);
+    if let Some((policy, _)) = active.as_ref() {
+        process_output::apply_managed_proxy_env(&mut command, policy);
     }
     Ok((command, env_closed))
 }
@@ -228,10 +228,8 @@ pub fn command_for_reexec(
         }
     };
     let (mut command, env_closed) = close_std_command_environment(command, program)?;
-    if let Some(proxy) =
-        active_sandbox_policy().and_then(|(policy, _)| policy.process_network_proxy)
-    {
-        process_output::apply_managed_proxy_env(&mut command, proxy);
+    if let Some((policy, _)) = active_sandbox_policy() {
+        process_output::apply_managed_proxy_env(&mut command, &policy);
     }
     Ok((command, env_closed, confinement))
 }
@@ -265,8 +263,8 @@ pub fn tokio_command_for_with_env_state(
         }
     };
     let closed = close_env_for_session!(command, program);
-    if let Some(proxy) = active.and_then(|(policy, _)| policy.process_network_proxy) {
-        process_output::apply_managed_proxy_env_tokio(&mut command, proxy);
+    if let Some((policy, _)) = active.as_ref() {
+        process_output::apply_managed_proxy_env_tokio(&mut command, policy);
     }
     Ok((command, closed))
 }
