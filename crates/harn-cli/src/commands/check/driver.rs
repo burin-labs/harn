@@ -270,15 +270,15 @@ fn run_ordered_checks<State>(
     })
 }
 
-/// Run `work` over every file on `workers` threads and return the results in
-/// input order. Files are claimed from a shared counter, so one slow file
-/// does not strand the rest behind it.
-pub(crate) fn run_ordered<State, T: Send>(
-    files: &[PathBuf],
+/// Run independent jobs on `workers` threads and return results in input order.
+/// Jobs are claimed from a shared counter, so one slow job does not strand
+/// the rest behind it. Callers must group aliases before scheduling mutations.
+pub(crate) fn run_ordered<Input: Sync, State, T: Send>(
+    files: &[Input],
     workers: usize,
     init: impl Fn() -> State + Sync,
-    work: impl Fn(&mut State, &PathBuf) -> T + Sync,
-    on_panic: impl Fn(&PathBuf) -> T + Sync,
+    work: impl Fn(&mut State, &Input) -> T + Sync,
+    on_panic: impl Fn(&Input) -> T + Sync,
 ) -> Vec<T> {
     let next = AtomicUsize::new(0);
     let run_worker = || {
