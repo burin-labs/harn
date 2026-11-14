@@ -865,11 +865,17 @@ fn a_confined_granted_fetch_and_push_land() {
             closed_env: true,
             ..Default::default()
         };
-        crate::stdlib::sandbox::command_output(&spawn.program, &args, &config).expect("spawned")
+        crate::stdlib::sandbox::command_output(&spawn.program, &args, &config)
     };
-    assert_succeeded(&confined(&["fetch", "origin"]));
+    // A host that cannot confine (a hosted Mac whose SIP allows DTrace) must
+    // refuse with its measured reason; there is nothing further to prove.
+    let fetched = confined(&["fetch", "origin"]);
+    if crate::sandbox_host::assert_unavailable_result(&fetched) {
+        return;
+    }
+    assert_succeeded(&fetched.expect("spawned"));
     ok(&ws, &["checkout", "-q", "-b", "confined", "origin/main"]);
-    assert_succeeded(&confined(&["push", "origin", "HEAD:refs/heads/confined"]));
+    assert_succeeded(&confined(&["push", "origin", "HEAD:refs/heads/confined"]).expect("spawned"));
     let server = fixture.root.path().join("server/o/r.git");
     assert_eq!(
         ok(&server, &["rev-parse", "refs/heads/confined"]),
