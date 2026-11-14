@@ -1,7 +1,8 @@
 //! The filter against a real `ssh-agent`, driven by OpenSSH's own clients.
 
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 use super::*;
 
@@ -38,6 +39,14 @@ impl Drop for Upstream {
     }
 }
 
+/// A scratch directory private to this user, as the filter requires.
+fn private_dir() -> tempfile::TempDir {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = tempfile::tempdir().expect("dir");
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).expect("chmod");
+    dir
+}
+
 fn keygen(dir: &Path, name: &str) -> PathBuf {
     let key = dir.join(name);
     let status = Command::new("ssh-keygen")
@@ -49,12 +58,30 @@ fn keygen(dir: &Path, name: &str) -> PathBuf {
     key
 }
 
+/// Run an OpenSSH client against `socket`, killing it after ten seconds so a
+/// filter that never answers fails the test instead of hanging it.
 fn with_agent(socket: &Path, program: &str, args: &[&str]) -> Output {
-    Command::new(program)
+    let mut child = Command::new(program)
         .args(args)
         .env("SSH_AUTH_SOCK", socket)
-        .output()
-        .expect("run OpenSSH client")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("run OpenSSH client");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while child.try_wait().expect("poll client").is_none() {
+        if Instant::now() > deadline {
+            let _ = child.kill();
+            panic!("{program} {args:?} got no answer from {}", socket.display());
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    child.wait_with_output().expect("client output")
+}
+
+fn soon() -> Instant {
+    Instant::now() + Duration::from_secs(10)
 }
 
 fn public(key: &Path) -> String {
@@ -64,21 +91,27 @@ fn public(key: &Path) -> String {
 /// One raw request to `socket`, returning the reply's message type.
 fn raw_request(socket: &Path, body: &[u8]) -> u8 {
     let mut stream = UnixStream::connect(socket).expect("connect");
-    write_message(&mut stream, body).expect("write");
-    read_message(&mut stream).expect("read").expect("reply")[0]
+    write_message(&mut stream, body, soon()).expect("write");
+    read_message(&mut stream, soon())
+        .expect("read")
+        .expect("reply")[0]
 }
 
 fn sign_request(key: &[u8], data: &[u8]) -> Vec<u8> {
+    sign_request_with_flags(key, data, 0)
+}
+
+fn sign_request_with_flags(key: &[u8], data: &[u8], flags: u32) -> Vec<u8> {
     let mut body = vec![SIGN_REQUEST];
     put_string(&mut body, key);
     put_string(&mut body, data);
-    body.extend(0u32.to_be_bytes());
+    body.extend(flags.to_be_bytes());
     body
 }
 
 #[test]
 fn only_the_configured_key_signs_and_only_for_its_namespace() {
-    let dir = tempfile::tempdir().expect("dir");
+    let dir = private_dir();
     let dir = dir.path().canonicalize().expect("canonical");
     let signing = keygen(&dir, "signing");
     let other = keygen(&dir, "other");
@@ -169,6 +202,19 @@ fn only_the_configured_key_signs_and_only_for_its_namespace() {
         raw_request(socket, &sign_request(&key, &sshsig)),
         SIGN_RESPONSE
     );
+    // A flag beyond the RSA SHA-2 hash choices is refused, though the
+    // upstream agent would sign with it.
+    assert_eq!(
+        raw_request(&upstream.socket, &sign_request_with_flags(&key, &sshsig, 1)),
+        SIGN_RESPONSE
+    );
+    for flags in [1, 6, 8] {
+        assert_eq!(
+            raw_request(socket, &sign_request_with_flags(&key, &sshsig, flags)),
+            FAILURE,
+            "flags {flags}"
+        );
+    }
     sshsig.push(0);
     assert_eq!(raw_request(socket, &sign_request(&key, &sshsig)), FAILURE);
 
@@ -187,7 +233,7 @@ fn only_the_configured_key_signs_and_only_for_its_namespace() {
 
 #[test]
 fn a_key_the_upstream_agent_lacks_is_not_listed() {
-    let dir = tempfile::tempdir().expect("dir");
+    let dir = private_dir();
     let dir = dir.path().canonicalize().expect("canonical");
     let signing = keygen(&dir, "signing");
     let upstream = Upstream::start(&dir);
@@ -206,4 +252,142 @@ fn a_key_the_upstream_agent_lacks_is_not_listed() {
         "listed a key the agent lacks: {listed:?}"
     );
     assert!(!String::from_utf8_lossy(&listed.stdout).contains("ssh-ed25519"));
+}
+
+/// A filter with the signing key loaded upstream, in a private directory.
+struct Served {
+    _dir: tempfile::TempDir,
+    signing: PathBuf,
+    _upstream: Upstream,
+    filter: SigningAgent,
+}
+
+fn served() -> Served {
+    let dir = private_dir();
+    let path = dir.path().canonicalize().expect("canonical");
+    let signing = keygen(&path, "signing");
+    let upstream = Upstream::start(&path);
+    let added = with_agent(&upstream.socket, "ssh-add", &[signing.to_str().unwrap()]);
+    assert!(added.status.success(), "ssh-add: {added:?}");
+    let filter = SigningAgent::serve(
+        &path,
+        &upstream.socket,
+        SigningScope {
+            public_key: public(&signing),
+            namespace: "git".into(),
+        },
+    )
+    .expect("serve");
+    Served {
+        _dir: dir,
+        signing,
+        _upstream: upstream,
+        filter,
+    }
+}
+
+/// One client that pipelines requests without reading a reply, and one that
+/// trickles a request a byte at a time, each hold only their own connection:
+/// another client is answered while both stall, and dropping the filter
+/// returns at once instead of waiting on them.
+#[test]
+fn a_stalled_client_neither_blocks_another_nor_holds_teardown() {
+    let Served {
+        _dir,
+        signing,
+        _upstream,
+        filter,
+    } = served();
+    let socket = filter.socket().to_path_buf();
+
+    // Unknown requests are answered locally, so the replies this client never
+    // reads fill its socket and leave the filter blocked writing to it.
+    let mut flooding = UnixStream::connect(&socket).expect("connect");
+    let flood = std::thread::spawn(move || {
+        let request = [0, 0, 0, 1, 99];
+        let mut sent = 0usize;
+        while flooding.write_all(&request).is_ok() {
+            sent += 1;
+        }
+        sent
+    });
+    let mut trickling = UnixStream::connect(&socket).expect("connect");
+    let stop_trickle = Arc::new(AtomicBool::new(false));
+    let trickle = {
+        let stop = Arc::clone(&stop_trickle);
+        std::thread::spawn(move || {
+            for byte in [0u8, 0, 0, 1, REQUEST_IDENTITIES].iter().cycle() {
+                if stop.load(Ordering::SeqCst) || trickling.write_all(&[*byte]).is_err() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        })
+    };
+    std::thread::sleep(Duration::from_millis(500));
+
+    let listed = with_agent(&socket, "ssh-add", &["-L"]);
+    assert_eq!(
+        String::from_utf8_lossy(&listed.stdout).trim(),
+        public(&signing).trim(),
+        "a second client went unanswered: {listed:?}"
+    );
+
+    let started = Instant::now();
+    drop(filter);
+    let teardown = started.elapsed();
+    assert!(
+        teardown < Duration::from_secs(2),
+        "dropping the filter waited {teardown:?} on stalled clients"
+    );
+    assert!(!socket.exists(), "the socket outlived the filter");
+    // The shutdown ends the flooding client's writes too.
+    let sent = flood.join().expect("flood");
+    assert!(sent > 0, "the flooding client never sent a request");
+    stop_trickle.store(true, Ordering::SeqCst);
+    trickle.join().expect("trickle");
+}
+
+#[test]
+fn the_socket_directory_must_be_private_and_a_stale_socket_is_replaced() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let Served {
+        _dir,
+        signing,
+        _upstream,
+        filter,
+    } = served();
+    let dir = filter.socket().parent().unwrap().to_path_buf();
+    let upstream = dir.join("upstream.sock");
+    let scope = || SigningScope {
+        public_key: public(&signing),
+        namespace: "git".into(),
+    };
+
+    // A live filter's socket is not taken over.
+    let error = SigningAgent::serve(&dir, &upstream, scope())
+        .err()
+        .expect("refused");
+    assert_eq!(error.kind(), std::io::ErrorKind::AddrInUse, "{error}");
+
+    // A socket nothing serves any more is replaced.
+    drop(filter);
+    drop(UnixListener::bind(dir.join(SOCKET)).expect("bind a stale socket"));
+    assert!(dir.join(SOCKET).exists());
+    let replaced = SigningAgent::serve(&dir, &upstream, scope()).expect("replace the stale socket");
+    let listed = with_agent(replaced.socket(), "ssh-add", &["-L"]);
+    assert!(listed.status.success(), "{listed:?}");
+    drop(replaced);
+
+    // A directory others can open is refused.
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o750)).expect("chmod");
+    let error = SigningAgent::serve(&dir, &upstream, scope())
+        .err()
+        .expect("refused");
+    assert_eq!(
+        error.kind(),
+        std::io::ErrorKind::PermissionDenied,
+        "{error}"
+    );
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).expect("chmod");
 }

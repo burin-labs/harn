@@ -14,13 +14,27 @@
 //! namespace. An authentication signature never has that shape: its data
 //! starts with the session identifier, not the `SSHSIG` magic. Every other
 //! request gets `SSH_AGENT_FAILURE` without reaching the upstream agent.
+//!
+//! This narrows what the grant can do; it does not narrow what it signs. The
+//! filter cannot see the message, only its hash, so anything that can connect
+//! to the socket can obtain the person's signature over any hash in the
+//! namespace: for `git`, a valid signature on any commit or tag it chooses,
+//! for as long as the filter serves. Grant it only where that is acceptable.
+//!
+//! Each client is served on its own thread, up to [`MAX_CLIENTS`] at once, and
+//! must finish within [`CONNECTION_DEADLINE`], so a client that stalls, trickles
+//! bytes, or never reads its replies holds only its own connection. Dropping
+//! the filter shuts every open connection down and returns without waiting
+//! for them.
 
+use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::os::unix::fs::{FileTypeExt as _, MetadataExt as _};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 
@@ -29,12 +43,20 @@ const REQUEST_IDENTITIES: u8 = 11;
 const IDENTITIES_ANSWER: u8 = 12;
 const SIGN_REQUEST: u8 = 13;
 const SIGN_RESPONSE: u8 = 14;
+/// Sign-request flags the filter forwards: none, or an RSA SHA-2 hash choice.
+const ALLOWED_FLAGS: [u32; 3] = [0, 2, 4];
 
 /// OpenSSH's own limit on one agent message.
 const MAX_MESSAGE: usize = 256 * 1024;
-/// A client that stops mid-message is dropped after this long, so one stuck
-/// connection cannot keep the filter from answering the next.
-const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long one read or write may wait on the upstream agent.
+const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(10);
+/// The whole life of one client connection. A signing client connects, lists,
+/// signs, and closes in well under this.
+pub const CONNECTION_DEADLINE: Duration = Duration::from_secs(30);
+/// Connections served at once; more are closed unanswered.
+pub const MAX_CLIENTS: usize = 8;
+/// How often the accept loop checks for a stop when no client is connecting.
+const ACCEPT_POLL: Duration = Duration::from_millis(50);
 /// The socket's name inside the directory the host gives [`SigningAgent::serve`].
 pub const SOCKET: &str = "signing-agent.sock";
 
@@ -48,16 +70,26 @@ pub struct SigningScope {
     pub namespace: String,
 }
 
+/// Open client connections, kept so a stop can shut each one down.
+#[derive(Default)]
+struct Clients {
+    next: u64,
+    open: HashMap<u64, UnixStream>,
+}
+
 /// Serves the filter until dropped, then removes its socket.
 pub struct SigningAgent {
     path: PathBuf,
     stop: Arc<AtomicBool>,
+    clients: Arc<Mutex<Clients>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl SigningAgent {
-    /// Bind [`SOCKET`] in `dir`, which the host creates private to the user,
-    /// and forward permitted requests to the agent at `upstream`.
+    /// Bind [`SOCKET`] in `dir`, which must be a directory owned by this user
+    /// that no one else can open (mode `0700`), and forward permitted requests
+    /// to the agent at `upstream`. A socket left there by a filter that is no
+    /// longer serving is replaced; a live one is refused.
     pub fn serve(dir: &Path, upstream: &Path, scope: SigningScope) -> std::io::Result<Self> {
         let key = key_blob(&scope.public_key).ok_or_else(|| {
             std::io::Error::new(
@@ -65,28 +97,34 @@ impl SigningAgent {
                 "the signing key is not an SSH public key",
             )
         })?;
-        let policy = Policy {
+        let policy = Arc::new(Policy {
             key,
             namespace: scope.namespace.into_bytes(),
             upstream: upstream.to_path_buf(),
-        };
+        });
+        check_private_dir(dir)?;
         let path = dir.join(SOCKET);
+        clear_stale_socket(&path)?;
         let listener = UnixListener::bind(&path)?;
+        listener.set_nonblocking(true)?;
         let stop = Arc::new(AtomicBool::new(false));
-        let stopping = Arc::clone(&stop);
+        let clients = Arc::new(Mutex::new(Clients::default()));
+        let (stopping, open) = (Arc::clone(&stop), Arc::clone(&clients));
         let thread = crate::task_spawn::thread(move || {
-            for stream in listener.incoming() {
-                if stopping.load(Ordering::SeqCst) {
-                    break;
-                }
-                if let Ok(stream) = stream {
-                    let _ = policy.serve_client(stream);
+            while !stopping.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((stream, _)) => admit(&policy, &open, &stopping, stream),
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(ACCEPT_POLL);
+                    }
+                    Err(_) => std::thread::sleep(ACCEPT_POLL),
                 }
             }
         });
         Ok(Self {
             path,
             stop,
+            clients,
             thread: Some(thread),
         })
     }
@@ -100,13 +138,87 @@ impl SigningAgent {
 impl Drop for SigningAgent {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
-        // Wake the accept loop so it sees the stop.
-        let _ = UnixStream::connect(&self.path);
+        let open = std::mem::take(
+            &mut self
+                .clients
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .open,
+        );
+        for stream in open.values() {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        }
+        // The accept loop polls the stop, so this returns within one poll.
+        // Client threads are not joined: their connections are shut down, and
+        // one still waiting on the upstream agent ends at its own timeout.
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
         let _ = std::fs::remove_file(&self.path);
     }
+}
+
+/// Serve `stream` on its own thread, or close it when the filter is full or
+/// stopping.
+fn admit(
+    policy: &Arc<Policy>,
+    clients: &Arc<Mutex<Clients>>,
+    stopping: &Arc<AtomicBool>,
+    stream: UnixStream,
+) {
+    let id = {
+        let mut clients = clients.lock().unwrap_or_else(|poison| poison.into_inner());
+        if clients.open.len() >= MAX_CLIENTS || stopping.load(Ordering::SeqCst) {
+            return;
+        }
+        let Ok(handle) = stream.try_clone() else {
+            return;
+        };
+        let id = clients.next;
+        clients.next += 1;
+        clients.open.insert(id, handle);
+        id
+    };
+    let (policy, clients) = (Arc::clone(policy), Arc::clone(clients));
+    crate::task_spawn::thread(move || {
+        let _ = policy.serve_client(stream, Instant::now() + CONNECTION_DEADLINE);
+        clients
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .open
+            .remove(&id);
+    });
+}
+
+/// Refuse a socket directory another user owns or can open.
+fn check_private_dir(dir: &Path) -> std::io::Result<()> {
+    let meta = std::fs::symlink_metadata(dir)?;
+    // SAFETY: geteuid has no arguments or preconditions.
+    let uid = unsafe { libc::geteuid() };
+    if !meta.is_dir() || meta.uid() != uid || meta.mode() & 0o077 != 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "the signing agent's directory must be a 0700 directory this user owns",
+        ));
+    }
+    Ok(())
+}
+
+/// Remove a socket at `path` that nothing serves. A live socket, or anything
+/// that is not a socket, is refused.
+fn clear_stale_socket(path: &Path) -> std::io::Result<()> {
+    let meta = match std::fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    if !meta.file_type().is_socket() || UnixStream::connect(path).is_ok() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AddrInUse,
+            "the signing agent's socket path is already in use",
+        ));
+    }
+    std::fs::remove_file(path)
 }
 
 struct Policy {
@@ -116,11 +228,12 @@ struct Policy {
 }
 
 impl Policy {
-    fn serve_client(&self, mut client: UnixStream) -> std::io::Result<()> {
-        client.set_read_timeout(Some(CLIENT_TIMEOUT))?;
-        while let Some(request) = read_message(&mut client)? {
+    fn serve_client(&self, mut client: UnixStream, deadline: Instant) -> std::io::Result<()> {
+        // Accepted from a nonblocking listener; some platforms pass that on.
+        client.set_nonblocking(false)?;
+        while let Some(request) = read_message(&mut client, deadline)? {
             let reply = self.answer(&request).unwrap_or_else(|| vec![FAILURE]);
-            write_message(&mut client, &reply)?;
+            write_message(&mut client, &reply, deadline)?;
         }
         Ok(())
     }
@@ -128,7 +241,7 @@ impl Policy {
     /// The reply body for one request, or `None` for a failure.
     fn answer(&self, request: &[u8]) -> Option<Vec<u8>> {
         match *request.first()? {
-            REQUEST_IDENTITIES => self.identities(request),
+            REQUEST_IDENTITIES => self.identities(),
             SIGN_REQUEST if self.permits(&request[1..]) => {
                 let reply = self.forward(request)?;
                 (reply.first() == Some(&SIGN_RESPONSE)).then_some(reply)
@@ -138,8 +251,9 @@ impl Policy {
     }
 
     /// The configured key alone, and only when the upstream agent lists it.
-    fn identities(&self, request: &[u8]) -> Option<Vec<u8>> {
-        let reply = self.forward(request)?;
+    /// Upstream gets a canonical request, whatever bytes the client sent.
+    fn identities(&self) -> Option<Vec<u8>> {
+        let reply = self.forward(&[REQUEST_IDENTITIES])?;
         let mut body = Reader::new(reply.get(1..)?);
         if reply.first() != Some(&IDENTITIES_ANSWER) {
             return None;
@@ -166,15 +280,16 @@ impl Policy {
     }
 
     /// Whether a sign request names the configured key and carries an SSHSIG
-    /// payload for the configured namespace, with nothing after it.
+    /// payload for the configured namespace, with nothing after it, and no
+    /// flag beyond an RSA SHA-2 hash choice.
     fn permits(&self, body: &[u8]) -> bool {
         let mut request = Reader::new(body);
-        let (Some(key), Some(data), Some(_flags)) =
+        let (Some(key), Some(data), Some(flags)) =
             (request.string(), request.string(), request.u32())
         else {
             return false;
         };
-        if !request.is_empty() || key != self.key.as_slice() {
+        if !request.is_empty() || key != self.key.as_slice() || !ALLOWED_FLAGS.contains(&flags) {
             return false;
         }
         let Some(payload) = data.strip_prefix(b"SSHSIG") else {
@@ -199,9 +314,9 @@ impl Policy {
 
     fn forward(&self, request: &[u8]) -> Option<Vec<u8>> {
         let mut upstream = UnixStream::connect(&self.upstream).ok()?;
-        upstream.set_read_timeout(Some(CLIENT_TIMEOUT)).ok()?;
-        write_message(&mut upstream, request).ok()?;
-        read_message(&mut upstream).ok()?
+        let deadline = Instant::now() + UPSTREAM_TIMEOUT;
+        write_message(&mut upstream, request, deadline).ok()?;
+        read_message(&mut upstream, deadline).ok()?
     }
 }
 
@@ -218,10 +333,11 @@ fn key_blob(public_key: &str) -> Option<Vec<u8>> {
     (Reader::new(&blob).string()? == algorithm.as_bytes()).then_some(blob)
 }
 
-/// One length-prefixed message, or `None` at a clean end of stream.
-fn read_message(stream: &mut UnixStream) -> std::io::Result<Option<Vec<u8>>> {
+/// One length-prefixed message, or `None` at a clean end of stream. Fails
+/// once `deadline` passes, however the bytes arrive.
+fn read_message(stream: &mut UnixStream, deadline: Instant) -> std::io::Result<Option<Vec<u8>>> {
     let mut length = [0u8; 4];
-    match stream.read_exact(&mut length) {
+    match read_exact_by(stream, &mut length, deadline) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
         Err(error) => return Err(error),
@@ -234,17 +350,55 @@ fn read_message(stream: &mut UnixStream) -> std::io::Result<Option<Vec<u8>>> {
         ));
     }
     let mut body = vec![0u8; length];
-    stream.read_exact(&mut body)?;
+    read_exact_by(stream, &mut body, deadline)?;
     Ok(Some(body))
 }
 
-fn write_message(stream: &mut UnixStream, body: &[u8]) -> std::io::Result<()> {
+/// Write one length-prefixed message, failing once `deadline` passes.
+fn write_message(stream: &mut UnixStream, body: &[u8], deadline: Instant) -> std::io::Result<()> {
     let length = u32::try_from(body.len())
         .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidInput, "message too long"))?;
     let mut message = Vec::with_capacity(body.len() + 4);
     message.extend(length.to_be_bytes());
     message.extend(body);
-    stream.write_all(&message)
+    let mut written = 0;
+    while written < message.len() {
+        stream.set_write_timeout(Some(time_left(deadline)?))?;
+        match stream.write(&message[written..]) {
+            Ok(0) => return Err(std::io::ErrorKind::WriteZero.into()),
+            Ok(count) => written += count,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn read_exact_by(
+    stream: &mut UnixStream,
+    buf: &mut [u8],
+    deadline: Instant,
+) -> std::io::Result<()> {
+    let mut filled = 0;
+    while filled < buf.len() {
+        stream.set_read_timeout(Some(time_left(deadline)?))?;
+        match stream.read(&mut buf[filled..]) {
+            Ok(0) => return Err(std::io::ErrorKind::UnexpectedEof.into()),
+            Ok(count) => filled += count,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+/// The time before `deadline`, or a timeout error once it has passed.
+fn time_left(deadline: Instant) -> std::io::Result<Duration> {
+    let left = deadline.saturating_duration_since(Instant::now());
+    if left.is_zero() {
+        return Err(std::io::ErrorKind::TimedOut.into());
+    }
+    Ok(left)
 }
 
 fn put_string(out: &mut Vec<u8>, value: &[u8]) {
