@@ -145,11 +145,15 @@ pub fn lookup() -> string throws LookupError {
     let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
     let server = McpServer::new(McpServerConfig::new(core));
     let listed = server.tools_list_result(&json!({}));
-    assert_eq!(
-        listed["tools"][0]["_meta"][harn_vm::tool_registry::HARN_MCP_TOOL_CONTRACT_META_KEY]
-            ["errorSchema"]["properties"]["variant"]["const"],
-        "NotFound"
-    );
+    let error_schema = &listed["tools"][0]["_meta"]
+        [harn_vm::tool_registry::HARN_MCP_TOOL_CONTRACT_META_KEY]["errorSchema"];
+    let error_validator = jsonschema::validator_for(error_schema).expect("valid error schema");
+    assert!(error_validator.is_valid(&json!({
+        "variant":"NotFound", "message":"diagnostic", "secret":"typed-detail"
+    })));
+    assert!(!error_validator.is_valid(&json!({
+        "variant":"Other", "message":"diagnostic", "secret":"typed-detail"
+    })));
 
     let response = mcp_tool_response(
         &server,
@@ -160,6 +164,10 @@ pub fn lookup() -> string throws LookupError {
     assert!(response.get("error").is_none(), "{response}");
     assert_eq!(response["result"]["isError"], true);
     assert!(response["result"].get("structuredContent").is_none());
+    assert!(error_validator.is_valid(
+        &response["result"]["_meta"][harn_vm::tool_registry::HARN_MCP_TOOL_CONTRACT_META_KEY]
+            ["applicationError"]["data"]
+    ));
     assert_eq!(
         response["result"]["_meta"][harn_vm::tool_registry::HARN_MCP_TOOL_CONTRACT_META_KEY]
             ["applicationError"]["data"]["variant"],

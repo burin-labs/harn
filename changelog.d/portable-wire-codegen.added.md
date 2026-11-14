@@ -9,3 +9,6 @@ Native handlers retain the original tool registry's governance and adapter
 metadata, with request-specific cancellation and an exact concurrency limit.
 For MCP `2026-07-28`, closing a direct HTTP response cancels that request while
 preserving independently owned background tasks.
+
+See [Migrate typed tool clients](https://harnlang.com/migrate-typed-tools.html)
+for the corrected wire representations and client update checks.

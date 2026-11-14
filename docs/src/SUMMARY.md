@@ -318,6 +318,7 @@
 - [Extending the CLI in `.harn`](./cli-extending-in-harn.md)
 - [Tool registry adapters](./tool-registry-adapters.md)
 - [Code generation reference](./code-generation.md)
+- [Migrate typed tool clients](./migrate-typed-tools.md)
 - [Native tool bindings reference](./native-tool-bindings.md)
 - [Tool invocation preparation](./tool-invocation-preparation.md)
 - [Tool adapter architecture](./tool-adapter-architecture.md)

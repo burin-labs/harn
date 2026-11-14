@@ -3,7 +3,7 @@
 `harn codegen` compiles a Harn tool contract into a closed, portable intermediate
 representation (IR). Installed backends consume that IR to generate clients and
 native handlers. Harn owns schema resolution, wire types, validation, and source
-coordinates.
+coordinates. For existing clients, see [Migrate typed tool clients](./migrate-typed-tools.md).
 
 ## Commands
 
