@@ -195,12 +195,10 @@ pub(crate) fn denied_read_root() -> Option<PathBuf> {
 }
 
 /// `home`'s per-spawn root with every link resolved, before or after the root
-/// itself exists.
+/// or the home itself exists: the same normalization a backend renders a root
+/// from, which resolves a missing path through its deepest existing ancestor.
 fn canonical_spawns_root(home: &Path) -> PathBuf {
-    let root = home.join("grant-spawns");
-    std::fs::canonicalize(&root)
-        .or_else(|_| std::fs::canonicalize(home).map(|home| home.join("grant-spawns")))
-        .unwrap_or(root)
+    super::super::normalize_for_policy(&home.join("grant-spawns"))
 }
 
 /// The one per-spawn directory the spawn this thread is launching may read:
@@ -481,5 +479,20 @@ mod tests {
         std::fs::create_dir(&leaf).unwrap();
         assert_eq!(canonical_spawns_root(&linked), resolved);
         assert!(leaf.starts_with(canonical_spawns_root(&linked)));
+    }
+
+    /// A Harn home not made yet, under a linked parent: the denial must still
+    /// name the resolved root the home will be created at.
+    #[test]
+    fn a_missing_harn_home_under_a_link_denies_the_resolved_spawn_root() {
+        let base = tempfile::tempdir().unwrap();
+        let real = base.path().join("real-parent");
+        std::fs::create_dir(&real).unwrap();
+        let linked = base.path().join("linked-parent");
+        std::os::unix::fs::symlink(&real, &linked).unwrap();
+        let resolved = std::fs::canonicalize(&real)
+            .unwrap()
+            .join("home/grant-spawns");
+        assert_eq!(canonical_spawns_root(&linked.join("home")), resolved);
     }
 }
