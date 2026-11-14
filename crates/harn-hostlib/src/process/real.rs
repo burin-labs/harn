@@ -30,11 +30,6 @@ impl ProcessSpawner for RealSpawner {
     fn spawn(&self, spec: SpawnSpec) -> Result<Box<dyn ProcessHandle>, ProcessError> {
         #[cfg(unix)]
         if spec.owner_death == super::OwnerDeathPolicy::KillContainment {
-            if !matches!(spec.output_capture, OutputCapture::Pipe) {
-                return Err(ProcessError::InvalidArgv(
-                    "owner-death containment requires piped output".to_string(),
-                ));
-            }
             if !spec.configure_process_group {
                 return Err(ProcessError::InvalidArgv(
                     "owner-death containment requires an independent process group".to_string(),
@@ -436,7 +431,30 @@ pub(crate) fn prepare_command_from(
     );
     harn_vm::op_interrupt::preserve_process_owner_token(&mut command);
 
-    match &spec.output_capture {
+    configure_output_capture(&mut command, &spec.output_capture)?;
+    command.stdin(match (&spec.output_capture, spec.use_stdin) {
+        (OutputCapture::Inherit, true) => Stdio::inherit(),
+        (_, true) => Stdio::piped(),
+        (_, false) => Stdio::null(),
+    });
+
+    process_sandbox::validate_command_environment(&mut command, env_cleared)
+        .map_err(ProcessError::sandbox_setup)?;
+
+    Ok(PreparedSpawn {
+        verifier_witness: None,
+        source_verifier_bound: false,
+        command,
+        cleanup_token,
+        env_cleared,
+    })
+}
+
+pub(super) fn configure_output_capture(
+    command: &mut Command,
+    capture: &OutputCapture,
+) -> Result<(), ProcessError> {
+    match capture {
         OutputCapture::Inherit => {
             command.stdout(Stdio::inherit());
             command.stderr(Stdio::inherit());
@@ -463,22 +481,7 @@ pub(crate) fn prepare_command_from(
             command.stderr(Stdio::from(stderr));
         }
     }
-    command.stdin(match (&spec.output_capture, spec.use_stdin) {
-        (OutputCapture::Inherit, true) => Stdio::inherit(),
-        (_, true) => Stdio::piped(),
-        (_, false) => Stdio::null(),
-    });
-
-    process_sandbox::validate_command_environment(&mut command, env_cleared)
-        .map_err(ProcessError::sandbox_setup)?;
-
-    Ok(PreparedSpawn {
-        verifier_witness: None,
-        source_verifier_bound: false,
-        command,
-        cleanup_token,
-        env_cleared,
-    })
+    Ok(())
 }
 
 /// Record only the non-secret facts needed to diagnose command-resolution
@@ -625,6 +628,8 @@ struct RealProcess {
     missing_program: Option<String>,
     pid: u32,
     pgid: Option<u32>,
+    #[cfg(unix)]
+    signal_pid: u32,
     #[cfg(not(target_os = "windows"))]
     cleanup_token: String,
     killer: Arc<dyn ProcessKiller>,
@@ -693,6 +698,8 @@ fn real_process(
         missing_program: None,
         pid,
         pgid,
+        #[cfg(unix)]
+        signal_pid,
         #[cfg(not(target_os = "windows"))]
         cleanup_token,
         killer,
@@ -743,8 +750,10 @@ impl ProcessHandle for RealProcess {
     ) -> Option<harn_vm::op_interrupt::ActiveProcessCleanupGuard> {
         #[cfg(unix)]
         {
+            // Keep the guardian alive to observe payload exit and retire
+            // escaped children; scope signals target the payload too.
             Some(harn_vm::op_interrupt::register_active_process_cleanup(
-                Some(self.pid),
+                Some(self.signal_pid),
                 &self.cleanup_token,
                 Some(cancel),
             ))
@@ -1007,6 +1016,69 @@ pub(crate) fn configure_background_process_group(command: &mut std::process::Com
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn scope_signals_target_payload_and_preserve_public_guardian_identity() {
+        use std::os::unix::process::CommandExt;
+
+        struct Fixture {
+            guardian: Child,
+            process: RealProcess,
+        }
+        impl Drop for Fixture {
+            fn drop(&mut self) {
+                let _ = self.guardian.kill();
+                let _ = self.guardian.wait();
+                if let Some(child) = self.process.child.as_mut() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+            }
+        }
+        let token = harn_vm::op_interrupt::new_process_cleanup_token();
+        let guardian = Command::new("cat")
+            .stdin(Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let payload = Command::new("cat")
+            .env(harn_vm::op_interrupt::PROCESS_CLEANUP_TOKEN_ENV, &token)
+            .stdin(Stdio::piped())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let payload_pid = payload.id();
+        let identity = ProcessIdentity {
+            pid: guardian.id(),
+            pgid: Some(guardian.id()),
+            signal_pid: payload_pid,
+        };
+        let process = real_process(payload, token, None, None, identity, None);
+        let mut fixture = Fixture { guardian, process };
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let _registration = fixture
+            .process
+            .register_scope_cleanup(Arc::clone(&cancel))
+            .unwrap();
+        assert!(fixture.guardian.try_wait().unwrap().is_none());
+        assert!(fixture
+            .process
+            .child
+            .as_mut()
+            .unwrap()
+            .try_wait()
+            .unwrap()
+            .is_none());
+        let report = harn_vm::op_interrupt::signal_active_process_cleanups_for_cancel_token(
+            libc::SIGKILL,
+            &cancel,
+        );
+        assert_eq!(report.root_pid, Some(payload_pid));
+        assert_eq!(fixture.process.wait().unwrap().signal, Some(libc::SIGKILL));
+        assert!(fixture.guardian.try_wait().unwrap().is_none());
+        assert_eq!(fixture.process.pid(), Some(fixture.guardian.id()));
+    }
 
     #[cfg(unix)]
     #[test]

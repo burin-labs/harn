@@ -1,4 +1,4 @@
-//! Native owner-death containment for managed background processes.
+//! Native owner-death containment for managed processes.
 //!
 //! Unix re-executes the current embedding executable as a small reaper plus a
 //! process-group-leading guardian. The executable must dispatch
@@ -30,7 +30,7 @@ use std::process::{Child, ChildStderr, ChildStdin, Command, ExitStatus, Stdio};
 use serde::{Deserialize, Serialize};
 
 #[cfg(unix)]
-use super::{ProcessError, SpawnSpec};
+use super::{OutputCapture, ProcessError, SpawnSpec};
 
 #[cfg(unix)]
 mod completion_receipt;
@@ -154,8 +154,21 @@ enum GuardianConfinement {
 }
 
 #[cfg(unix)]
+#[derive(Default, Deserialize, Serialize)]
+enum GuardianOutputCapture {
+    #[default]
+    Pipe,
+    File {
+        stdout_path: Vec<u8>,
+        stderr_path: Vec<u8>,
+    },
+}
+
+#[cfg(unix)]
 #[derive(Deserialize, Serialize)]
 struct GuardianCommandRequest {
+    #[serde(default)]
+    output_capture: GuardianOutputCapture,
     #[serde(default)]
     cleanup_receipt_fd: Option<i32>,
     #[cfg(target_os = "linux")]
@@ -218,9 +231,27 @@ pub(crate) fn prepare_guardian(
     cleanup_token: String,
 ) -> Result<PreparedGuardian, ProcessError> {
     super::real::validate_program(spec)?;
+    let output_capture = match &spec.output_capture {
+        OutputCapture::Pipe => GuardianOutputCapture::Pipe,
+        OutputCapture::File {
+            stdout_path,
+            stderr_path,
+        } => GuardianOutputCapture::File {
+            stdout_path: os_bytes(stdout_path.as_os_str()),
+            stderr_path: os_bytes(stderr_path.as_os_str()),
+        },
+        OutputCapture::Inherit => {
+            return Err(ProcessError::InvalidArgv(
+                "owner-death containment requires captured output".to_string(),
+            ));
+        }
+    };
     let mut payload_spec = spec.clone();
     payload_spec.configure_process_group = false;
     payload_spec.owner_death = super::OwnerDeathPolicy::None;
+    // Open file captures in the guardian, before payload confinement, rather
+    // than opening and discarding them while serializing the command.
+    payload_spec.output_capture = OutputCapture::Pipe;
     #[cfg(target_os = "linux")]
     let pinned = super::program_lookup::pinned_verifier(&payload_spec, &[RULESET_FD])?;
     #[cfg(target_os = "linux")]
@@ -279,6 +310,7 @@ pub(crate) fn prepare_guardian(
         confinement.as_ref().map(TransferredConfinement::request),
         spec.use_stdin,
     );
+    request.output_capture = output_capture;
     #[cfg(target_os = "linux")]
     if let Some(pinned) = pinned.as_ref() {
         if payload.get_program() != std::ffi::OsStr::new(&pinned.program) {
@@ -511,6 +543,7 @@ impl GuardianCommandRequest {
         payload_stdin: bool,
     ) -> Self {
         Self {
+            output_capture: GuardianOutputCapture::Pipe,
             cleanup_receipt_fd: None,
             #[cfg(target_os = "linux")]
             cancel_request_fd: None,
@@ -742,6 +775,7 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
 
     let stdout = payload.stdout.take();
     let stderr = payload.stderr.take();
+    let mut open_outputs = u8::from(stdout.is_some()) + u8::from(stderr.is_some());
     let payload_stdin = payload.stdin.take();
     let (event_tx, event_rx) = std::sync::mpsc::channel();
 
@@ -799,7 +833,6 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
     drop(event_tx);
 
     let mut payload_status = None;
-    let mut open_outputs = 2_u8;
     #[cfg(target_os = "linux")]
     let mut cancellation_cleanup = None;
     while let Ok(event) = event_rx.recv() {
