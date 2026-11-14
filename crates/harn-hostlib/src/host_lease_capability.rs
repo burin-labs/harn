@@ -45,7 +45,12 @@ impl HostlibCapability for HostLeaseCapability {
 
     fn register_builtins(&self, registry: &mut BuiltinRegistry) {
         registry.register_fn("host_lease", STATUS_BUILTIN, "status", handle_status);
-        registry.register_fn("host_lease", ACQUIRE_BUILTIN, "acquire", handle_acquire);
+        registry.register_interruptible_fn(
+            "host_lease",
+            ACQUIRE_BUILTIN,
+            "acquire",
+            handle_acquire,
+        );
         registry.register_fn(
             "host_lease",
             UPDATE_METADATA_BUILTIN,
@@ -144,12 +149,13 @@ fn handle_acquire(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         metadata,
     };
     let store = HostLeaseStore::from_env().map_err(|error| backend(ACQUIRE_BUILTIN, error))?;
-    let receipt = if wait_slice_ms == 0 {
-        store.try_acquire(request)
-    } else {
-        store.acquire_wait(request, Duration::from_millis(wait_slice_ms as u64))
-    }
-    .map_err(|error| backend(ACQUIRE_BUILTIN, error))?;
+    let receipt = store
+        .acquire_wait_interruptible(
+            request,
+            Duration::from_millis(wait_slice_ms as u64),
+            &harn_vm::op_interrupt::requested,
+        )
+        .map_err(|error| backend(ACQUIRE_BUILTIN, error))?;
     acquire_to_value(store, receipt)
 }
 

@@ -36,6 +36,9 @@ use tempfile::TempDir;
 
 static HOST_LEASE_ENV_LOCK: Mutex<()> = Mutex::new(());
 
+#[path = "registration/lease_interrupt.rs"]
+mod lease_interrupt;
+
 /// Restores the process-global lease-root override after one hermetic VM test.
 ///
 /// The host capability resolves its store per invocation, so the test needs to

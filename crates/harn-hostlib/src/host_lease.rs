@@ -51,6 +51,7 @@ const RUN_RECEIPTS_DIR: &str = "receipts";
 const SQLITE_MUTATION_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 const REGISTRY_BUSY_RETRY_INTERVAL: Duration = Duration::from_millis(250);
 const PROCESS_LIVENESS_RECHECK_INTERVAL: Duration = Duration::from_secs(5);
+const INTERRUPT_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const SCHEMA_VERSION: u32 = 4;
 const RUN_RECEIPT_SCHEMA_VERSION: u32 = 4;
 const WHOLE_MACHINE_RESOURCE_CLASS: &str = "whole-machine";
@@ -61,6 +62,9 @@ pub const DEFAULT_HOST_LEASE_DOMAIN: &str = "default";
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum HostLeaseError {
+    /// The acquiring call was interrupted before ownership was delivered.
+    #[error("host lease acquisition interrupted")]
+    Interrupted,
     /// The caller supplied an invalid or unsafe contract value.
     #[error("invalid host lease request: {0}")]
     InvalidRequest(String),
@@ -709,7 +713,23 @@ impl HostLeaseStore {
             requested_at_ms: started_at_ms,
             recoverable: false,
         };
-        self.acquire_wait_ordered(request, wait_timeout, identity, None)
+        self.acquire_wait_ordered(request, wait_timeout, identity, None, None)
+    }
+
+    /// Acquire for a cancellable host call, retiring its queue entry and any
+    /// grant that races cancellation before returning ownership.
+    pub(crate) fn acquire_wait_interruptible(
+        &self,
+        request: HostLeaseRequest,
+        wait_timeout: Duration,
+        interrupted: &dyn Fn() -> bool,
+    ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
+        let identity = WaiterIdentity {
+            waiter_id: Uuid::now_v7().to_string(),
+            requested_at_ms: self.now_ms()?,
+            recoverable: false,
+        };
+        self.acquire_wait_ordered(request, wait_timeout, identity, None, Some(interrupted))
     }
 
     /// Resume the durable FIFO position owned by a supervised run receipt.
@@ -773,6 +793,7 @@ impl HostLeaseStore {
                 recoverable: true,
             },
             on_progress,
+            None,
         )
     }
 
@@ -782,6 +803,7 @@ impl HostLeaseStore {
         wait_timeout: Duration,
         identity: WaiterIdentity,
         mut on_progress: Option<&mut dyn FnMut(&HostLeaseAcquireReceipt)>,
+        interrupted: Option<&dyn Fn() -> bool>,
     ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
         // The deadline is decided on the injected clock's monotonic counter.
         // The watcher's `recv_timeout` below only bounds how long one blocking
@@ -808,12 +830,33 @@ impl HostLeaseStore {
         let mut progress_schedule = on_progress.as_ref().map(|_| WaitProgressSchedule::new());
 
         loop {
-            let receipt = self.try_acquire_once(
+            if interrupted.is_some_and(|check| check()) {
+                self.remove_waiter(&identity.waiter_id)?;
+                return Err(HostLeaseError::Interrupted);
+            }
+            let receipt = self.try_acquire_once_with_registry_timeout(
                 request.clone(),
                 Some(started_monotonic_ms),
                 Some(deadline_at_ms),
                 &identity,
+                if interrupted.is_some() {
+                    INTERRUPT_POLL_INTERVAL
+                } else {
+                    SQLITE_MUTATION_BUSY_TIMEOUT
+                },
             )?;
+            if interrupted.is_some_and(|check| check()) {
+                if let Some(handle) = receipt.handle.as_ref() {
+                    self.release_for_domain(
+                        &handle.host,
+                        handle.resource_class,
+                        &handle.domain,
+                        &handle.lease_id,
+                    )?;
+                }
+                self.remove_waiter(&identity.waiter_id)?;
+                return Err(HostLeaseError::Interrupted);
+            }
             let elapsed = self.monotonic_elapsed(started_monotonic_ms);
             if receipt.status == HostLeaseAcquireStatus::Deferred
                 && progress_schedule
@@ -852,6 +895,9 @@ impl HostLeaseStore {
                 continue;
             }
             let mut wait_duration = wake_duration.min(remaining);
+            if interrupted.is_some() {
+                wait_duration = wait_duration.min(INTERRUPT_POLL_INTERVAL);
+            }
             if let Some(schedule) = progress_schedule {
                 wait_duration = wait_duration
                     .min(schedule.until_next(self.monotonic_elapsed(started_monotonic_ms)));
