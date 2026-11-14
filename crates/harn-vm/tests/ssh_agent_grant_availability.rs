@@ -71,13 +71,17 @@ fn a_no_network_proposal_reports_the_measured_host_decision() {
     match ssh_agent_grant_available(&policy) {
         Ok(()) => eprintln!("SSH agent preflight: measured no-network grant held"),
         Err(error) => {
-            assert!(cfg!(target_os = "linux"));
-            let reason = refusal(error);
-            assert_eq!(
-                reason,
-                "SSH agent socket connection requires Landlock ABI 9 with measured enforcement on this host"
-            );
-            eprintln!("SSH agent preflight: measured no-network grant refused: {reason}");
+            #[cfg(target_os = "linux")]
+            {
+                let reason = refusal(error);
+                assert_eq!(
+                    reason,
+                    "SSH agent socket connection requires Landlock ABI 9 with measured enforcement on this host"
+                );
+                eprintln!("SSH agent preflight: measured no-network grant refused: {reason}");
+            }
+            #[cfg(target_os = "macos")]
+            panic!("the macOS backend must hold this grant: {error}");
         }
     }
     assert_eq!(policy, before);
