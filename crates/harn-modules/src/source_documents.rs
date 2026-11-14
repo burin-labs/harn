@@ -165,7 +165,7 @@ impl ModuleGraph {
         let paths = self.module_paths();
         let mut pending = BTreeSet::new();
         for path in &paths {
-            if let Some(module) = stdlib_module_name(&path) {
+            if let Some(module) = stdlib_module_name(path) {
                 let document = format!("harn:synthetic/std/{}", encode_path(Path::new(module))?);
                 result.documents.insert(path.clone(), document);
                 continue;
