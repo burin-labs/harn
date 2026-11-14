@@ -146,8 +146,11 @@ impl ProcessSpawner for RealSpawner {
                 cleanup_token,
                 Some(liveness),
                 Some(stderr),
-                Some(guardian_pid),
-                Some(payload_pid),
+                ProcessIdentity {
+                    pid: guardian_pid,
+                    pgid: Some(guardian_pid),
+                    signal_pid: payload_pid,
+                },
                 None,
             );
             process.missing_program = missing_program;
@@ -228,7 +231,8 @@ impl ProcessSpawner for RealSpawner {
             }
         }
 
-        let mut process = real_process(child, cleanup_token, None, None, None, None, owner_job);
+        let identity = ProcessIdentity::for_spawn(child.id(), spec.configure_process_group);
+        let mut process = real_process(child, cleanup_token, None, None, identity, owner_job);
         process.missing_program = missing_program;
         process.verifier_witness = verifier_witness;
         Ok(Box::new(process))
@@ -636,20 +640,44 @@ struct RealProcess {
     stderr_taken: bool,
 }
 
+struct ProcessIdentity {
+    pid: u32,
+    pgid: Option<u32>,
+    signal_pid: u32,
+}
+
+impl ProcessIdentity {
+    fn for_spawn(pid: u32, independent_group: bool) -> Self {
+        Self {
+            pid,
+            // Successful exec proves the pre-exec setsid succeeded, even if
+            // the child exits before the parent can query its process group.
+            pgid: if independent_group {
+                Some(pid)
+            } else {
+                child_process_group_id(pid)
+            },
+            signal_pid: pid,
+        }
+    }
+}
+
 fn real_process(
     child: Child,
     cleanup_token: String,
     owner_liveness: Option<ChildStdin>,
     stderr: Option<ChildStderr>,
-    reported_pid: Option<u32>,
-    killer_pid: Option<u32>,
+    identity: ProcessIdentity,
     #[cfg(target_os = "windows")] owner_job: Option<Arc<super::windows::KillOnCloseJob>>,
     #[cfg(not(target_os = "windows"))] _owner_job: Option<()>,
 ) -> RealProcess {
-    let pid = reported_pid.unwrap_or_else(|| child.id());
-    let pgid = child_process_group_id(pid);
+    let ProcessIdentity {
+        pid,
+        pgid,
+        signal_pid,
+    } = identity;
     let killer: Arc<dyn ProcessKiller> = Arc::new(RealKiller {
-        pid: killer_pid.unwrap_or(pid),
+        pid: signal_pid,
         cleanup_token: cleanup_token.clone(),
         #[cfg(target_os = "linux")]
         guardian_cancel: None,
@@ -979,6 +1007,25 @@ pub(crate) fn configure_background_process_group(command: &mut std::process::Com
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_reaped_session_leader_keeps_its_known_process_group() {
+        let mut command = Command::new("true");
+        configure_background_process_group(&mut command);
+        let mut child = command.spawn().unwrap();
+        let pid = child.id();
+        assert!(child.wait().unwrap().success());
+        assert_eq!(
+            child_process_group_id(pid),
+            None,
+            "the OS no longer has the child"
+        );
+        let identity = ProcessIdentity::for_spawn(pid, true);
+        assert_eq!(identity.pid, pid);
+        assert_eq!(identity.pgid, Some(pid));
+        assert_eq!(identity.signal_pid, pid);
+    }
 
     /// The race this exists for: two refusals, then the sibling's window closes
     /// and the same file runs. Without the retry the first refusal is final.
