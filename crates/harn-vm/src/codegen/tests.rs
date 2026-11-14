@@ -18,6 +18,15 @@ pub(super) fn catalog(description: &str) -> PreparedToolCatalog {
 }
 
 #[test]
+fn generated_typescript_uses_the_shared_projection_whitespace_owner() {
+    let generated = codegen_typescript();
+    assert!(generated.contains("export type CodegenIr ="));
+    assert!(generated.ends_with('\n'));
+    assert!(generated.lines().all(|line| line == line.trim_end()));
+    assert!(!generated.ends_with("\n\n"));
+}
+
+#[test]
 fn canonical_catalog_ir_roundtrips_through_the_untrusted_boundary() {
     let ir = compile_catalog(&catalog("test"), &[]).expect("compile");
     let decoded = validate_ir(&ir.canonical_json()).expect("validated standalone IR");

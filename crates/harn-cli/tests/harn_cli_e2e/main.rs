@@ -114,6 +114,7 @@ mod parse_tokens_cli;
 mod path_metadata_persistence_cli;
 mod persona_activation_cli_e2e;
 mod pg_codegen_cli;
+mod portable_wire_codegen;
 mod portal_stderr;
 mod precompile_dispatch;
 mod precompiled_interfaces;

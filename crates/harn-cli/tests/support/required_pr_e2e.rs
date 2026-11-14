@@ -24,6 +24,7 @@ macro_rules! required_pr_e2e_cases {
             typed_tool_outcomes::agent_validates_payload_without_losing_the_explicit_outcome,
             typed_tool_outcomes::cli_and_mcp_project_validated_payload_and_canonical_feedback,
             typed_tool_outcomes::exported_mcp_resolves_typed_payload_schema_and_preserves_feedback,
+            portable_wire_codegen::original_harn_wire_contract_holds_across_stdio_and_generated_cli,
             #[cfg(any(target_os = "macos", target_os = "linux"))]
             acp_confinement_cli::confine_workspace_holds_the_server_and_its_commands_to_the_workspace,
             #[cfg(any(target_os = "macos", target_os = "linux"))]

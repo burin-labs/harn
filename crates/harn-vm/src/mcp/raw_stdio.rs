@@ -220,4 +220,53 @@ mod tests {
             std::io::ErrorKind::InvalidData
         );
     }
+
+    #[tokio::test]
+    async fn newline_and_crlf_frame_boundaries_match_the_pinned_sdk_transport() {
+        use rmcp::service::RoleClient;
+        use rmcp::transport::{async_rw::AsyncRwTransport, Transport};
+
+        let limit = super::super::MCP_MAX_STDIO_LINE_BYTES;
+        assert!(super::super::MCP_STDIO_LINE_LIMIT_INCLUDES_TERMINATOR);
+        for (ending, line_length, accepted) in [
+            (b"\n".as_slice(), limit, true),
+            (b"\n".as_slice(), limit + 1, false),
+            (b"\r\n".as_slice(), limit, true),
+            (b"\r\n".as_slice(), limit + 1, false),
+        ] {
+            let content_length = line_length - ending.len();
+            let prefix = br#"{"jsonrpc":"2.0","id":7,"result":{"resultType":"complete","tools":[],"ttlMs":null,"_meta":{"padding":""#;
+            let suffix = br#""}}}"#;
+            let mut line = Vec::with_capacity(line_length);
+            line.extend_from_slice(prefix);
+            line.resize(content_length - suffix.len(), b'x');
+            line.extend_from_slice(suffix);
+            line.extend_from_slice(ending);
+            let mut sdk = AsyncRwTransport::<RoleClient, _, _>::new(
+                std::io::Cursor::new(line.clone()),
+                tokio::io::sink(),
+            );
+            assert_eq!(
+                sdk.receive().await.is_some(),
+                accepted,
+                "known SDK transport boundary for full line {line_length}"
+            );
+            let responses = RawResponseLog::default();
+            let mut reader = RawResponseReader::new(std::io::empty(), responses.clone());
+            assert_eq!(
+                reader.record_bytes(&line).is_ok(),
+                accepted,
+                "observer disagrees with pinned SDK for full line {line_length}, ending {ending:?}"
+            );
+            if accepted {
+                assert!(responses.result_after(0).unwrap()["_meta"]["padding"]
+                    .as_str()
+                    .is_some());
+                let mut fragmented =
+                    RawResponseReader::new(std::io::empty(), RawResponseLog::default());
+                fragmented.record_bytes(&line[..line.len() - 1]).unwrap();
+                fragmented.record_bytes(&line[line.len() - 1..]).unwrap();
+            }
+        }
+    }
 }

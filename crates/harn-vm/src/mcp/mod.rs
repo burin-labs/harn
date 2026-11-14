@@ -45,8 +45,12 @@ const X_MCP_HEADER: &str = "x-mcp-header";
 
 const MCP_INPUT_REQUIRED_MAX_ROUNDS: usize = rmcp::model::DEFAULT_MRTR_MAX_ROUNDS;
 
-/// Incoming stdio frame bound owned by the ordinary MCP SDK transport.
+/// Incoming stdio frame bound owned by the ordinary MCP SDK transport,
+/// including the LF terminator and an optional preceding CR.
 pub const MCP_MAX_STDIO_LINE_BYTES: usize = rmcp::transport::async_rw::DEFAULT_MAX_LINE_LENGTH;
+
+/// `AsyncRwTransport` checks the complete line before stripping its terminator.
+pub const MCP_STDIO_LINE_LIMIT_INCLUDES_TERMINATOR: bool = true;
 
 /// Default timeout for MCP requests (60 seconds).
 ///

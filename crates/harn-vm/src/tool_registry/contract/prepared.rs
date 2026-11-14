@@ -188,8 +188,22 @@ pub struct PreparedToolCatalog {
 
 impl PreparedToolCatalog {
     /// Validate and compile an immutable execution view of `catalog`.
-    pub fn prepare(catalog: ToolCatalog) -> Result<Self, PreparedToolCatalogError> {
+    pub fn prepare(mut catalog: ToolCatalog) -> Result<Self, PreparedToolCatalogError> {
         catalog.validate().map_err(PreparedToolCatalogError::new)?;
+        if let Some(components) = catalog.components.as_mut() {
+            for schema in components.schemas.values_mut() {
+                super::schema::canonicalize_required_names(schema);
+            }
+        }
+        for tool in &mut catalog.tools {
+            super::schema::canonicalize_required_names(&mut tool.input_schema);
+            for schema in [&mut tool.output_schema, &mut tool.error_schema]
+                .into_iter()
+                .flatten()
+            {
+                super::schema::canonicalize_required_names(schema);
+            }
+        }
         let components = catalog
             .components
             .as_ref()

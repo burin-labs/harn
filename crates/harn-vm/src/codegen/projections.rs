@@ -70,6 +70,7 @@ pub fn codegen_protocol_facts() -> Value {
         "WIRE_ENUM_FIELDS_KEY":crate::wire::ENUM_FIELDS_KEY,
         "MCP_PROTOCOL_VERSION": mcp::PROTOCOL_VERSION,
         "MCP_MAX_STDIO_LINE_BYTES": crate::mcp::MCP_MAX_STDIO_LINE_BYTES,
+        "MCP_STDIO_LINE_LIMIT_INCLUDES_TERMINATOR": crate::mcp::MCP_STDIO_LINE_LIMIT_INCLUDES_TERMINATOR,
         "MCP_METHOD_SERVER_DISCOVER": mcp::METHOD_SERVER_DISCOVER,
         "MCP_METHOD_TOOLS_LIST": mcp::METHOD_TOOLS_LIST,
         "MCP_METHOD_TOOLS_CALL": mcp::METHOD_TOOLS_CALL,
@@ -155,5 +156,5 @@ pub fn codegen_typescript() -> String {
             facts[name]
         ));
     }
-    output
+    crate::tool_registry::finish_typescript_projection(output)
 }

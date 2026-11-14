@@ -25,6 +25,7 @@ pub use handler_result::tool_handler_output_schema;
 mod invocation;
 pub(crate) mod preparation_scope;
 pub(crate) use contract::append_tool_catalog_typescript;
+pub(crate) use contract::finish_typescript_projection;
 pub(crate) use contract::transform_codegen_schema;
 pub use contract::*;
 pub(crate) use invocation::tool_registry_catalog_for_tool;

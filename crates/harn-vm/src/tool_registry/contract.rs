@@ -1215,6 +1215,10 @@ pub fn tool_catalog_typescript() -> String {
          export type JsonSchema202012 = boolean | { readonly [keyword: string]: JsonValue };\n\n",
     );
     append_tool_catalog_typescript(&mut output, &config);
+    finish_typescript_projection(output)
+}
+
+pub(crate) fn finish_typescript_projection(output: String) -> String {
     let mut output = output
         .lines()
         .map(str::trim_end)

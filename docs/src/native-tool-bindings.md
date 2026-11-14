@@ -55,6 +55,12 @@ cancellation accounting. Dropping one pending call sends ordinary stdio
 `notifications/cancelled` for that request. It doesn't cancel an unrelated call.
 Raw compatibility requests can't be mixed into an activated native connection.
 
+Each stdio message is limited to 16 MiB of UTF-8 bytes, including its LF
+terminator and any preceding CR. The generated protocol facts export both the
+limit and that terminator rule. Worker stderr is drained without retaining or
+publishing its contents; ordinary diagnostics don't impose a cumulative worker
+lifetime quota.
+
 Native adapter failures prevent automatic replay of the operation, including
 protocol faults and rejected output after a handler may have mutated state.
 The original failure category and caught value remain available. A caller can
