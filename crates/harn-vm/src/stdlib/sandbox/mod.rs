@@ -99,6 +99,8 @@ mod read_roots;
 mod refusal;
 mod scope_memo;
 mod scoped_fs;
+#[cfg(unix)]
+pub mod signing_agent;
 use backend::ActiveBackend;
 pub use backend::{
     active_backend_available, active_backend_filesystem_available,
