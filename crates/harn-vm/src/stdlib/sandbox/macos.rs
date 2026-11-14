@@ -586,13 +586,44 @@ fn render_profile_with_extra_read_roots(
             sandbox_profile_escape(&ancestor)
         ));
     }
+    // A per-spawn directory may hold a socket that serves a login (a granted
+    // git's credential socket), so no confined child connects to anything
+    // there, whatever network or socket roots it was granted above.
+    if let Some(root) = super::workspace_env::grant_spawn::denied_read_root() {
+        for path in sandbox_profile_path_aliases(&root.display().to_string()) {
+            profile.push_str(&format!(
+                "(deny network-outbound (subpath \"{}\"))\n",
+                sandbox_profile_escape(&path)
+            ));
+        }
+    }
     // A granted spawn re-reads its own private directory inside the denied
     // per-spawn root. Later rules win, so this follows the denials, and it
-    // names only that one directory.
+    // names only that one directory. The denial names metadata on its own,
+    // which a wildcard read grant does not outrank, so the grant names it too:
+    // without it the directory reads but cannot be listed or stat'd, and a
+    // granted git refuses it as "not a git repository". Resolving the
+    // directory's real path also stats the per-spawn root itself, which is
+    // allowed as that one literal: its listing stays denied.
     if let Some(own) = super::workspace_env::grant_spawn::own_spawn_read_root() {
         for path in sandbox_profile_path_aliases(&own.display().to_string()) {
+            let escaped = sandbox_profile_escape(&path);
             profile.push_str(&format!(
-                "(allow file-read* (subpath \"{}\"))\n",
+                "(allow file-read* (subpath \"{escaped}\"))\n\
+                 (allow file-read-metadata (subpath \"{escaped}\"))\n"
+            ));
+            if let Some(root) = std::path::Path::new(&path).parent() {
+                profile.push_str(&format!(
+                    "(allow file-read-metadata (literal \"{}\"))\n",
+                    sandbox_profile_escape(&root.display().to_string())
+                ));
+            }
+        }
+        // A granted git asks its own per-spawn credential socket for its login.
+        let socket = own.join(super::workspace_env::git_network::CREDENTIAL_SOCKET);
+        for path in sandbox_profile_path_aliases(&socket.display().to_string()) {
+            profile.push_str(&format!(
+                "(allow network-outbound (literal \"{}\"))\n",
                 sandbox_profile_escape(&path)
             ));
         }

@@ -13,6 +13,8 @@
 //! module and are consolidated to this root.
 #![recursion_limit = "256"]
 
+harn_hostlib::process_guardian_test_fixture!();
+
 // Shared helpers (still at `tests/test_util/`, one level up), reached by the
 // submodules via `crate::test_util::...`.
 #[path = "../test_util/mod.rs"]

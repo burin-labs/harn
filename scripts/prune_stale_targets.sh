@@ -157,6 +157,8 @@ measure_bytes=0
 host_maintenance=0
 requested_entries=()
 protected_entries=()
+incremental_only=0
+request_mode=""
 usage() {
   cat <<'EOF'
 Usage: scripts/prune_stale_targets.sh [options]
@@ -165,6 +167,8 @@ Usage: scripts/prune_stale_targets.sh [options]
   --measure-bytes      Measure reclaimed and retained allocated bytes.
   --host-maintenance   Apply retention, size and free-space bounds; measure bytes.
   --remove-entry NAME  Retire this exact basename regardless of rank or age.
+  --prune-incremental-entry NAME
+                       Remove only idle Cargo incremental state in this entry.
   --protect-entry NAME Keep this exact basename ahead of every removal rule.
   --help               Show this help without scanning or changing caches.
 
@@ -174,6 +178,10 @@ outrank named removal. Both managed cache families use the same protections.
 HARN_TARGET_GC_PROTECT adds the caller's own target path or basename to the set.
 Protected bytes still count toward the ceiling; an oversized retained root is
 reported as partial. See the script's Env reference for the remaining bounds.
+Incremental-only requests preserve dependencies and binaries, retain every
+other entry, and cannot be combined with whole-entry or automatic maintenance.
+They require Python's safe directory-FD removal and do not advance the full
+sweep's last-success receipt.
 EOF
 }
 while [ "$#" -gt 0 ]; do
@@ -182,14 +190,21 @@ while [ "$#" -gt 0 ]; do
     --dry-run) dry_run=1; shift ;;
     --measure-bytes) measure_bytes=1; shift ;;
     --host-maintenance) host_maintenance=1; measure_bytes=1; shift ;;
-    --remove-entry|--protect-entry)
+    --remove-entry|--protect-entry|--prune-incremental-entry)
       [ "$#" -ge 2 ] || { echo "$1 needs a NAME" >&2; exit 2; }
       # One path segment only. A name carrying a separator could otherwise
       # address a directory outside the managed root.
       case "$2" in
         ""|.|..|*/*) echo "invalid $1 name: $2" >&2; exit 2 ;;
       esac
-      if [ "$1" = --remove-entry ]; then
+      if [ "$1" = --remove-entry ] || [ "$1" = --prune-incremental-entry ]; then
+        mode=whole
+        [ "$1" != --prune-incremental-entry ] || mode=incremental
+        if [ -n "$request_mode" ] && [ "$request_mode" != "$mode" ]; then
+          echo "whole-entry and incremental-only requests cannot be combined" >&2; exit 2
+        fi
+        request_mode="$mode"
+        if [ "$mode" = incremental ]; then incremental_only=1; measure_bytes=1; fi
         requested_entries+=("$2")
       else
         protected_entries+=("$2")
@@ -198,6 +213,9 @@ while [ "$#" -gt 0 ]; do
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+if [ "$incremental_only" -eq 1 ] && [ "$host_maintenance" -eq 1 ]; then
+  echo "incremental-only requests cannot be combined with host maintenance" >&2; exit 2
+fi
 
 # Was this entry named on the command line?
 entry_requested() {
@@ -232,7 +250,11 @@ report_pending_named_entry() {
 matched_entries=()
 
 gc_policy_version="harn-target-gc/v2-$(cksum "$SCRIPT_DIR/prune_stale_targets.sh" | awk '{print $1 "-" $2}')"
+if [ "$incremental_only" -eq 1 ]; then
+  gc_policy_version="$gc_policy_version-incremental-$(cksum "$SCRIPT_DIR/lib/target_gc_incremental.py" | awk '{print $1 "-" $2}')"
+fi
 scanned=0; removed=0; kept=0; pending_candidates=0; blocked_named_entries=0; ceiling_unproven_roots=0; pressure_unproven_roots=0; summary_printed=0
+incremental_reclaims=0
 reclaimed_bytes=0; retained_bytes=0; unmeasured_entries=0
 completed=0
 receipt_root="${HARN_DEV_SETUP_STORAGE_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/harn/dev-setup}"
@@ -265,6 +287,7 @@ report_unmatched_entries() {
     fi
     if [ "$found" -eq 0 ]; then
       echo "warning: --remove-entry matched no entry in any managed root: $want" >&2
+      if [ "$incremental_only" -eq 1 ]; then blocked_named_entries=$((blocked_named_entries + 1)); fi
     fi
   done
   # An `&&` as the last statement would return 1 whenever the name DID match,
@@ -304,10 +327,11 @@ print_summary() {
   fi
   # scanned is reported alongside the verdict so a zero here is readable as
   # "walked these roots and found nothing" rather than "walked nothing".
-  echo "harn-target GC: policy=$gc_policy_version status=$status last_success=$last_success last_success_policy=$last_success_policy scanned=$scanned kept=$kept removed=$removed reclaimed_bytes=$reported_reclaimed retained_bytes=$reported_retained pending_candidates=$reported_pending unmeasured_entries=$unmeasured_entries ceiling_unproven_roots=$ceiling_unproven_roots pressure_unproven_roots=$pressure_unproven_roots blocked_named_entries=$blocked_named_entries (roots=$roots)$suffix"
+  echo "harn-target GC: policy=$gc_policy_version status=$status last_success=$last_success last_success_policy=$last_success_policy scanned=$scanned kept=$kept removed=$removed reclaimed_bytes=$reported_reclaimed retained_bytes=$reported_retained pending_candidates=$reported_pending unmeasured_entries=$unmeasured_entries ceiling_unproven_roots=$ceiling_unproven_roots pressure_unproven_roots=$pressure_unproven_roots blocked_named_entries=$blocked_named_entries incremental_only=$incremental_only incremental_reclaims=$incremental_reclaims (roots=$roots)$suffix"
 }
 
 record_success() {
+  [ "$incremental_only" -eq 0 ] || return 0
   [ "$dry_run" -eq 0 ] || return 0
   [ "$pending_candidates" -eq 0 ] || return 1
   # A protected/live name is a measured policy refusal, not a failed deletion.
@@ -898,6 +922,10 @@ prune_root() {
     if entry_requested "$name"; then
       matched_entries+=("$name")
     fi
+    if [ "$incremental_only" -eq 1 ] && ! entry_requested "$name"; then
+      remember_kept_path "$d"
+      continue
+    fi
 
     # The caller's own entry outranks every other rule, including the process
     # probe: a setup run that has restored a seed but not yet started Cargo owns
@@ -941,7 +969,11 @@ prune_root() {
     # a lane being finished but cannot be wrong about a compiler holding the
     # tree open. Rank and age are exactly what the caller is overriding.
     if entry_requested "$name"; then
-      remove_entry "$target_root" "$d" "named by caller"
+      if [ "$incremental_only" -eq 1 ]; then
+        prune_incremental_entry "$target_root" "$d"
+      else
+        remove_entry "$target_root" "$d" "named by caller"
+      fi
       continue
     fi
 
@@ -1001,7 +1033,70 @@ prune_root() {
     done < <(sort -rn "$warm_file")
   fi
 
-  enforce_storage_bounds "$target_root"
+  if [ "$incremental_only" -eq 0 ]; then enforce_storage_bounds "$target_root"; fi
+}
+
+# Selection and both process/lease checks stay at the existing collector. The
+# helper binds filesystem operations to directory identities across staging.
+prune_incremental_entry() {
+  local root="$1" entry="$2" name receipt row status stage bytes parts pids
+  name="$(basename "$entry")"
+  remember_kept_path "$entry"
+  if ! command -v python3 >/dev/null 2>&1 || entry_holds_git_repository "$entry"; then
+    echo "keep incremental state (safe filesystem operations unavailable): $name" >&2
+    report_pending_named_entry "$name"
+    return 0
+  fi
+  if ! pids="$(entry_live_pids "$entry")" || [ -n "$pids" ]; then
+    echo "keep incremental state (ownership changed before staging): $name" >&2
+    report_pending_named_entry "$name"
+    return 0
+  fi
+  receipt="$(mktemp)"
+  local stage_args=()
+  if [ "$dry_run" -eq 1 ]; then stage_args+=(--dry-run); fi
+  if ! row="$(python3 "$SCRIPT_DIR/lib/target_gc_incremental.py" stage "$root" "$name" --receipt "$receipt" ${stage_args[@]+"${stage_args[@]}"})"; then
+    rm -f "$receipt"
+    report_pending_named_entry "$name"
+    return 0
+  fi
+  cat "$receipt"
+  IFS=$'\t' read -r status stage bytes parts <<< "$row"
+  case "$status" in
+    empty) rm -f "$receipt"; return 0 ;;
+    dry-run)
+      echo "would prune incremental state: $name parts=$parts bytes=$bytes"
+      pending_candidates=$((pending_candidates + parts))
+      rm -f "$receipt"; return 0 ;;
+    staged) ;;
+    *) rm -f "$receipt"; report_pending_named_entry "$name"; return 0 ;;
+  esac
+  # A build can start during the measured directory moves. After staging, new
+  # builds create a fresh incremental directory; readers of the old generation
+  # still protect the whole entry before its staged bytes can be deleted.
+  if ! pids="$(entry_live_pids "$entry")" || [ -n "$pids" ]; then
+    python3 "$SCRIPT_DIR/lib/target_gc_incremental.py" restore "$root" "$name" --stage "$stage" --receipt "$receipt" >/dev/null || true
+    cat "$receipt"
+    rm -f "$receipt"
+    echo "keep incremental state (ownership changed after staging): $name" >&2
+    report_pending_named_entry "$name"
+    return 0
+  fi
+  if ! row="$(python3 "$SCRIPT_DIR/lib/target_gc_incremental.py" finish "$root" "$name" --stage "$stage" --receipt "$receipt")"; then
+    rm -f "$receipt"
+    report_pending_named_entry "$name"
+    return 0
+  fi
+  cat "$receipt"
+  rm -f "$receipt"
+  IFS=$'\t' read -r status stage bytes parts <<< "$row"
+  if [ "$status" = reclaimed ]; then
+    incremental_reclaims=$((incremental_reclaims + 1))
+    reclaimed_bytes=$((reclaimed_bytes + bytes))
+  else
+    reclaimed_bytes=$((reclaimed_bytes + bytes))
+    report_pending_named_entry "$name"
+  fi
 }
 
 # Drop one path from the kept list. The size pass runs after entries have

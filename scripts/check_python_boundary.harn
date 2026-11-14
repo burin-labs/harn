@@ -21,6 +21,30 @@ const SKIP_SEGMENTS = [
 const PYTHON_ALLOWLIST = [
   {
     kind: "exact",
+    pattern: "scripts/lib/target_gc_incremental.py",
+    category: "foreign-runtime-bootstrap",
+    owner: "Target-cache collector",
+    reason:
+      "Directory-FD operations bind staged Cargo cache deletion to inode identities before a Harn build exists; the shell collector owns selection and process admission.",
+  },
+  {
+    kind: "exact",
+    pattern: "scripts/tests/prune_stale_targets_incremental_test.py",
+    category: "subprocess-fixture",
+    owner: "Target-cache collector",
+    reason:
+      "Real filesystem generations and open readers prove partial reclamation, refusal and recovery through the owning collector.",
+  },
+  {
+    kind: "exact",
+    pattern: "scripts/tests/thread_parity_runner_test.py",
+    category: "subprocess-fixture",
+    owner: "Thread-count qualification",
+    reason:
+      "Real process groups and IPC prove wrapper signal custody and partial receipts; the existing Harn summarizer owns every census decision.",
+  },
+  {
+    kind: "exact",
     pattern: "scripts/tests/bootstrap_harn_auth_test.py",
     category: "subprocess-fixture",
     owner: "Bootstrap seed transport",
@@ -118,6 +142,31 @@ const PYTHON_ALLOWLIST = [
 ]
 
 const EMBEDDED_PYTHON_ALLOWLIST = [
+  {
+    path: "scripts/prune_stale_targets.sh",
+    pattern:
+      r#"python3\s+"\$SCRIPT_DIR/lib/target_gc_incremental\.py"\s+(stage|finish|restore)\s+"#,
+    category: "foreign-runtime-bootstrap",
+    owner: "Target-cache collector",
+    reason:
+      "Invokes only inode-bound filesystem operations after the existing collector's process and lease admission.",
+  },
+  {
+    path: "Makefile",
+    pattern: r"^\s*python3\s+\./scripts/tests/prune_stale_targets_incremental_test\.py(?:\s|$)",
+    category: "subprocess-fixture",
+    owner: "Target-cache collector",
+    reason:
+      "Runs the partial cache reclamation and process-holder controls in the owning shell gate.",
+  },
+  {
+    path: "Makefile",
+    pattern:
+      r#"^\s*HARN_BIN="\$\(HARN_BIN\)"\s+python3\s+scripts/tests/thread_parity_runner_test\.py\s*$"#,
+    category: "subprocess-fixture",
+    owner: "Thread-count qualification",
+    reason: "Runs the actual IPC and signal regression after the qualified Harn CLI is available.",
+  },
   {
     path: ".github/workflows/setup-harn-contract.yml",
     pattern: r"^\s*run:\s+python3\s+scripts/tests/bootstrap_harn_auth_test\.py\s*$",

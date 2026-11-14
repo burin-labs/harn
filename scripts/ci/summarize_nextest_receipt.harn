@@ -1,5 +1,10 @@
 import { parse, parser } from "std/cli/argparse"
-import { SelectedInventory, selected_inventory } from "./nextest_inventory"
+import {
+  SelectedInventory,
+  event_identity,
+  event_test_identity,
+  selected_inventory,
+} from "./nextest_inventory"
 
 pub type Receipt = {
   reason: string,
@@ -9,6 +14,9 @@ pub type Receipt = {
   skipped: int,
   failed: int,
   missing: list<string>,
+  started: int,
+  pending: list<string>,
+  failed_names: list<string>,
 }
 
 pub type ReceiptResult = {
@@ -19,16 +27,11 @@ pub type ReceiptResult = {
   format: string,
 }
 
-type NextestEvent = {type?: string, event?: string, name?: string}
+type NextestEvent = {type?: string, event?: string, name?: string, binary_id?: string?}
 
-fn finished_receipt(
-  inventory: SelectedInventory,
-  events: string,
-  runner_status: int,
-  stress_count: int?,
-) -> Receipt {
+fn expanded_tests(names: list<string>, stress_count: int?) -> dict<string, bool> {
   let selected: dict<string, bool> = {}
-  for name in inventory.selected {
+  for name in names {
     if stress_count == nil {
       selected[name] = true
     } else {
@@ -41,9 +44,27 @@ fn finished_receipt(
       }
     }
   }
+  return selected
+}
+
+fn finished_receipt(
+  inventory: SelectedInventory,
+  events: string,
+  runner_status: int,
+  stress_count: int?,
+) -> Receipt {
+  const selected = expanded_tests(inventory.selected, stress_count)
+  const ignored = expanded_tests(
+    inventory.excluded.keys().filter(
+      fn(name: string) -> bool { return inventory.excluded[name] == "ignored" },
+    ),
+    stress_count,
+  )
   let finished: dict<string, string> = {}
+  let started: dict<string, bool> = {}
   let line_number = 0
   let passed = 0
+  let owner: string? = nil
   const event_schema = schema_of(NextestEvent) + {additional_properties: true}
   for line in events.split("\n") {
     line_number += 1
@@ -52,15 +73,39 @@ fn finished_receipt(
     }
     const event = schema_expect<NextestEvent>(json_parse(line), event_schema)
     const kind = event.event ?? ""
-    if event.type != "test" || !["ok", "failed"].contains(kind) {
+    if event.type == "harn-invocation" {
+      if kind != "started" || !event.keys().contains("binary_id") {
+        throw "invocation marker has no owning identity"
+      }
+      owner = event.binary_id
+      if owner != nil && !inventory.isolated.contains(unwrap(owner)) {
+        throw "invocation marker is not an isolated inventory binary: ${owner}"
+      }
+      continue
+    }
+    if event.type != "test" || !["started", "ok", "failed", "ignored"].contains(kind) {
       continue
     }
     if event.name == nil {
       throw "events line ${line_number} has no test name"
     }
-    const name = unwrap(event.name)
+    const identity = event_identity(unwrap(event.name))
+    const name = event_test_identity(identity, inventory.event_owners[identity.key] ?? [], owner)
+    if ignored[name] ?? false {
+      if kind == "started" || kind == "ignored" {
+        continue
+      }
+      throw "excluded test emitted ${kind}: ${name}"
+    }
     if !(selected[name] ?? false) {
-      throw "finished test is absent from inventory: ${name}"
+      throw "test is not selected in inventory: ${name}"
+    }
+    if kind == "ignored" {
+      throw "selected test was ignored: ${name}"
+    }
+    started[name] = true
+    if kind == "started" {
+      continue
     }
     if finished[name] != nil {
       throw "test has multiple terminal events: ${name}"
@@ -72,6 +117,8 @@ fn finished_receipt(
   }
   const missing = selected.keys().filter({ name -> finished[name] == nil }).sorted()
   const failed = len(finished) - passed
+  const pending = started.keys().filter({ name -> finished[name] == nil }).sorted()
+  const failed_names = finished.keys().filter({ name -> finished[name] == "failed" }).sorted()
   const reason = if len(missing) > 0 {
     "tests-not-run"
   } else if failed > 0 {
@@ -89,6 +136,9 @@ fn finished_receipt(
     skipped: inventory.skipped,
     failed: failed,
     missing: missing,
+    started: len(started),
+    pending: pending,
+    failed_names: failed_names,
   }
 }
 
@@ -103,11 +153,18 @@ fn main(harness: Harness) {
         {kind: "flag", name: "threads", long: "--threads", required: true},
         {kind: "flag", name: "stress_count", long: "--stress-count"},
         {kind: "flag", name: "format", long: "--format"},
+        {kind: "flag", name: "receipt", long: "--receipt"},
       ],
     },
   )
+  let receipt_path: string? = nil
   const outcome = try {
     const options = unwrap(parse(spec, argv)).options
+    receipt_path = if options.receipt == nil {
+      nil
+    } else {
+      to_string(options.receipt)
+    }
     const status_text = to_string(options.runner_status)
     const threads_text = to_string(options.threads)
     if regex_match(r"^[0-9]+$", status_text) == nil
@@ -146,6 +203,9 @@ fn main(harness: Harness) {
   }
   const result = schema_expect<ReceiptResult>(unwrap(outcome), schema_of(ReceiptResult))
   const receipt = result.receipt
+  if receipt_path != nil {
+    harness.fs.write_text(unwrap(receipt_path), json_stringify(result))
+  }
   if result.format == "json" {
     harness.stdio.println(json_stringify(result))
   } else {
@@ -154,12 +214,19 @@ fn main(harness: Harness) {
         "thread_parity_receipt reason=${receipt.reason} threads=${result.threads} selected=${receipt.selected}",
         "run=${receipt.run} passed=${receipt.passed} skipped=${receipt.skipped}",
         "not_run=${len(receipt.missing)} failed=${receipt.failed} runner_status=${result.status}",
+        "started=${receipt.started} pending=${len(receipt.pending)}",
       ]
         .join(" "),
     )
   }
   for name in receipt.missing {
     harness.stdio.eprintln("thread_parity_missing_test ${name}")
+  }
+  for name in receipt.pending {
+    harness.stdio.eprintln("thread_parity_pending_test ${name}")
+  }
+  for name in receipt.failed_names {
+    harness.stdio.eprintln("thread_parity_failed_test ${name}")
   }
   if receipt.reason != "complete" {
     harness.runtime.exit(1)
