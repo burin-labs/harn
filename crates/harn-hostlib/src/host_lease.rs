@@ -728,6 +728,9 @@ impl HostLeaseStore {
             requested_at_ms: self.now_ms()?,
             recoverable: false,
         };
+        if wait_timeout.is_zero() {
+            return self.acquire_once_interruptible(request, identity, interrupted);
+        }
         self.acquire_wait_ordered(request, wait_timeout, identity, None, Some(interrupted))
     }
 

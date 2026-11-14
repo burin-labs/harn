@@ -168,6 +168,8 @@ idempotent cleanup through guard lifetime. Acquisition waits in bounded slices
 on registry notifications rather than sleeping or parsing process tables.
 These waits leave the session thread free to receive cancellation. An interrupted
 acquisition removes its queue entry and releases any grant that raced the stop.
+If another registry writer holds the database, cleanup continues on the blocking
+worker after the VM returns cancellation; it retires the entry when the lock clears.
 
 When deterministic discovery finishes after acquisition, replace the active
 lease metadata without introducing a sidecar authority or releasing ownership:

@@ -7,14 +7,119 @@ use super::*;
 
 const INTERRUPT_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
+struct AcquireScope<'a> {
+    store: &'a HostLeaseStore,
+    waiter_id: &'a str,
+    queued: bool,
+    grant: Option<HostLeaseHandle>,
+}
+
+impl<'a> AcquireScope<'a> {
+    fn new(store: &'a HostLeaseStore, waiter_id: &'a str) -> Self {
+        Self {
+            store,
+            waiter_id,
+            queued: false,
+            grant: None,
+        }
+    }
+
+    fn observe(&mut self, receipt: &HostLeaseAcquireReceipt) {
+        self.queued = receipt.status == HostLeaseAcquireStatus::Deferred;
+        self.grant = receipt.handle.clone();
+    }
+
+    fn deliver(
+        mut self,
+        receipt: HostLeaseAcquireReceipt,
+    ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
+        if self.queued {
+            self.store.remove_waiter(self.waiter_id)?;
+            self.queued = false;
+        }
+        self.grant = None;
+        Ok(receipt)
+    }
+}
+
+impl Drop for AcquireScope<'_> {
+    fn drop(&mut self) {
+        if let Some(handle) = self.grant.take() {
+            if let Err(error) = self.store.release_for_domain(
+                &handle.host,
+                handle.resource_class,
+                &handle.domain,
+                &handle.lease_id,
+            ) {
+                tracing::warn!(lease_id = %handle.lease_id, %error, "host lease grant cleanup remains unconfirmed");
+            }
+        }
+        if self.queued {
+            if let Err(error) = self.store.remove_waiter(self.waiter_id) {
+                tracing::warn!(waiter_id = self.waiter_id, %error, "host lease waiter cleanup remains unconfirmed");
+            }
+        }
+    }
+}
+
 impl HostLeaseStore {
+    pub(super) fn acquire_once_interruptible(
+        &self,
+        request: HostLeaseRequest,
+        identity: WaiterIdentity,
+        interrupted: &dyn Fn() -> bool,
+    ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
+        let mut scope = AcquireScope::new(self, &identity.waiter_id);
+        if interrupted() {
+            return Err(HostLeaseError::Interrupted);
+        }
+        let receipt = self.try_acquire_once(
+            request,
+            None,
+            Some(identity.requested_at_ms.saturating_add(60_000)),
+            &identity,
+        )?;
+        scope.observe(&receipt);
+        if interrupted() {
+            return Err(HostLeaseError::Interrupted);
+        }
+        scope.deliver(receipt)
+    }
+
     pub(super) fn acquire_wait_ordered(
+        &self,
+        request: HostLeaseRequest,
+        wait_timeout: Duration,
+        identity: WaiterIdentity,
+        on_progress: Option<&mut dyn FnMut(&HostLeaseAcquireReceipt)>,
+        interrupted: Option<&dyn Fn() -> bool>,
+    ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
+        let (tx, rx) = mpsc::channel();
+        let mut watcher = notify::recommended_watcher(move |event| {
+            let _ = tx.send(event);
+        })
+        .map_err(|error| HostLeaseError::Watch(error.to_string()))?;
+        watcher
+            .watch(&self.wake_path, RecursiveMode::NonRecursive)
+            .map_err(|error| HostLeaseError::Watch(error.to_string()))?;
+        self.acquire_wait_notified(
+            request,
+            wait_timeout,
+            identity,
+            on_progress,
+            interrupted,
+            &rx,
+        )
+    }
+
+    pub(super) fn acquire_wait_notified(
         &self,
         request: HostLeaseRequest,
         wait_timeout: Duration,
         identity: WaiterIdentity,
         mut on_progress: Option<&mut dyn FnMut(&HostLeaseAcquireReceipt)>,
         interrupted: Option<&dyn Fn() -> bool>,
+        notifications: &mpsc::Receiver<notify::Result<notify::Event>>,
     ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
         // The deadline is decided on the injected clock's monotonic counter.
         // The watcher's `recv_timeout` below only bounds how long one blocking
@@ -30,19 +135,11 @@ impl HostLeaseStore {
                 )
             })?;
         let deadline_at_ms = started_at_ms.saturating_add(wait_timeout_ms);
-        let (tx, rx) = mpsc::channel();
-        let mut watcher = notify::recommended_watcher(move |event| {
-            let _ = tx.send(event);
-        })
-        .map_err(|error| HostLeaseError::Watch(error.to_string()))?;
-        watcher
-            .watch(&self.wake_path, RecursiveMode::NonRecursive)
-            .map_err(|error| HostLeaseError::Watch(error.to_string()))?;
         let mut progress_schedule = on_progress.as_ref().map(|_| WaitProgressSchedule::new());
+        let mut scope = AcquireScope::new(self, &identity.waiter_id);
 
         loop {
             if interrupted.is_some_and(|check| check()) {
-                self.remove_waiter(&identity.waiter_id)?;
                 return Err(HostLeaseError::Interrupted);
             }
             let receipt = self.try_acquire_once_with_registry_timeout(
@@ -56,16 +153,8 @@ impl HostLeaseStore {
                     SQLITE_MUTATION_BUSY_TIMEOUT
                 },
             )?;
+            scope.observe(&receipt);
             if interrupted.is_some_and(|check| check()) {
-                if let Some(handle) = receipt.handle.as_ref() {
-                    self.release_for_domain(
-                        &handle.host,
-                        handle.resource_class,
-                        &handle.domain,
-                        &handle.lease_id,
-                    )?;
-                }
-                self.remove_waiter(&identity.waiter_id)?;
                 return Err(HostLeaseError::Interrupted);
             }
             let elapsed = self.monotonic_elapsed(started_monotonic_ms);
@@ -83,10 +172,7 @@ impl HostLeaseStore {
             if receipt.status == HostLeaseAcquireStatus::Acquired
                 || receipt.waited_ms >= wait_timeout_ms.unsigned_abs()
             {
-                if receipt.status == HostLeaseAcquireStatus::Deferred {
-                    self.remove_waiter(&identity.waiter_id)?;
-                }
-                return Ok(receipt);
+                return scope.deliver(receipt);
             }
             let wake_at = receipt
                 .defer
@@ -113,7 +199,7 @@ impl HostLeaseStore {
                 wait_duration = wait_duration
                     .min(schedule.until_next(self.monotonic_elapsed(started_monotonic_ms)));
             }
-            match rx.recv_timeout(wait_duration) {
+            match notifications.recv_timeout(wait_duration) {
                 Ok(Ok(_)) | Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Ok(Err(error)) => return Err(HostLeaseError::Watch(error.to_string())),
                 Err(mpsc::RecvTimeoutError::Disconnected) => {

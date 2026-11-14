@@ -6,6 +6,15 @@ use super::*;
 
 #[test]
 fn lease_acquire_yields_to_cancel_on_the_session_thread_and_retires_its_waiter() {
+    assert_cancellable_wait(false);
+}
+
+#[test]
+fn lease_cancel_finishes_while_a_registry_writer_blocks_cleanup() {
+    assert_cancellable_wait(true);
+}
+
+fn assert_cancellable_wait(block_cleanup: bool) {
     let root = TempDir::new().unwrap();
     let _env = HostLeaseRootGuard::set(root.path());
     let store = HostLeaseStore::for_root(root.path()).unwrap();
@@ -77,8 +86,20 @@ pipeline default(harness: Harness) {
                 }
             }
         }
+        let mut writer = block_cleanup.then(|| rusqlite::Connection::open(root.path().join("host-leases.sqlite")).unwrap());
+        let transaction = writer.as_mut().map(|connection| {
+            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).unwrap()
+        });
         cancel.store(true, Ordering::SeqCst);
-        assert!(execution.await.is_err(), "cancelled acquisition must not return ownership");
+        if let Some(transaction) = transaction {
+            let error = execution.await.expect_err("cancelled acquisition returned ownership");
+            assert_eq!(harn_vm::value::error_to_category(&error), harn_vm::value::ErrorCategory::Cancelled, "expected runtime cancellation, got {error:?}");
+            let pending: i64 = transaction.query_row("SELECT COUNT(*) FROM host_lease_waiters", [], |row| row.get(0)).unwrap();
+            assert_eq!(pending, 1, "the writer must still exclude cleanup");
+            transaction.commit().unwrap();
+        } else {
+            assert!(execution.await.is_err(), "cancelled acquisition must not return ownership");
+        }
         loop {
             let state = observed();
             assert_eq!(state.active.unwrap().lease_id, holder.lease_id);
