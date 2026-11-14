@@ -748,6 +748,7 @@ fn typed_stream_recovery_fires_once_before_output_and_respects_call_authority() 
                     ""
                 }
             );
+            crate::llm::rate_limit::observe_network_outcome_for_llm_call(&opts, false);
         }
         let mut required = crate::llm::api::options::base_opts("together");
         required.model = "Qwen/Qwen3.7-Max".into();
