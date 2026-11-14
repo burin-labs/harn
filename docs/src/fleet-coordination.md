@@ -166,6 +166,12 @@ acquisition. Normal returns and exceptions write an explicit typed release
 receipt; forced task cancellation, frame teardown, and VM drop invoke the same
 idempotent cleanup through guard lifetime. Acquisition waits in bounded slices
 on registry notifications rather than sleeping or parsing process tables.
+These waits leave the session thread free to receive cancellation. An interrupted
+acquisition removes its queue entry and releases any grant that raced the stop.
+If another registry writer holds the database, cleanup continues on the blocking
+worker after the VM returns cancellation; it retires the entry when the lock clears.
+Transient registry lock failures retry without abandoning a raced grant, including
+grants without an expiry.
 
 When deterministic discovery finishes after acquisition, replace the active
 lease metadata without introducing a sidecar authority or releasing ownership:

@@ -11,6 +11,7 @@ mod db;
 mod execution;
 mod schema;
 mod status;
+mod wait;
 
 pub use status::{HostLeaseOverview, HostLeasePendingRequest, HostLeaseState};
 
@@ -22,16 +23,15 @@ pub use execution::{
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 use std::time::Duration;
 
-use notify::{RecursiveMode, Watcher};
 use rusqlite::{params, ErrorCode, OptionalExtension, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
 use uuid::Uuid;
 
-use self::admission::{WaitProgressSchedule, WaiterIdentity};
+use self::admission::WaiterIdentity;
 use self::schema::{
     add_domain_key, add_execution_context_column, create_current_lease_table, create_waiter_table,
     lease_table_layout, migrate_legacy_lease_table, LeaseTableLayout,
@@ -61,6 +61,9 @@ pub const DEFAULT_HOST_LEASE_DOMAIN: &str = "default";
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum HostLeaseError {
+    /// The acquiring call was interrupted before ownership was delivered.
+    #[error("host lease acquisition interrupted")]
+    Interrupted,
     /// The caller supplied an invalid or unsafe contract value.
     #[error("invalid host lease request: {0}")]
     InvalidRequest(String),
@@ -709,7 +712,26 @@ impl HostLeaseStore {
             requested_at_ms: started_at_ms,
             recoverable: false,
         };
-        self.acquire_wait_ordered(request, wait_timeout, identity, None)
+        self.acquire_wait_ordered(request, wait_timeout, identity, None, None)
+    }
+
+    /// Acquire for a cancellable host call, retiring its queue entry and any
+    /// grant that races cancellation before returning ownership.
+    pub(crate) fn acquire_wait_interruptible(
+        &self,
+        request: HostLeaseRequest,
+        wait_timeout: Duration,
+        interrupted: &dyn Fn() -> bool,
+    ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
+        let identity = WaiterIdentity {
+            waiter_id: Uuid::now_v7().to_string(),
+            requested_at_ms: self.now_ms()?,
+            recoverable: false,
+        };
+        if wait_timeout.is_zero() {
+            return self.acquire_once_interruptible(request, identity, interrupted);
+        }
+        self.acquire_wait_ordered(request, wait_timeout, identity, None, Some(interrupted))
     }
 
     /// Resume the durable FIFO position owned by a supervised run receipt.
@@ -773,99 +795,8 @@ impl HostLeaseStore {
                 recoverable: true,
             },
             on_progress,
+            None,
         )
-    }
-
-    fn acquire_wait_ordered(
-        &self,
-        request: HostLeaseRequest,
-        wait_timeout: Duration,
-        identity: WaiterIdentity,
-        mut on_progress: Option<&mut dyn FnMut(&HostLeaseAcquireReceipt)>,
-    ) -> Result<HostLeaseAcquireReceipt, HostLeaseError> {
-        // The deadline is decided on the injected clock's monotonic counter.
-        // The watcher's `recv_timeout` below only bounds how long one blocking
-        // wait lasts; a wake that arrives late or never merely re-attempts.
-        let started_at_ms = self.now_ms()?;
-        let started_monotonic_ms = self.clock.monotonic_ms();
-        let wait_timeout_ms = duration_ms_i64(wait_timeout);
-        let deadline_monotonic_ms = started_monotonic_ms
-            .checked_add(wait_timeout_ms)
-            .ok_or_else(|| {
-                HostLeaseError::InvalidRequest(
-                    "wait timeout exceeds the monotonic clock".to_string(),
-                )
-            })?;
-        let deadline_at_ms = started_at_ms.saturating_add(wait_timeout_ms);
-        let (tx, rx) = mpsc::channel();
-        let mut watcher = notify::recommended_watcher(move |event| {
-            let _ = tx.send(event);
-        })
-        .map_err(|error| HostLeaseError::Watch(error.to_string()))?;
-        watcher
-            .watch(&self.wake_path, RecursiveMode::NonRecursive)
-            .map_err(|error| HostLeaseError::Watch(error.to_string()))?;
-        let mut progress_schedule = on_progress.as_ref().map(|_| WaitProgressSchedule::new());
-
-        loop {
-            let receipt = self.try_acquire_once(
-                request.clone(),
-                Some(started_monotonic_ms),
-                Some(deadline_at_ms),
-                &identity,
-            )?;
-            let elapsed = self.monotonic_elapsed(started_monotonic_ms);
-            if receipt.status == HostLeaseAcquireStatus::Deferred
-                && progress_schedule
-                    .as_mut()
-                    .is_some_and(|schedule| schedule.should_report(elapsed))
-            {
-                if let Some(observer) = on_progress.as_deref_mut() {
-                    observer(&receipt);
-                }
-            }
-            // A progress callback can outlive this admission snapshot. Decide
-            // expiry from the receipt, so a later clock read cannot return it stale.
-            if receipt.status == HostLeaseAcquireStatus::Acquired
-                || receipt.waited_ms >= wait_timeout_ms.unsigned_abs()
-            {
-                if receipt.status == HostLeaseAcquireStatus::Deferred {
-                    self.remove_waiter(&identity.waiter_id)?;
-                }
-                return Ok(receipt);
-            }
-            let wake_at = receipt
-                .defer
-                .as_ref()
-                .and_then(|defer| defer.next_wake_at_ms)
-                .map(|wake| wake.min(deadline_at_ms))
-                .unwrap_or(deadline_at_ms);
-            let wake_duration =
-                Duration::from_millis(wake_at.saturating_sub(receipt.observed_at_ms).max(1) as u64);
-            let remaining = Duration::from_millis(
-                deadline_monotonic_ms
-                    .saturating_sub(self.clock.monotonic_ms())
-                    .max(0) as u64,
-            );
-            if remaining.is_zero() {
-                // Re-observe expiry and remove the waiter through the terminal path.
-                continue;
-            }
-            let mut wait_duration = wake_duration.min(remaining);
-            if let Some(schedule) = progress_schedule {
-                wait_duration = wait_duration
-                    .min(schedule.until_next(self.monotonic_elapsed(started_monotonic_ms)));
-            }
-            match rx.recv_timeout(wait_duration) {
-                Ok(Ok(_)) | Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Ok(Err(error)) => return Err(HostLeaseError::Watch(error.to_string())),
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err(HostLeaseError::Watch(
-                        "host lease watcher disconnected".to_string(),
-                    ));
-                }
-            }
-        }
     }
 
     /// Inspect one host, recovering expired or dead-owner state transactionally.
