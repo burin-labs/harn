@@ -119,7 +119,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     #[allow(clippy::await_holding_lock)]
-    async fn zero_chunk_sse_transport_failure_is_typed_not_success() {
+    async fn single_request_probe_retains_zero_chunk_sse_transport_failure() {
         let _guard = crate::llm::env_guard();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind SSE stub");
         let addr = listener.local_addr().expect("SSE stub address");
@@ -154,6 +154,7 @@ mod tests {
             provider: "fixture".to_string(),
             model: "fixture-model".to_string(),
             messages: vec![serde_json::json!({"role": "user", "content": "test"})],
+            provider_contract_probe: Some(crate::llm::capabilities::PortableOption::Temperature),
             ..Default::default()
         };
         let (tx, mut rx) = tokio::sync::mpsc::channel(4);
