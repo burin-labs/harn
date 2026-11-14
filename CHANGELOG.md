@@ -9,6 +9,82 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.197
+
+### Breaking
+
+- **`AgentTurnPhase` gains an `Idle` variant (#11284).** A daemon agent loop
+  reports `Idle` when it finishes a step and waits for wake input. Because the
+  variant sits between `Generating` and `Verifying`, the numeric discriminants
+  of `Verifying` and `Terminal` each move up by one.
+
+  Migration: add an `AgentTurnPhase::Idle` arm to every exhaustive `match` on
+  `AgentTurnPhase`, and stop relying on the enum's numeric cast values.
+
+  ```rust
+  match phase {
+      AgentTurnPhase::Generating => show_working(),
+      AgentTurnPhase::Idle => show_waiting(),
+      AgentTurnPhase::Verifying { .. } => show_checking(),
+      AgentTurnPhase::Terminal { .. } => show_done(),
+  }
+  ```
+
+### Added
+
+- Add `std/decision` for typed semantic dispatch with route-specific thresholds,
+  separate unmatched and uncertain outcomes, and existing evaluation receipts and
+  replay. Include a synthetic HTTP example mixing lookup, review preparation,
+  and a bounded investigation agent.
+- Merged pull requests labeled `release-needed` now request a fresh release candidate and promote it only after the existing
+  release checks pass. Failed or stalled requests report pending and failing jobs on the pull request and in a reusable
+  `release-blocked` issue.
+
+### Changed
+
+- Clarify DeepInfra Ling 3.1 Flash's confirmed November 15 retirement time without changing route
+  selection or historical pricing.
+
+### Fixed
+
+- Process command receipts retain the group ID established during spawn
+  even when a fast command exits before the parent reads its metadata.
+- `harn check` rejects dict destructuring of known struct values, including typed
+  list elements, and suggests field access before the program can fail at runtime.
+- A tool path argument written from the home directory (`~` or `~/notes/todo.md`) now names that file
+  in the home directory. Before, it was read as a folder literally named `~` inside the workspace, so
+  reads reported the file missing and permission policy judged the wrong path. Tool dispatch and
+  workspace path classification share one reading of the spelling, so the policy and the tool always
+  see the same absolute path.
+- Preserve a server launcher's configured secret store across `serve site`,
+  file-backed MCP, and A2A dispatch workers, including credentials received through
+  `--parent-secret-stdin`.
+- An idle daemon agent loop now reports a `turn_phase_changed` event with phase `idle` once per idle
+  stretch, so a client can show it is waiting rather than working. A steer now wakes an idle daemon on
+  its own: the idle wait is the end of a step, where a steer is delivered, but the wait took only
+  `interrupt_immediate` input, so a steer stayed queued until a reminder or other input arrived.
+- A daemon agent loop now publishes the reply it goes idle on. A toolless reply was published only
+  when its session finalized, and a daemon idles between replies instead of finalizing, so ACP clients
+  saw no `agent_message_chunk` for any of a daemon's replies until the session ended. A reply that
+  wake input supersedes before the daemon idles stays unpublished.
+- Harn's binary freshness check no longer rejects a checkout's own Git `HEAD` as a conflicting input
+  when the Cargo build also watches it for the embedded source revision. The Git `HEAD` authority,
+  which already covers the exact file bytes, now governs that path.
+- OpenAI agent and streaming examples use GPT-5.6 Terra, the documented replacement for GPT-5 Mini
+  before its December 11, 2026 shutdown.
+- Release requests wait within their existing deadline when a newly dispatched
+  workflow has not reported its run purpose yet. Unreported purpose stays pending;
+  warm builds, mismatched promotion sources, and completed runs without purpose
+  remain refused.
+
+### Security
+
+- On macOS, a confined command behind the managed network proxy can no longer bypass it. Its profile now admits only
+  the proxy's TCP/IPv4 ports, and the proxy holds those ports at every local IPv4 address while it runs, so another
+  service on the same port numbers over IPv6, over UDP, or at the host's LAN address is out of reach. A loopback grant
+  behind the proxy still lets the command listen, but it connects only through the proxy, its own local servers
+  included. A spawn naming proxy ports that no live proxy in the process holds is refused by name.
+
 ## v0.10.196
 
 ### Fixed
