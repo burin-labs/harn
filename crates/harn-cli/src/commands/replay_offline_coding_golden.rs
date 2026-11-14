@@ -1,3 +1,7 @@
+//! Authored verifier receipts shared by exact replay test targets.
+
+#![cfg(test)]
+
 use serde_json::{json, Value};
 
 pub fn completed_verifier_result() -> Value {

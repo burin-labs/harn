@@ -64,7 +64,7 @@ fn fixture() -> OfflineCodingReplayFixture {
     }
 }
 
-#[path = "../../tests/test_util/offline_replay_golden.rs"]
+#[path = "replay_offline_coding_golden.rs"]
 mod verifier_golden;
 
 use verifier_golden::completed_verifier_result;

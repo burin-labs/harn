@@ -6,7 +6,7 @@ use serde_json::json;
 use crate::test_util::cli::stdout_json;
 use crate::test_util::process::harn_e2e_command;
 
-#[path = "../test_util/offline_replay_golden.rs"]
+#[path = "../../src/commands/replay_offline_coding_golden.rs"]
 mod verifier_golden;
 
 #[test]
