@@ -48,15 +48,10 @@ pub(super) fn grant_host_fallback(
     filesystem: &mut FilesystemProfile,
     namespaced: bool,
 ) -> Result<(), VmError> {
-    if namespaced || !Path::new(SHARED_MEMORY_DIR).is_dir() {
+    let Some(root) = host_fallback_root().filter(|_| !namespaced) else {
         return Ok(());
-    }
-    push_rule(
-        filesystem,
-        PathBuf::from(SHARED_MEMORY_DIR),
-        SHARED_MEMORY_ACCESS,
-        true,
-    )?;
+    };
+    push_rule(filesystem, root, SHARED_MEMORY_ACCESS, true)?;
     static REPORTED: std::sync::Once = std::sync::Once::new();
     REPORTED.call_once(|| {
         crate::events::log_debug(
