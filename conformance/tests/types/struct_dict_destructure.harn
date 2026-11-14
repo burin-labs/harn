@@ -1,0 +1,13 @@
+struct Point {
+  x: int
+  y: int
+}
+
+fn show(p: Point) -> string {
+  const {x = 0, y = 0} = p
+  return "${x},${y}"
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(show(Point {x: 1, y: 2}))
+}

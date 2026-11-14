@@ -19,6 +19,7 @@ mod builtin_methods;
 mod callable_attributes;
 mod calls_and_generics;
 mod coalesce;
+mod destructuring;
 mod enum_construct;
 mod exhaustiveness;
 mod flow_predicates;

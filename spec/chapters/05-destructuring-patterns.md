@@ -121,6 +121,10 @@ still only introduces `value`.
 
 ### Type errors
 
+Dict patterns cannot destructure structs. When the source has a known struct
+type, including an element of a typed list, `harn check` rejects the pattern
+with `HARN-TYP-024`. Read struct fields directly, for example `p.x`.
+
 Destructuring a non-dict value with a dict pattern or a non-list value
 with a list pattern produces a runtime error. For example,
 `const {a} = "hello"` throws `"dict destructuring requires a dict value"`.

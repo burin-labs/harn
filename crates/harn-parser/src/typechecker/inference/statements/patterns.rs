@@ -1,6 +1,50 @@
 use super::*;
 
 impl TypeChecker {
+    pub(super) fn check_pattern_source(
+        &mut self,
+        pattern: &BindingPattern,
+        source_ty: &InferredType,
+        source: Option<&SNode>,
+        span: Span,
+        scope: &TypeScope,
+    ) {
+        let BindingPattern::Dict(fields) = pattern else {
+            return;
+        };
+        let Some(ty) = source_ty else {
+            return;
+        };
+        let resolved = self.resolve_alias(ty, scope);
+        let name = match &resolved {
+            TypeExpr::Named(name) | TypeExpr::Applied { name, .. }
+                if scope.get_struct(name).is_some() =>
+            {
+                name
+            }
+            _ => return,
+        };
+        let receiver = match source.map(|source| &source.node) {
+            Some(Node::Identifier(name)) => name.as_str(),
+            _ => "value",
+        };
+        let field = fields.iter().find(|field| !field.is_rest);
+        let help = field.filter(|_| source.is_some()).map_or_else(
+            || "use field access instead".to_string(),
+            |field| {
+                format!(
+                    "use field access such as `{receiver}.{}` instead",
+                    field.key
+                )
+            },
+        );
+        self.error_at(
+            Code::InvalidPatternBinding,
+            format!("dict destructuring requires a dict, got struct `{name}`; {help}"),
+            span,
+        );
+    }
+
     pub(super) fn stmt_definitely_exits(stmt: &SNode) -> bool {
         stmt_definitely_exits(stmt)
     }

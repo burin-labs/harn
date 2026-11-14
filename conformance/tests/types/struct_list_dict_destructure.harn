@@ -1,0 +1,16 @@
+struct Point {
+  x: int
+}
+
+fn total(points: list<Point>) -> int {
+  let sum = 0
+  for p in points {
+    const {x = 0} = p
+    sum = sum + x
+  }
+  return sum
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(total([Point {x: 1}]))
+}
