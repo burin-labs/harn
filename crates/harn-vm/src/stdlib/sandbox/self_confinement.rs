@@ -147,6 +147,17 @@ fn private_temp_dir() -> Result<PathBuf, VmError> {
     Ok(dir)
 }
 
+/// Remove this process's private temp dir, if it was confined.
+///
+/// Call it as the process finishes serving. Best effort: the directory lies
+/// inside the process's own write roots, so it can always be removed, and a
+/// failure leaves only the leftover this call exists to prevent.
+pub fn remove_process_temp_dir() {
+    if let Some(confinement) = CONFINEMENT.get() {
+        let _ = std::fs::remove_dir_all(&confinement.temp_dir);
+    }
+}
+
 /// This process's own confinement, if [`confine_current_process`] applied one.
 pub fn current_process_confinement() -> Option<&'static ProcessConfinement> {
     CONFINEMENT.get()
