@@ -930,6 +930,20 @@ jobs:
           archive: false
           if-no-files-found: error
           retention-days: 1
+      - name: Package stripped consumer CLI
+        run: >-
+          ./scripts/ci/rust_artifact.sh pack-consumer-cli
+          "$RUNNER_TEMP/harn-cli.tar.zst"
+          "$RUNNER_TEMP/harn-consumer-cli.tar.zst"
+          "$GITHUB_SHA"
+      - name: Upload stripped consumer CLI
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: harn-consumer-cli.tar.zst
+          path: ${{ runner.temp }}/harn-consumer-cli.tar.zst
+          archive: false
+          if-no-files-found: error
+          retention-days: 1
       # Name the commit this target was built from, for the next restore's
       # workspace crate reuse. Only a fully successful build may claim it.
       - name: Record the workspace cache source
@@ -3369,7 +3383,7 @@ jobs:
         run: |
           set -euo pipefail
           ids="$(gh api "$RUN_URL?per_page=100" --paginate --jq '.artifacts[]
-            | select(.name == "harn-cli.tar.zst" or .name == "harn-security.tar.zst" or .name == "harn-workspace-tests.tar.zst")
+            | select(.name == "harn-cli.tar.zst" or .name == "harn-consumer-cli.tar.zst" or .name == "harn-security.tar.zst" or .name == "harn-workspace-tests.tar.zst")
             | "\(.id)\t\(.name)\t\(.size_in_bytes)"')"
           deleted=0 bytes=0
           while IFS=$'\t' read -r id name size; do
