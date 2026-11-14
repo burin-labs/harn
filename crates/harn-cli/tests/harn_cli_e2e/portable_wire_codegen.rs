@@ -122,10 +122,10 @@ fn assert_payload(graph: &PreparedWireGraph, ir: &CodegenIr, expected: &Value, a
     let CodegenOutput::Value { type_id, .. } = &operation.output else {
         panic!("declared echo output")
     };
-    assert_eq!(
-        graph.decode(type_id, actual).expect("actual wire output"),
-        graph.decode(type_id, expected).expect("known golden input")
-    );
+    assert!(harn_vm::value::values_equal(
+        &graph.decode(type_id, actual).expect("actual wire output"),
+        &graph.decode(type_id, expected).expect("known golden input")
+    ));
     assert_eq!(actual["sequence"].as_i64(), Some(i64::MAX));
     assert_eq!(actual["pair"][1].as_i64(), Some(9_007_199_254_740_993));
     assert_eq!(actual["amount"], expected["amount"]);
@@ -136,7 +136,7 @@ fn assert_payload(graph: &PreparedWireGraph, ir: &CodegenIr, expected: &Value, a
 }
 
 #[test]
-fn original_harn_wire_contract_holds_across_stdio_and_generated_cli() {
+pub(crate) fn original_harn_wire_contract_holds_across_stdio_and_generated_cli() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
     fs::create_dir(root.join("source")).unwrap();
