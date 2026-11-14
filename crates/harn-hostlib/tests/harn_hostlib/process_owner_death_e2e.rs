@@ -17,6 +17,7 @@ const OWNER_DEATH_SUPERVISOR_ENV: &str = "HARN_TEST_OWNER_DEATH_SUPERVISOR";
 const OWNER_DEATH_REPORT_FD_ENV: &str = "HARN_TEST_OWNER_DEATH_REPORT_FD";
 const OWNER_DEATH_LEAK_LIVENESS_ENV: &str = "HARN_TEST_OWNER_DEATH_LEAK_LIVENESS";
 const OWNER_DEATH_STALLED_STDIN_ENV: &str = "HARN_TEST_OWNER_DEATH_STALLED_STDIN";
+const FOREGROUND_CAPTURE_ENV: &str = "HARN_TEST_FOREGROUND_OWNER_DEATH_CAPTURE";
 const CLOSED_INPUT_WORK_ENV: &str = "HARN_TEST_CLOSED_INPUT_WORK";
 
 #[test]
@@ -194,6 +195,26 @@ fn owner_death_supervisor_fixture() {
         "process_tools_e2e::owner_death_guardian_fixture",
         "--nocapture",
     ]);
+    if let Some(transport) = std::env::var_os(FOREGROUND_CAPTURE_ENV) {
+        use super::support::{dict_map, vlist_str, vm_string};
+        let executable = std::env::current_exe().unwrap();
+        let mut request = dict_map();
+        request.insert(
+            "argv".into(),
+            vlist_str(&[
+                executable.to_str().unwrap(),
+                "--exact",
+                "process_owner_death_e2e::owner_death_payload_fixture",
+                "--nocapture",
+            ]),
+        );
+        let mut capture = dict_map();
+        capture.insert("transport".into(), vm_string(transport.to_str().unwrap()));
+        request.insert("capture".into(), harn_vm::VmValue::dict(capture));
+        super::process_tools_e2e::call("hostlib_tools_run_command", request)
+            .expect("run actual foreground tool");
+        panic!("foreground payload returned before owner death");
+    }
     let mut input_owner = None;
     let (worker_pid, worker_pgid) = if std::env::var_os(OWNER_DEATH_STALLED_STDIN_ENV).is_some() {
         use harn_hostlib::process::{
@@ -542,6 +563,99 @@ fn assert_managed_background_group_dies_with_supervisor(
     cleanup
         .groups
         .retain(|pgid| leak_liveness_pipe && *pgid == fields["holder"]);
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn foreground_pipe_tree_dies_with_its_owner() {
+    assert_foreground_tree_dies_with_its_owner("pipe");
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[test]
+fn foreground_file_tree_dies_with_its_owner() {
+    assert_foreground_tree_dies_with_its_owner("file");
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn assert_foreground_tree_dies_with_its_owner(transport: &str) {
+    let _serial = lock_env();
+    let mut report_pipe = [0_i32; 2];
+    assert_eq!(unsafe { libc::pipe(report_pipe.as_mut_ptr()) }, 0);
+    let read_fd = report_pipe[0];
+    let write_fd = report_pipe[1];
+    let read_flags = unsafe { libc::fcntl(read_fd, libc::F_GETFD) };
+    assert!(read_flags >= 0);
+    assert_eq!(
+        unsafe { libc::fcntl(read_fd, libc::F_SETFD, read_flags | libc::FD_CLOEXEC) },
+        0
+    );
+    let executable = std::env::current_exe().unwrap();
+    let mut supervisor = std::process::Command::new(&executable)
+        .args([
+            "--exact",
+            "process_owner_death_e2e::owner_death_supervisor_fixture",
+            "--nocapture",
+        ])
+        .env(OWNER_DEATH_SUPERVISOR_ENV, "1")
+        .env(OWNER_DEATH_REPORT_FD_ENV, write_fd.to_string())
+        .env(FOREGROUND_CAPTURE_ENV, transport)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .process_group(0)
+        .spawn()
+        .expect("spawn real foreground command owner");
+    unsafe { libc::close(write_fd) };
+    let mut cleanup = ProcessGroupCleanup {
+        groups: vec![supervisor.id() as i32],
+    };
+    let mut report_file = unsafe { std::fs::File::from_raw_fd(read_fd) };
+    let mut readiness = libc::pollfd {
+        fd: read_fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    assert_eq!(unsafe { libc::poll(&raw mut readiness, 1, 10_000) }, 1);
+    let mut report = String::new();
+    std::io::BufReader::new(&mut report_file)
+        .read_line(&mut report)
+        .expect("read actual foreground payload handshake");
+    let fields = parse_pid_fields(&report);
+    let payload = fields["payload"];
+    let grandchild = fields["grandchild"];
+    assert!(payload > 0 && grandchild > 0);
+    assert_ne!(payload, grandchild);
+    assert_ne!(fields["pgid"], fields["grandchild_pgid"]);
+    cleanup
+        .groups
+        .extend([fields["pgid"], fields["grandchild_pgid"]]);
+    assert_eq!(unsafe { libc::kill(payload, 0) }, 0);
+    assert_eq!(unsafe { libc::kill(grandchild, 0) }, 0);
+
+    let mut sibling = std::process::Command::new(executable)
+        .args([
+            "--exact",
+            "process_owner_death_e2e::owner_death_grandchild_fixture",
+            "--nocapture",
+        ])
+        .env(OWNER_DEATH_REPORT_FD_ENV, "-1")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .process_group(0)
+        .spawn()
+        .expect("spawn unrelated live sibling");
+    cleanup.groups.push(sibling.id() as i32);
+    assert!(sibling.try_wait().unwrap().is_none());
+    supervisor.kill().expect("SIGKILL only the command owner");
+    assert!(!supervisor.wait().unwrap().success());
+    wait_for_native_exit(payload);
+    wait_for_native_exit(grandchild);
+    assert!(
+        sibling.try_wait().unwrap().is_none(),
+        "unrelated sibling was killed"
+    );
+    sibling.kill().unwrap();
+    sibling.wait().unwrap();
 }
 
 fn parse_pid_fields(line: &str) -> std::collections::BTreeMap<&str, i32> {

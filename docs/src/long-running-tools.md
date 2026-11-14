@@ -63,6 +63,14 @@ from scope cancellation and deadlines. They are owned by the handle store
 and die only through `tools.cancel_handle` or agent-session-end cleanup,
 as described below.
 
+On Unix, native command tools also use an owner-death guardian. Their process
+trees, including descendants that create another process group, end when the
+owning Harn process is killed or the foreground command completes. Pipe and
+file output capture preserve the command's output and exit status. Use an
+explicit background handle for work that must continue after a command returns.
+For a contained command, `pid` and `process_group_id` identify its guardian;
+a cancellation receipt's `process_cleanup.root_pid` identifies the payload.
+
 ## Handle envelope
 
 A long-running call returns immediately with a handle envelope:

@@ -747,7 +747,10 @@ fn real_run_command_file_capture_kills_child_when_timeout_elapses() {
     assert_eq!(require_str(&resp, "signal"), "SIGKILL");
     let pid = require_int(&resp, "pid");
     let cleanup = require_nested_dict(&resp, "process_cleanup");
-    assert_eq!(require_int(&cleanup, "root_pid"), pid);
+    let payload_pid = require_int(&cleanup, "root_pid");
+    assert!(payload_pid > 0);
+    assert_process_gone(payload_pid, "timed-out file-capture payload");
+    assert_process_gone(pid, "timed-out file-capture guardian");
     let pgid = require_int(&resp, "process_group_id");
     assert_process_gone(
         -pgid,
@@ -1354,9 +1357,9 @@ print("parent-exit", flush=True)
         .parse::<i64>()
         .expect("numeric pipe holder pid");
     assert_process_gone(parent_pid, "direct parent after capture returns");
-    assert!(
-        unix_process_exists(descendant_pid),
-        "file capture must return while escaped pipe holder {descendant_pid} is still alive"
+    assert_process_gone(
+        descendant_pid,
+        "escaped descendant after file capture returns",
     );
 }
 

@@ -6,7 +6,7 @@
 
 #![cfg(unix)]
 
-use harn_hostlib::process::{ExitStatus, MockProcessConfig, OutputCapture};
+use harn_hostlib::process::{ExitStatus, MockProcessConfig, OutputCapture, OwnerDeathPolicy};
 use harn_hostlib::HostlibError;
 use harn_vm::value::VmDictExt as _;
 use harn_vm::VmValue;
@@ -59,6 +59,7 @@ fn run_completed_capture(
     let resp = require_dict(resp_value);
     let captured = spawner.captured();
     assert_eq!(captured.len(), 1);
+    assert_eq!(captured[0].owner_death, OwnerDeathPolicy::KillContainment);
     (resp, captured[0].output_capture.clone())
 }
 
