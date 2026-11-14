@@ -197,8 +197,21 @@ thread_local! {
 /// Harn home nor a user home has none: its fallback is the temp dir, where
 /// [`create_spawn_dir`] always refuses, so no credential can land there, and
 /// denying it would refuse every hardened spawn whose workspace holds that dir.
+///
+/// The path is canonical, like every per-spawn directory [`create_spawn_dir`]
+/// makes: the sandbox matches resolved paths, so a Harn home reached through a
+/// link would otherwise leave the denial naming a path nothing resolves to.
 pub(crate) fn denied_read_root() -> Option<PathBuf> {
-    crate::mcp_oauth::configured_harn_home_dir().map(|home| home.join("grant-spawns"))
+    crate::mcp_oauth::configured_harn_home_dir().map(|home| canonical_spawns_root(&home))
+}
+
+/// `home`'s per-spawn root with every link resolved, before or after the root
+/// itself exists.
+fn canonical_spawns_root(home: &Path) -> PathBuf {
+    let root = home.join("grant-spawns");
+    std::fs::canonicalize(&root)
+        .or_else(|_| std::fs::canonicalize(home).map(|home| home.join("grant-spawns")))
+        .unwrap_or(root)
 }
 
 /// The one per-spawn directory the spawn this thread is launching may read:
@@ -456,5 +469,28 @@ mod tests {
         std::os::unix::fs::symlink(&planted, linked.join("tool")).unwrap();
         let entries = trusted_path_entries(linked.to_str().unwrap(), &untrusted);
         assert_eq!(trusted_program("tool", &entries, &untrusted), None);
+    }
+
+    /// A Harn home reached through a link: the denial must name the resolved
+    /// root the per-spawn directories live under, or Seatbelt never matches it
+    /// and every confined sibling may read them and ask their sockets.
+    #[test]
+    fn a_linked_harn_home_denies_the_resolved_spawn_root() {
+        let base = tempfile::tempdir().unwrap();
+        let real = base.path().join("real-home");
+        std::fs::create_dir(&real).unwrap();
+        let linked = base.path().join("linked-home");
+        std::os::unix::fs::symlink(&real, &linked).unwrap();
+        let resolved = std::fs::canonicalize(&real).unwrap().join("grant-spawns");
+        assert_ne!(linked.join("grant-spawns"), resolved);
+        // Before the root exists, and after a spawn directory is made in it.
+        assert_eq!(canonical_spawns_root(&linked), resolved);
+        std::fs::create_dir(linked.join("grant-spawns")).unwrap();
+        let leaf = std::fs::canonicalize(linked.join("grant-spawns"))
+            .unwrap()
+            .join("1-0-0");
+        std::fs::create_dir(&leaf).unwrap();
+        assert_eq!(canonical_spawns_root(&linked), resolved);
+        assert!(leaf.starts_with(canonical_spawns_root(&linked)));
     }
 }
