@@ -266,11 +266,21 @@ impl std::error::Error for RuntimeInitError {}
 /// an operator who set `HARN_CACHE_DIR` gets a hard failure rather than a
 /// silent downgrade to no caching.
 pub fn initialize_runtime() -> Result<Option<&'static str>, RuntimeInitError> {
-    harn_modules::ensure_stdlib_installed().map_err(RuntimeInitError::StdlibCatalog)?;
-    environment_registry::validate_startup_environment().map_err(RuntimeInitError::Environment)?;
-    let warning = bytecode_cache::check_cache_config().map_err(RuntimeInitError::CacheDir)?;
+    let warning = validate_runtime_configuration()?;
     initialize_runtime_assets();
     Ok(warning)
+}
+
+/// Validate startup configuration without warming execution assets.
+///
+/// Command-line hosts can call this before parsing help or version requests,
+/// then call [`initialize_runtime_assets`] before execution. Standard library,
+/// environment, and cache refusals match [`initialize_runtime`], including its
+/// optional cache warning.
+pub fn validate_runtime_configuration() -> Result<Option<&'static str>, RuntimeInitError> {
+    harn_modules::ensure_stdlib_installed().map_err(RuntimeInitError::StdlibCatalog)?;
+    environment_registry::validate_startup_environment().map_err(RuntimeInitError::Environment)?;
+    bytecode_cache::check_cache_config().map_err(RuntimeInitError::CacheDir)
 }
 
 /// Crate-wide deterministic clock mock used by stdlib time builtins, the

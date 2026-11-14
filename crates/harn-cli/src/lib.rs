@@ -128,7 +128,6 @@ pub(crate) fn install_default_hostlib(_vm: &mut harn_vm::Vm) {}
 /// drives the async dispatcher in `async_main`.
 pub fn run() {
     install_broken_pipe_panic_hook();
-    harn_vm::initialize_runtime_assets();
     // Pre-runtime commands stay on the main thread: the namespace helper must
     // run while the process still has exactly one thread.
     let raw_args = bootstrap::args_after_pre_runtime_command();
@@ -153,9 +152,10 @@ pub fn run() {
         .spawn(move || {
             // Windows' 1 MiB main stack cannot materialize the argument tree.
             // Linux parses before this thread so Landlock covers every child.
-            ensure_builtin_signatures_installed();
             #[cfg(not(target_os = "linux"))]
             let cli = entrypoint::parse_cli(raw_args);
+            harn_vm::initialize_runtime_assets();
+            ensure_builtin_signatures_installed();
             let runtime_mode = cli_runtime_mode(&cli);
             let runtime = build_cli_runtime(runtime_mode);
             runtime.block_on(async_main(cli, runtime_mode));
