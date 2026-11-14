@@ -58,10 +58,10 @@ fn keygen(dir: &Path, name: &str) -> PathBuf {
     key
 }
 
-/// Run an OpenSSH client against `socket`, killing it after ten seconds so a
-/// filter that never answers fails the test instead of hanging it.
+/// Run an OpenSSH client against `socket`. A filter that never answers fails
+/// the test at the shared hang ceiling instead of hanging it.
 fn with_agent(socket: &Path, program: &str, args: &[&str]) -> Output {
-    let mut child = Command::new(program)
+    let child = Command::new(program)
         .args(args)
         .env("SSH_AUTH_SOCK", socket)
         .stdin(Stdio::null())
@@ -69,15 +69,12 @@ fn with_agent(socket: &Path, program: &str, args: &[&str]) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .expect("run OpenSSH client");
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while child.try_wait().expect("poll client").is_none() {
-        if Instant::now() > deadline {
-            let _ = child.kill();
-            panic!("{program} {args:?} got no answer from {}", socket.display());
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    child.wait_with_output().expect("client output")
+    let (answered, answer) = std::sync::mpsc::channel();
+    crate::runtime_stack::spawn(move || {
+        let _ = answered.send(child.wait_with_output());
+    });
+    harn_clock::test_support::recv_within(&format!("{program} {args:?} answered"), &answer)
+        .expect("client output")
 }
 
 fn soon() -> Instant {
@@ -287,9 +284,9 @@ fn served() -> Served {
 }
 
 /// One client that pipelines requests without reading a reply, and one that
-/// trickles a request a byte at a time, each hold only their own connection:
-/// another client is answered while both stall, and dropping the filter
-/// returns at once instead of waiting on them.
+/// trickles a request a byte at a time and never finishes it, each hold only
+/// their own connection: another client is answered after every trickled
+/// byte, and dropping the filter returns at once instead of waiting on them.
 #[test]
 fn a_stalled_client_neither_blocks_another_nor_holds_teardown() {
     let Served {
@@ -299,11 +296,19 @@ fn a_stalled_client_neither_blocks_another_nor_holds_teardown() {
         filter,
     } = served();
     let socket = filter.socket().to_path_buf();
+    let lists_the_key = |when: &str| {
+        let listed = with_agent(&socket, "ssh-add", &["-L"]);
+        assert_eq!(
+            String::from_utf8_lossy(&listed.stdout).trim(),
+            public(&signing).trim(),
+            "{when}: another client went unanswered: {listed:?}"
+        );
+    };
 
     // Unknown requests are answered locally, so the replies this client never
     // reads fill its socket and leave the filter blocked writing to it.
     let mut flooding = UnixStream::connect(&socket).expect("connect");
-    let flood = std::thread::spawn(move || {
+    let flood = crate::runtime_stack::spawn(move || {
         let request = [0, 0, 0, 1, 99];
         let mut sent = 0usize;
         while flooding.write_all(&request).is_ok() {
@@ -311,27 +316,12 @@ fn a_stalled_client_neither_blocks_another_nor_holds_teardown() {
         }
         sent
     });
+    // A request header, then a body byte that never comes.
     let mut trickling = UnixStream::connect(&socket).expect("connect");
-    let stop_trickle = Arc::new(AtomicBool::new(false));
-    let trickle = {
-        let stop = Arc::clone(&stop_trickle);
-        std::thread::spawn(move || {
-            for byte in [0u8, 0, 0, 1, REQUEST_IDENTITIES].iter().cycle() {
-                if stop.load(Ordering::SeqCst) || trickling.write_all(&[*byte]).is_err() {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(100));
-            }
-        })
-    };
-    std::thread::sleep(Duration::from_millis(500));
-
-    let listed = with_agent(&socket, "ssh-add", &["-L"]);
-    assert_eq!(
-        String::from_utf8_lossy(&listed.stdout).trim(),
-        public(&signing).trim(),
-        "a second client went unanswered: {listed:?}"
-    );
+    for (index, byte) in [0u8, 0, 0, 1].into_iter().enumerate() {
+        trickling.write_all(&[byte]).expect("trickle");
+        lists_the_key(&format!("after trickled byte {index}"));
+    }
 
     let started = Instant::now();
     drop(filter);
@@ -341,11 +331,12 @@ fn a_stalled_client_neither_blocks_another_nor_holds_teardown() {
         "dropping the filter waited {teardown:?} on stalled clients"
     );
     assert!(!socket.exists(), "the socket outlived the filter");
-    // The shutdown ends the flooding client's writes too.
+    // The shutdown ends the flooding client's writes and the trickle's
+    // connection.
     let sent = flood.join().expect("flood");
     assert!(sent > 0, "the flooding client never sent a request");
-    stop_trickle.store(true, Ordering::SeqCst);
-    trickle.join().expect("trickle");
+    let mut rest = Vec::new();
+    assert_eq!(trickling.read_to_end(&mut rest).expect("closed"), 0);
 }
 
 #[test]

@@ -627,6 +627,9 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   // Bubblewrap setup waits on real OS descendants; its monotonic deadline
   // bounds inherited pipes through the existing subprocess interrupt owner.
   "crates/harn-vm/src/stdlib/sandbox/linux_bwrap_probe.rs",
+  // The signing filter's per-connection deadline bounds real socket reads and
+  // writes from a confined client; OS socket timeouts run on real time.
+  "crates/harn-vm/src/stdlib/sandbox/signing_agent.rs",
   "crates/harn-vm/src/llm/api/partial_tool_args.rs",
   "crates/harn-vm/src/llm/api/transport.rs",
   "crates/harn-vm/src/llm/autonomy_budget.rs",
