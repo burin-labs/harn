@@ -8,6 +8,7 @@ use harn_clock::PausedClock;
 use rusqlite::Connection;
 use tempfile::TempDir;
 
+use super::admission::WaitProgressSchedule;
 use super::*;
 
 #[path = "tests/status.rs"]
