@@ -13,7 +13,7 @@ impl TypeChecker {
         let inferred = self.infer_type(value, scope);
         self.record_predicate_binding(pattern, inferred.as_ref(), span, scope);
         let BindingPattern::Identifier(name) = pattern else {
-            self.check_pattern_source(pattern, &inferred, value, span, scope);
+            self.check_pattern_source(pattern, &inferred, Some(value), span, scope);
             self.check_pattern_defaults(pattern, scope);
             self.define_pattern_vars_typed(pattern, &inferred, scope, false);
             return;

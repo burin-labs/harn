@@ -5,7 +5,7 @@ impl TypeChecker {
         &mut self,
         pattern: &BindingPattern,
         source_ty: &InferredType,
-        source: &SNode,
+        source: Option<&SNode>,
         span: Span,
         scope: &TypeScope,
     ) {
@@ -24,12 +24,12 @@ impl TypeChecker {
             }
             _ => return,
         };
-        let receiver = match &source.node {
-            Node::Identifier(name) => name.as_str(),
+        let receiver = match source.map(|source| &source.node) {
+            Some(Node::Identifier(name)) => name.as_str(),
             _ => "value",
         };
         let field = fields.iter().find(|field| !field.is_rest);
-        let help = field.map_or_else(
+        let help = field.filter(|_| source.is_some()).map_or_else(
             || "use field access instead".to_string(),
             |field| {
                 format!(

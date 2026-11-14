@@ -27,6 +27,8 @@ fn dict_patterns_reject_struct_values(#[case] binding: &str) {
     );
     if !binding.starts_with("for {x") {
         assert!(diagnostic.message.contains("`p.x`"), "{diagnostic:?}");
+    } else {
+        assert!(!diagnostic.message.contains("points.x"), "{diagnostic:?}");
     }
 }
 
