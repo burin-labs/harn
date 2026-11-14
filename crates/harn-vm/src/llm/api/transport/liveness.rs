@@ -178,18 +178,9 @@ impl StreamLiveness {
                     Ok(Some(item))
                 }
                 Ok(None) => Ok(None),
-                Err(error) => {
-                    let timed_out = error.kind() == std::io::ErrorKind::TimedOut;
-                    Err(self.failure(
-                        if timed_out {
-                            ProviderStreamFailureReason::Deadline
-                        } else {
-                            ProviderStreamFailureReason::Read
-                        },
-                        timed_out.then_some(ProviderStreamDeadline::Total),
-                        crate::egress::redact_diagnostic_text(&error.to_string()),
-                    ))
-                },
+                Err(error) => Err(stream_read_failure(
+                    &self.provider, self.phase(), self.partial_output, &error,
+                )),
             },
             _ = clock.sleep(wait) => Err(self.failure(
                 ProviderStreamFailureReason::Deadline,
@@ -218,6 +209,27 @@ impl StreamLiveness {
             detail,
         }))
     }
+}
+
+pub(crate) fn stream_read_failure(
+    provider: &str,
+    phase: ProviderStreamPhase,
+    partial: bool,
+    error: &std::io::Error,
+) -> VmError {
+    let timed_out = error.kind() == std::io::ErrorKind::TimedOut;
+    VmError::ProviderStreamFailure(Box::new(ProviderStreamFailure {
+        provider: provider.to_string(),
+        phase,
+        reason: if timed_out {
+            ProviderStreamFailureReason::Deadline
+        } else {
+            ProviderStreamFailureReason::Read
+        },
+        deadline: timed_out.then_some(ProviderStreamDeadline::Total),
+        partial,
+        detail: crate::egress::redact_diagnostic_text(&error.to_string()),
+    }))
 }
 
 /// Build the typed failure for a provider stream that ended before its
