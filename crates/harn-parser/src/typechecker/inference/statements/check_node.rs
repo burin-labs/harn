@@ -90,6 +90,7 @@ impl TypeChecker {
                         }
                     }
                 } else {
+                    self.check_pattern_source(pattern, &inferred, value, span, scope);
                     self.check_pattern_defaults(pattern, scope);
                     self.define_pattern_vars_typed(pattern, &inferred, scope, true);
                 }
@@ -344,6 +345,7 @@ impl TypeChecker {
                     let elem_source = iter_type
                         .as_ref()
                         .and_then(|ty| self.iterable_item_type(ty, scope));
+                    self.check_pattern_source(pattern, &elem_source, iterable, span, scope);
                     self.check_pattern_defaults(pattern, &mut loop_scope);
                     self.define_pattern_vars_typed(pattern, &elem_source, &mut loop_scope, false);
                 }

@@ -1,0 +1,1 @@
+dict destructuring requires a dict, got struct `Point`; use field access such as `p.x` instead
