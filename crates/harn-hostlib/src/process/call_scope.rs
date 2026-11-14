@@ -12,6 +12,7 @@ use super::ProcessHandle;
 pub(crate) struct CallProcessScope {
     cancel: Arc<AtomicBool>,
     parent_cancel: Option<Arc<AtomicBool>>,
+    execution_cancel: Option<Arc<AtomicBool>>,
     launching: Arc<Mutex<()>>,
 }
 
@@ -20,8 +21,14 @@ impl CallProcessScope {
         Self {
             cancel,
             parent_cancel,
+            execution_cancel: None,
             launching: Arc::new(Mutex::new(())),
         }
+    }
+
+    pub(crate) fn with_execution_cancel(mut self, cancel: Option<Arc<AtomicBool>>) -> Self {
+        self.execution_cancel = cancel;
+        self
     }
 
     pub(crate) fn enter_launch(&self) -> Option<MutexGuard<'_, ()>> {
@@ -36,6 +43,10 @@ impl CallProcessScope {
         self.cancel.load(Ordering::SeqCst)
             || self
                 .parent_cancel
+                .as_ref()
+                .is_some_and(|cancel| cancel.load(Ordering::SeqCst))
+            || self
+                .execution_cancel
                 .as_ref()
                 .is_some_and(|cancel| cancel.load(Ordering::SeqCst))
     }
