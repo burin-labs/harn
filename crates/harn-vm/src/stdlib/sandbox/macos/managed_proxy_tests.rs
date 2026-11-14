@@ -52,10 +52,32 @@ fn other_local_ipv4() -> Option<std::net::Ipv4Addr> {
         })
 }
 
+/// Hosted Macs whose SIP allows DTrace refuse every confinement profile, so
+/// nothing here can be measured on them; owned Macs measure it.
+fn host_confinement_unavailable(test: &str) -> bool {
+    let mut policy = macos_policy_with_workspace_ops(&[]);
+    policy.workspace_roots = vec![std::env::current_dir().unwrap().display().to_string()];
+    let probe = Backend::run_to_output(
+        "/usr/bin/true",
+        &[],
+        &ProcessCommandConfig::default(),
+        &policy,
+        SandboxProfile::Worktree,
+    );
+    let unavailable = crate::sandbox_host::assert_unavailable_result(&probe);
+    if unavailable {
+        eprintln!("{test} not_measured: host process confinement unavailable");
+    }
+    unavailable
+}
+
 #[test]
 fn managed_proxy_is_the_only_destination() {
     if let Ok(raw) = std::env::var(CHILD) {
         child(serde_json::from_str(&raw).unwrap());
+        return;
+    }
+    if host_confinement_unavailable("managed_proxy_is_the_only_destination") {
         return;
     }
     let proxy = crate::egress::ProcessEgressProxy::start_allowlist(&["example.invalid:443".into()])
@@ -170,6 +192,10 @@ fn managed_proxy_is_the_only_destination() {
 /// profile that would grant them is never applied.
 #[test]
 fn managed_proxy_ports_without_a_live_proxy_are_refused_by_name() {
+    if host_confinement_unavailable("managed_proxy_ports_without_a_live_proxy_are_refused_by_name")
+    {
+        return;
+    }
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let workspace = tempfile::tempdir().unwrap();
