@@ -34,8 +34,6 @@ pub mod exfil_precision;
 pub mod file_provenance;
 pub mod provenance;
 pub mod session_environment;
-#[cfg(unix)]
-pub mod signing_agent;
 pub mod stance_judge;
 
 pub use ambient::current_policy;
