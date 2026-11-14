@@ -40,13 +40,13 @@ const SANDBOX_EXEC_PATH: &str = "/usr/bin/sandbox-exec";
 
 pub(super) fn check_replay_supported() -> Result<(), VmError> {
     if nested::process_is_sandboxed() {
-        return Err(super::sandbox_rejection(
-            "cannot replay commands in a moved workspace inside an inherited macOS sandbox; its isolated filesystem boundary cannot be applied".into(),
+        return Err(super::replay::relocation_unconfined(
+            "cannot replay commands in a moved workspace inside an inherited macOS sandbox; its isolated filesystem boundary cannot be applied",
         ));
     }
     if !Backend::filesystem_available() {
-        return Err(super::sandbox_rejection(
-            "cannot replay commands in a moved workspace without an available macOS filesystem sandbox".into(),
+        return Err(super::replay::relocation_unconfined(
+            "cannot replay commands in a moved workspace without an available macOS filesystem sandbox",
         ));
     }
     Ok(())

@@ -165,6 +165,38 @@ async fn a_non_throwing_ok_false_return_is_recorded_as_a_failed_call() {
     );
 }
 
+#[tokio::test]
+async fn structured_failure_data_reaches_the_tool_receipt() {
+    let result = dispatch(
+        "refused_command",
+        r#"fn handler(request: dict) {
+            throw {category: "tool_rejected", reason_code: "replay_relocation_unconfined", message: "Recording cannot run commands here"}
+        }"#,
+    )
+    .await;
+    assert_eq!(result["ok"], false, "{result}");
+    assert_eq!(result["error_category"], "tool_rejected", "{result}");
+    assert_eq!(
+        result["error_data"]["reason_code"], "replay_relocation_unconfined",
+        "{result}"
+    );
+    assert_eq!(
+        result["error_data"]["message"],
+        "Recording cannot run commands here"
+    );
+
+    let ordinary = dispatch(
+        "ordinary_failure",
+        r#"fn handler(request: dict) { throw "replay_relocation_unconfined" }"#,
+    )
+    .await;
+    assert_eq!(ordinary["ok"], false, "{ordinary}");
+    assert!(
+        ordinary["error_data"].is_null(),
+        "text is not typed data: {ordinary}"
+    );
+}
+
 /// MCP-shaped producer data is paired with an explicit handler failure.
 #[tokio::test]
 async fn an_is_error_true_return_is_recorded_as_a_failed_call() {
