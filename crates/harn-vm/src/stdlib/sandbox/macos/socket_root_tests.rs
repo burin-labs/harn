@@ -250,9 +250,7 @@ fn only_its_own_granted_spawn_may_ask_a_credential_socket() {
     use super::super::workspace_env::git_credential_socket::{CredentialSocket, Login};
     use super::super::workspace_env::git_network::CREDENTIAL_SOCKET as SOCKET;
     use super::super::workspace_env::grant_spawn;
-    if !Path::new(SANDBOX_EXEC_PATH).exists()
-        || grant_spawn::denied_read_root() != Some(grant_spawn::grant_spawns_root())
-    {
+    if !Path::new(SANDBOX_EXEC_PATH).exists() || grant_spawn::denied_read_root().is_none() {
         return;
     }
     const SECRET: &str = "credential-socket-canary-7741";

@@ -762,6 +762,22 @@ fn a_linked_shallow_or_tracking_ref_is_refused() {
     assert!(spawn(&["fetch", "origin"]).is_err(), "a linked shallow");
     std::fs::remove_file(git_dir.join("shallow")).unwrap();
 
+    // Entries git writes through a link must be the repository's own.
+    let fetch_head = git_dir.join("FETCH_HEAD");
+    let _ = std::fs::remove_file(&fetch_head);
+    std::os::unix::fs::symlink(&secret, &fetch_head).unwrap();
+    assert!(spawn(&["fetch", "origin"]).is_err(), "a linked FETCH_HEAD");
+    std::fs::remove_file(&fetch_head).unwrap();
+    let fifo = std::ffi::CString::new(fetch_head.as_os_str().as_encoded_bytes()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+    assert!(spawn(&["fetch", "origin"]).is_err(), "a FIFO FETCH_HEAD");
+    std::fs::remove_file(&fetch_head).unwrap();
+    std::fs::rename(git_dir.join("objects"), git_dir.join("objects-real")).unwrap();
+    std::os::unix::fs::symlink("objects-real", git_dir.join("objects")).unwrap();
+    assert!(spawn(&["fetch", "origin"]).is_err(), "a linked objects");
+    std::fs::remove_file(git_dir.join("objects")).unwrap();
+    std::fs::rename(git_dir.join("objects-real"), git_dir.join("objects")).unwrap();
+
     std::fs::create_dir_all(git_dir.join("refs/remotes/origin")).unwrap();
     std::os::unix::fs::symlink("../../heads", git_dir.join("refs/remotes/origin/sub")).unwrap();
     assert!(

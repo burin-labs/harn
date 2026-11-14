@@ -714,6 +714,9 @@ fn serve_login(
 #[cfg(unix)]
 fn link_repository(dir: &Path, repository: &Repository, remotes: &[String]) -> std::io::Result<()> {
     let objects = repository.common.join("objects");
+    // A linked entry is written through, so it must be the repository's own:
+    // `objects` a real directory, and `FETCH_HEAD` a regular file or absent.
+    refuse_link(&objects)?;
     if !objects.is_dir() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::NotFound,
@@ -725,7 +728,11 @@ fn link_repository(dir: &Path, repository: &Repository, remotes: &[String]) -> s
         .map(|name| (name, &repository.common))
         .chain(WORKTREE_LINKS.iter().map(|name| (name, &repository.gitdir)));
     for (name, base) in entries {
-        std::os::unix::fs::symlink(base.join(name), dir.join(name))?;
+        let target = base.join(name);
+        if WORKTREE_LINKS.contains(name) {
+            refuse_unless_regular(&target)?;
+        }
+        std::os::unix::fs::symlink(target, dir.join(name))?;
     }
     let refs = repository.common.join("refs");
     std::fs::create_dir_all(dir.join("refs/remotes"))?;
@@ -775,6 +782,24 @@ fn refuse_link(path: &Path) -> std::io::Result<()> {
         Ok(_) => Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
             "a repository ref directory is a link or not a directory",
+        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+/// Refuse a path that exists as anything but a regular file: a link, a FIFO,
+/// a device or a directory.
+#[cfg(unix)]
+fn refuse_unless_regular(path: &Path) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() => Ok(()),
+        Ok(_) => Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "the repository's `{}` is not a regular file",
+                path.display()
+            ),
         )),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
