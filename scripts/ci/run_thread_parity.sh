@@ -70,6 +70,7 @@ fi
 inventory_complete=1
 
 RUST_TEST_STDOUT_PATH="$events" \
+RUST_TEST_INVENTORY_PATH="$inventory" RUST_TEST_REPORTER="$reporter" \
 NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1 \
   "$repo_root/scripts/ci/run_rust_test_lane.sh" \
   cargo-nextest nextest run --locked --workspace --profile ci \

@@ -1,7 +1,10 @@
+import { Invocation } from "../ci/nextest_inventory"
 import { ReceiptResult } from "../ci/summarize_nextest_receipt"
 import { BuildEvidence, Snapshot } from "../ci/workspace_build_evidence"
 
 type CliResult = {exit_code: int, stdout: string, stderr: string}
+
+type Invocations = list<Invocation>
 
 fn run_cli(harness: Harness, script: string, args: list<string>) -> CliResult {
   const root = path_normalize(path_join(harness.fs.source_dir(), "../.."))
@@ -130,6 +133,108 @@ pipeline test_actual_nextest_inventory_refuses_empty_and_inconsistent_censuses(h
   check_collectors(harness, "inventory")
 }
 
+pipeline test_duplicate_names_require_inventory_bound_invocations(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("nextest-identities-")
+  const inventory = path_join(root, "inventory.json")
+  const events = path_join(root, "events.jsonl")
+  const testcase = {same: {ignored: false, "filter-match": {status: "matches"}}}
+  const shared = {
+    "package-name": "demo",
+    "binary-name": "tests",
+    status: "listed",
+    testcases: testcase,
+  }
+  harness.fs.write_text(
+    inventory,
+    json_stringify(
+      {
+        "test-count": 3,
+        "rust-suites": {
+          demo: shared,
+          "demo::tests": shared,
+          "demo::ordinary": shared + {"binary-name": "ordinary"},
+        },
+      },
+    ),
+  )
+  const planned = run_cli(harness, "nextest_inventory.harn", ["--execution-plan", inventory])
+  assert_eq(planned.exit_code, 0, planned.stderr)
+  const plan = schema_expect(json_parse(planned.stdout), schema_of(Invocations))
+  assert_eq(
+    plan,
+    [
+      {binary_id: nil, filter: "not (binary_id(=demo) or binary_id(=demo::tests))"},
+      {binary_id: "demo", filter: "binary_id(=demo)"},
+      {binary_id: "demo::tests", filter: "binary_id(=demo::tests)"},
+    ],
+  )
+  const ordinary = {type: "test", event: "ok", name: "demo::ordinary$same"}
+  const same = {type: "test", event: "ok", name: "demo::tests$same"}
+  const library = {type: "harn-invocation", event: "started", binary_id: "demo"}
+  const integration = library + {binary_id: "demo::tests"}
+  for scenario in [
+    {rows: [ordinary, library, same, integration, same], code: 0},
+    {rows: [ordinary, same], code: 2},
+    {rows: [library + {binary_id: "missing"}, same], code: 2},
+    {rows: [ordinary, library, same, library, same], code: 2},
+    {rows: [library + {event: "finished"}, same], code: 2},
+  ] {
+    harness.fs.write_text(events, scenario.rows.map({ row -> json_stringify(row) }).join("\n"))
+    const result = run_cli(
+      harness,
+      "summarize_nextest_receipt.harn",
+      [
+        "--inventory",
+        inventory,
+        "--events",
+        events,
+        "--runner-status",
+        "0",
+        "--threads",
+        "4",
+        "--format",
+        "json",
+      ],
+    )
+    assert_eq(result.exit_code, scenario.code, result.stderr)
+    if scenario.code == 0 {
+      const receipt = schema_expect(json_parse(result.stdout), schema_of(ReceiptResult)).receipt
+      assert_eq(receipt.selected, 3)
+      assert_eq(receipt.run, 3)
+      assert_eq(receipt.passed, 3)
+      assert_eq(receipt.pending, [])
+      assert_eq(receipt.missing, [])
+      assert_eq(receipt.failed_names, [])
+    }
+  }
+  harness.fs.write_text(
+    events,
+    [library, same + {event: "started"}].map({ row -> json_stringify(row) }).join("\n"),
+  )
+  const interrupted = run_cli(
+    harness,
+    "summarize_nextest_receipt.harn",
+    [
+      "--inventory",
+      inventory,
+      "--events",
+      events,
+      "--runner-status",
+      "143",
+      "--threads",
+      "4",
+      "--format",
+      "json",
+    ],
+  )
+  assert_eq(interrupted.exit_code, 1, interrupted.stderr)
+  const partial = schema_expect(json_parse(interrupted.stdout), schema_of(ReceiptResult)).receipt
+  assert_eq(partial.selected, 3)
+  assert_eq(partial.run, 0)
+  assert_eq(partial.pending, ["demo$same"])
+  assert_eq(len(partial.missing), 3)
+}
+
 pipeline test_actual_nextest_receipt_reports_missing_failed_and_aborted_tests(harness: Harness) {
   check_collectors(harness, "terminal")
 }
@@ -151,7 +256,7 @@ pipeline test_interrupted_receipt_retains_started_pending_and_failed_names(harne
       {
         "test-count": 3,
         "rust-suites": {
-          demo: {
+          "demo::tests": {
             "package-name": "demo",
             "binary-name": "tests",
             status: "listed",
@@ -217,7 +322,7 @@ pipeline test_actual_stress_receipt_requires_every_selected_test_in_every_iterat
       {
         "test-count": 1,
         "rust-suites": {
-          demo: {
+          "demo::tests": {
             "package-name": "demo",
             "binary-name": "tests",
             status: "listed",

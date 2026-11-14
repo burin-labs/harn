@@ -14,6 +14,10 @@ cp scripts/ci/native_qualification_receipt.sh "$tools/receipt.sh"
 cp scripts/ci/hostlib_macos_stress.sh scripts/ci/nextest_inventory.harn \
   scripts/ci/summarize_nextest_receipt.harn "$tools/"
 cp scripts/lib/sha256.sh "$tools/"
+mkdir -p "$tools/runner/ci"
+cp scripts/ci/run_rust_test_lane.sh scripts/ci/nextest_inventory.harn \
+  scripts/ci/rust_resource_budget.sh "$tools/runner/ci/"
+cp scripts/harn_test_env.sh "$tools/runner/"
 jq '.platforms[] | select(.name == "macos") | .required_steps' scripts/release_audit_contract.json > "$tools/phases.json"
 printf '%s\n' "$SOURCE_SHA" > "$tools/admitted-source"
 printf '%s\n' "$GITHUB_SHA" > "$tools/policy-source"

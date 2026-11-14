@@ -26,10 +26,21 @@ import json, os, socket, sys
 from pathlib import Path
 names = ["completed", "pending", "queued"]
 mode = os.environ["PARITY_FIXTURE_MODE"]
+collision = mode.startswith("collision")
 if sys.argv[1:3] == ["nextest", "list"]:
+    if mode == "zero-selected":
+        print(json.dumps({"test-count": 0, "rust-suites": {}}))
+        sys.exit(0)
     if mode == "inventory-error":
         print("intentional inventory refusal", file=sys.stderr)
         sys.exit(70)
+    if collision:
+        shared = {"package-name": "probe", "binary-name": "probe", "status": "listed",
+                  "testcases": {"same": {"ignored": False, "filter-match": {"status": "matches"}}}}
+        suites = {"probe": shared, "probe::probe": shared,
+                  "ordinary::unit": dict(shared, **{"package-name": "ordinary", "binary-name": "unit"})}
+        print(json.dumps({"test-count": 3, "rust-suites": suites}))
+        sys.exit(0)
     print(json.dumps({"test-count": 3, "rust-suites": {"probe::unit": {
         "package-name": "probe", "binary-name": "unit", "status": "listed",
         "testcases": {name: {"ignored": False, "filter-match": {"status": "matches"}}
@@ -37,6 +48,35 @@ if sys.argv[1:3] == ["nextest", "list"]:
     sys.exit(0)
 assert sys.argv[1:3] == ["nextest", "run"]
 Path(os.environ["PARITY_PID_RECORD"]).write_text(str(os.getpid()))
+if collision:
+    expressions = [sys.argv[index + 1] for index, arg in enumerate(sys.argv) if arg == "-E"]
+    if mode == "collision-filter":
+        assert sys.argv[sys.argv.index("--partition") + 1] == "count:1/1"
+        assert len(expressions) == 1 and "(package(=probe) or package(=ordinary)) and (" in expressions[0]
+        assert any(arg.startswith("--filter-expr=(not test(=excluded)) and (") for arg in sys.argv)
+    else:
+        assert len(expressions) == 1, sys.argv
+    expression = expressions[0]
+    with Path(os.environ["PARITY_COMMANDS"]).open("a") as commands:
+        commands.write(json.dumps(sys.argv[1:]) + "\n")
+    if "not (" in expression:
+        assert "binary_id(=probe) or binary_id(=probe::probe)" in expression
+        prefix, index = "ordinary::unit", 1
+    elif "binary_id(=probe::probe)" in expression:
+        prefix, index = "probe::probe", 3
+    else:
+        assert "binary_id(=probe)" in expression
+        prefix, index = "probe::probe", 2
+    print(json.dumps({"type": "test", "event": "started", "name": prefix + "$same"}), flush=True)
+    if mode == "collision-interrupted" and index == 3:
+        ready = socket.socket(socket.AF_UNIX)
+        ready.connect(os.environ["PARITY_SOCKET"])
+        ready.sendall(b"ready\n")
+        ready.recv(1)
+        raise AssertionError("interrupted collision producer must not resume")
+    print(json.dumps({"type": "test", "event": "ok", "name": prefix + "$same"}), flush=True)
+    print(f"PASS ({index}/3) {prefix} same", file=sys.stderr, flush=True)
+    sys.exit(0)
 for index, name in enumerate(names):
     print(json.dumps({"type": "test", "event": "started", "name": "probe::unit$" + name}), flush=True)
     if mode == "interrupted" and index == 1:
@@ -76,20 +116,23 @@ def run_case(case: str, binary: str) -> None:
                    HARN_BIN=binary, RUNNER_TEMP=str(runner), GITHUB_OUTPUT=str(output),
                    GITHUB_STEP_SUMMARY=str(scratch / "summary.md"),
                    PARITY_FIXTURE_MODE="interrupted" if case in ("interrupted-int", "lane-int") else case,
-                   PARITY_PID_RECORD=str(pid_record))
+                   PARITY_PID_RECORD=str(pid_record), PARITY_COMMANDS=str(scratch / "commands.jsonl"))
         env.pop("RUST_TEST_JOB_LIMIT_MINUTES", None)
         env.pop("RUST_TEST_FEEDBACK_BUDGET_SECONDS", None)
         if case == "reporter-error":
             env["HARN_BIN"] = str(scratch / "absent-reporter")
         if case == "reporter-run-error":
             reporter = tools / "failed-reporter"
-            reporter.write_text("#!/usr/bin/env bash\nexit 74\n")
+            reporter.write_text("#!/usr/bin/env python3\nimport os, sys\n"
+                                "if '--execution-plan' in sys.argv:\n"
+                                f"    os.execv({binary!r}, [{binary!r}] + sys.argv[1:])\n"
+                                "sys.exit(74)\n")
             reporter.chmod(0o755)
             env["HARN_BIN"] = str(reporter)
         bootstrap = repository / "scripts/bootstrap-harn.sh"
         bootstrap.write_text("#!/usr/bin/env bash\nprintf invoked > bootstrap-invoked\nexit 88\n")
         listener = None
-        if case in ("interrupted", "interrupted-int", "lane-int"):
+        if case in ("interrupted", "interrupted-int", "lane-int", "collision-interrupted"):
             listener = socket.socket(socket.AF_UNIX)
             listener.settimeout(60)
             listener.bind(str(scratch / "ready.sock"))
@@ -102,6 +145,14 @@ def run_case(case: str, binary: str) -> None:
                 if case == "lane-int":
                     command = ["bash", str(repository / FILES[1]), "cargo-nextest", "nextest", "run", "--status-level=pass"]
                     env["RUST_TEST_STDOUT_PATH"] = str(scratch / "lane-events.jsonl")
+                if case == "collision-filter":
+                    inventory = scratch / "inventory.json"
+                    inventory.write_text(subprocess.check_output([str(cargo), "nextest", "list"], env=env, text=True))
+                    command = ["bash", str(repository / FILES[1]), "cargo-nextest", "nextest", "run",
+                               "--status-level=pass", "--partition", "count:1/1", "-E",
+                               "package(=probe) or package(=ordinary)", "--filter-expr=not test(=excluded)"]
+                    env.update(RUST_TEST_INVENTORY_PATH=str(inventory), RUST_TEST_REPORTER=binary,
+                               RUST_TEST_STDOUT_PATH=str(scratch / "lane-events.jsonl"))
                 process = subprocess.Popen(command,
                                            cwd=repository, env=env, stdout=stdout, stderr=stderr,
                                            start_new_session=True)
@@ -133,6 +184,21 @@ def run_case(case: str, binary: str) -> None:
                     raise AssertionError("the direct lane wrapper retained its producer")
                 print("thread-parity wrapper case=lane-int passed")
                 return
+            if case == "collision-filter":
+                assert status == 0
+                commands = [json.loads(line) for line in (scratch / "commands.jsonl").read_text().splitlines()]
+                assert len(commands) == 3
+                result = subprocess.run([binary, "run", "--standalone", "--no-sandbox",
+                                         str(repository / "scripts/ci/summarize_nextest_receipt.harn"), "--",
+                                         "--inventory", str(inventory), "--events", env["RUST_TEST_STDOUT_PATH"],
+                                         "--runner-status", "0", "--threads", "4", "--format", "json"],
+                                        cwd=repository, capture_output=True, text=True)
+                assert result.returncode == 0, result.stderr
+                receipt = json.loads(result.stdout)["receipt"]
+                assert receipt["selected"] == receipt["run"] == receipt["passed"] == 3
+                assert receipt["pending"] == receipt["missing"] == receipt["failed_names"] == []
+                print("thread-parity wrapper case=collision-filter passed")
+                return
             evidence = dict(line.split("=", 1) for line in output.read_text().splitlines()).get("evidence_dir")
             assert evidence is not None, "the actual wrapper did not publish its evidence directory"
             folder = Path(evidence)
@@ -140,7 +206,10 @@ def run_case(case: str, binary: str) -> None:
             stdout_text = (scratch / "stdout.log").read_text()
             stderr_text = (scratch / "stderr.log").read_text()
             assert not (repository / "bootstrap-invoked").exists(), "receipt reporting invoked the installer"
-            if case == "inventory-error":
+            if case == "zero-selected":
+                assert status == 2 and "inventory selected zero tests" in stderr_text
+                assert not pid_record.exists() and (folder / "events.jsonl").stat().st_size == 0
+            elif case == "inventory-error":
                 assert status == 70 and "reason=inventory-error" in stderr_text
             elif case == "reporter-run-error":
                 assert status == 74, "a reporter failure changed a run into success"
@@ -151,7 +220,24 @@ def run_case(case: str, binary: str) -> None:
                 receipt = result["receipt"]
                 assert receipt["selected"] == 3
                 assert "PASS (1/3)" in stderr_text, "native progress did not survive the stdout redirect"
-                if case in ("interrupted", "interrupted-int"):
+                if case.startswith("collision"):
+                    commands = [json.loads(line) for line in (scratch / "commands.jsonl").read_text().splitlines()]
+                    assert len(commands) == 3
+                    assert all("--status-level=pass" in command for command in commands)
+                    markers = [json.loads(line) for line in (folder / "events.jsonl").read_text().splitlines()
+                               if json.loads(line)["type"] == "harn-invocation"]
+                    assert [marker["binary_id"] for marker in markers] == [None, "probe", "probe::probe"]
+                    assert receipt["failed_names"] == []
+                    if case == "collision-interrupted":
+                        assert status == 143 and result["status"] == 143
+                        assert receipt["run"] == receipt["passed"] == 2
+                        assert receipt["started"] == 3
+                        assert receipt["pending"] == receipt["missing"] == ["probe::probe$same"]
+                    else:
+                        assert status == 0 and receipt["run"] == receipt["passed"] == 3
+                        assert receipt["pending"] == receipt["missing"] == []
+                        assert "PASS (3/3)" in stderr_text
+                elif case in ("interrupted", "interrupted-int"):
                     expected_status = 130 if case == "interrupted-int" else 143
                     assert status == expected_status and result["status"] == expected_status
                     assert receipt["run"] == receipt["passed"] == 1 and receipt["failed"] == 0
@@ -194,11 +280,12 @@ def run_case(case: str, binary: str) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--case", choices=["complete", "interrupted", "interrupted-int", "lane-int", "failed", "inventory-error", "reporter-error", "reporter-run-error", "invalid"])
+    cases = ["complete", "collision", "collision-filter", "collision-interrupted", "interrupted", "interrupted-int", "lane-int", "failed", "inventory-error", "zero-selected", "reporter-error", "reporter-run-error", "invalid"]
+    parser.add_argument("--case", choices=cases)
     parser.add_argument("--source-root", type=Path, default=ROOT)
     arguments = parser.parse_args()
     ROOT = arguments.source_root
     harn = os.environ.get("HARN_BIN") or os.environ.get("HARN_EXT_BOOTSTRAP_INSTALLER") or shutil.which("harn")
     assert harn, "a qualified Harn binary is required"
-    for selected in ([arguments.case] if arguments.case else ["complete", "interrupted", "interrupted-int", "lane-int", "failed", "inventory-error", "reporter-error", "reporter-run-error", "invalid"]):
+    for selected in ([arguments.case] if arguments.case else cases):
         run_case(selected, harn)

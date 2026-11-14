@@ -115,14 +115,56 @@ if [[ -n "${RUST_TEST_JOB_LIMIT_MINUTES:-}" ]]; then
 fi
 started=$SECONDS
 status=0
-if [[ -n "${RUST_TEST_STDOUT_PATH:-}" ]]; then
+if [[ -n "${RUST_TEST_INVENTORY_PATH:-}" ]]; then
+  reporter="${RUST_TEST_REPORTER:?captured nextest requires its prepared reporter}"
+  events="${RUST_TEST_STDOUT_PATH:?captured nextest requires an event destination}"
+  planner="$(dirname "${BASH_SOURCE[0]}")/nextest_inventory.harn"
+  plan="$events.plan.json"
+  : >"$events"
+  "$reporter" run --standalone --no-sandbox "$planner" -- \
+    --execution-plan "$RUST_TEST_INVENTORY_PATH" >"$plan"
+  count=$(jq -er 'length | select(. > 0)' "$plan")
+  for ((invocation = 0; invocation < count; invocation++)); do
+    filter=$(jq -er ".[$invocation].filter" "$plan")
+    args=("$@")
+    found=0
+    for ((index = 0; index < ${#args[@]}; index++)); do
+      case "${args[$index]}" in
+        -E|--filter-expr)
+          ((index += 1))
+          args[index]="(${args[$index]}) and ($filter)"
+          found=1
+          ;;
+        --filter-expr=*)
+          args[index]="--filter-expr=(${args[$index]#--filter-expr=}) and ($filter)"
+          found=1
+          ;;
+        -E?*)
+          args[index]="-E(${args[$index]#-E}) and ($filter)"
+          found=1
+          ;;
+      esac
+    done
+    ((found)) || args+=(-E "$filter")
+    jq -cn --argjson invocation "$(jq -c ".[$invocation]" "$plan")" \
+      '{type:"harn-invocation",event:"started",binary_id:$invocation.binary_id}' >>"$events"
+    bash "$test_env" --per-test-state "${args[@]}" >>"$events" &
+    child_pid=$!
+    wait "$child_pid" || status=$?
+    child_pid=""
+    ((status == 0)) || break
+  done
+elif [[ -n "${RUST_TEST_STDOUT_PATH:-}" ]]; then
   bash "$test_env" --per-test-state "$@" >"$RUST_TEST_STDOUT_PATH" &
+  child_pid=$!
+  wait "$child_pid" || status=$?
+  child_pid=""
 else
   bash "$test_env" --per-test-state "$@" &
+  child_pid=$!
+  wait "$child_pid" || status=$?
+  child_pid=""
 fi
-child_pid=$!
-wait "$child_pid" || status=$?
-child_pid=""
 duration=$((SECONDS - started))
 if [[ -n "${RUST_TEST_JOB_LIMIT_MINUTES:-}" ]]; then
   report_duration_budget "$duration" "$RUST_TEST_JOB_LIMIT_MINUTES" "$memory_mb" "${RUST_TEST_FEEDBACK_BUDGET_SECONDS:-}"
