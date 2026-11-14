@@ -602,7 +602,9 @@ fn render_profile_with_extra_read_roots(
     // names only that one directory. The denial names metadata on its own,
     // which a wildcard read grant does not outrank, so the grant names it too:
     // without it the directory reads but cannot be listed or stat'd, and a
-    // granted git refuses it as "not a git repository".
+    // granted git refuses it as "not a git repository". Resolving the
+    // directory's real path also stats the per-spawn root itself, which is
+    // allowed as that one literal: its listing stays denied.
     if let Some(own) = super::workspace_env::grant_spawn::own_spawn_read_root() {
         for path in sandbox_profile_path_aliases(&own.display().to_string()) {
             let escaped = sandbox_profile_escape(&path);
@@ -610,6 +612,12 @@ fn render_profile_with_extra_read_roots(
                 "(allow file-read* (subpath \"{escaped}\"))\n\
                  (allow file-read-metadata (subpath \"{escaped}\"))\n"
             ));
+            if let Some(root) = std::path::Path::new(&path).parent() {
+                profile.push_str(&format!(
+                    "(allow file-read-metadata (literal \"{}\"))\n",
+                    sandbox_profile_escape(&root.display().to_string())
+                ));
+            }
         }
         // A granted git asks its own per-spawn credential socket for its login.
         let socket = own.join(super::workspace_env::git_credential_socket::SOCKET);

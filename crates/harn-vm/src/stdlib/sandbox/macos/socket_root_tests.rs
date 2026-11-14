@@ -316,5 +316,27 @@ fn only_its_own_granted_spawn_may_ask_a_credential_socket() {
         String::from_utf8_lossy(&listed.stderr)
     );
     assert!(!list(&render_profile(&policy)).status.success());
+    // Resolving its real path stats the per-spawn root, which the own profile
+    // allows; listing the root, and so finding a sibling spawn, stays denied.
+    let root = dir.path().parent().expect("a spawn dir has a root");
+    let stat = std::process::Command::new(SANDBOX_EXEC_PATH)
+        .args(["-p", &own, "--", "/usr/bin/stat", "-f", "%N"])
+        .arg(root)
+        .output()
+        .expect("spawn sandbox-exec");
+    assert!(
+        stat.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stat.stderr)
+    );
+    let listed_root = std::process::Command::new(SANDBOX_EXEC_PATH)
+        .args(["-p", &own, "--", "/bin/ls"])
+        .arg(root)
+        .output()
+        .expect("spawn sandbox-exec");
+    assert!(
+        !listed_root.status.success(),
+        "the root listing stays denied"
+    );
     drop(socket);
 }

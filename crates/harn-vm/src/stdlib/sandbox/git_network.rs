@@ -899,6 +899,9 @@ fn render_config(dir: &Path, projection: &Projection) -> String {
                 ("fsmonitor", "false".into()),
                 ("hooksPath", dir.join("hooks").display().to_string()),
                 ("askPass", String::new()),
+                // The private directory is read-only to a confined git, and a
+                // tracking ref's reflog would be written there.
+                ("logAllRefUpdates", "false".into()),
             ],
         ),
         ("protocol", None, vec![("allow", "never".into())]),

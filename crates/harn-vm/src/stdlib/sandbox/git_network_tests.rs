@@ -798,3 +798,65 @@ fn a_linked_shallow_or_tracking_ref_is_refused() {
     std::fs::write(git_dir.join("shallow"), format!("{main}\n")).unwrap();
     assert!(matches!(spawn(&["fetch", "origin"]), Ok(Some(_))));
 }
+
+/// The granted fetch and push work under the real sandbox profile, whose
+/// per-spawn root denial reaches every confined child and which re-allows
+/// only this spawn's own directory and socket. Run unconfined, the tests
+/// above cannot see a profile that leaves git unable to open its own git
+/// directory or ask its socket.
+#[test]
+fn a_confined_granted_fetch_and_push_land() {
+    use crate::orchestration::{
+        pop_execution_policy, push_execution_policy, CapabilityPolicy, ProcessSandboxPolicy,
+        ProcessSandboxPreset, SandboxProfile,
+    };
+    let _granted = Granted::enter();
+    let fixture = Fixture::new();
+    let ws = fixture.ws();
+    push_execution_policy(CapabilityPolicy {
+        workspace_roots: vec![std::fs::canonicalize(fixture.root.path())
+            .unwrap()
+            .display()
+            .to_string()],
+        side_effect_level: Some("network".to_string()),
+        sandbox_profile: SandboxProfile::Worktree,
+        process_sandbox: Box::new(ProcessSandboxPolicy {
+            presets: Some(vec![
+                ProcessSandboxPreset::SystemRuntime,
+                ProcessSandboxPreset::DeveloperToolchains,
+            ]),
+            ..ProcessSandboxPolicy::default()
+        }),
+        ..CapabilityPolicy::default()
+    });
+    struct PopPolicy;
+    impl Drop for PopPolicy {
+        fn drop(&mut self) {
+            pop_execution_policy();
+        }
+    }
+    let _policy = PopPolicy;
+    let confined = |words: &[&str]| {
+        let args: Vec<String> = words.iter().map(|word| word.to_string()).collect();
+        let spawn = crate::stdlib::process::granted_spawn("git", &args, &ws, &BTreeMap::new())
+            .expect("no refusal")
+            .expect("granted");
+        let _launch = spawn.launching();
+        let config = crate::stdlib::sandbox::ProcessCommandConfig {
+            cwd: Some(ws.clone()),
+            env: spawn.env.clone(),
+            env_remove: spawn.remove.clone(),
+            closed_env: true,
+            ..Default::default()
+        };
+        crate::stdlib::sandbox::command_output(&spawn.program, &args, &config).expect("spawned")
+    };
+    assert_succeeded(&confined(&["fetch", "origin"]));
+    ok(&ws, &["checkout", "-q", "-b", "confined", "origin/main"]);
+    assert_succeeded(&confined(&["push", "origin", "HEAD:refs/heads/confined"]));
+    let server = fixture.root.path().join("server/o/r.git");
+    assert_eq!(
+        ok(&server, &["rev-parse", "refs/heads/confined"]),
+        ok(&ws, &["rev-parse", "HEAD"])
+    );
+}
