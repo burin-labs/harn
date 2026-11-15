@@ -141,7 +141,12 @@ impl WorkspaceEdit {
         allowed_rename: Option<(&Path, &Path)>,
     ) -> Result<BTreeMap<PathBuf, DocumentEdits>, String> {
         let mut out = BTreeMap::new();
-        if self.document_changes.is_some() && self.changes.is_some() {
+        if self.document_changes.is_some()
+            && self
+                .changes
+                .as_ref()
+                .is_some_and(|changes| !changes.is_empty())
+        {
             return Err("the server mixed changes and documentChanges".into());
         }
         if let Some(changes) = self.document_changes {

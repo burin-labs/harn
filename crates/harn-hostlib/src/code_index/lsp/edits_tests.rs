@@ -81,7 +81,7 @@ fn document_edits_retain_versions_and_refuse_ambiguous_censuses() {
     })).unwrap().into_versioned_file_edits().unwrap();
     assert_eq!(edit[&PathBuf::from("/tmp/source.java")].version, Some(7));
     for value in [
-        serde_json::json!({"changes": {}, "documentChanges": []}),
+        serde_json::json!({"changes": {"file:///tmp/source.java": []}, "documentChanges": []}),
         serde_json::json!({"documentChanges": [
             {"textDocument": {"uri": "file:///tmp/source.java", "version": 7}, "edits": []},
             {"textDocument": {"uri": "file:///tmp/source.java", "version": 8}, "edits": []}
@@ -93,6 +93,26 @@ fn document_edits_retain_versions_and_refuse_ambiguous_censuses() {
             .into_versioned_file_edits()
             .is_err());
     }
+}
+
+#[test]
+fn jdtls_empty_legacy_changes_preserves_the_document_edit_and_file_rename() {
+    let old = Path::new("/project/Before.java");
+    let new = Path::new("/project/After.java");
+    let value = serde_json::json!({
+        "changes": {},
+        "documentChanges": [
+            {"textDocument": {"uri": path_to_uri(old), "version": 9}, "edits": []},
+            {"kind": "rename", "oldUri": path_to_uri(old), "newUri": path_to_uri(new)}
+        ]
+    });
+    let admitted = serde_json::from_value::<WorkspaceEdit>(value)
+        .unwrap()
+        .into_rename_file_edits(Some((old, new)))
+        .unwrap();
+    assert_eq!(admitted.len(), 1);
+    assert_eq!(admitted[old].version, Some(9));
+    assert_eq!(admitted[old].rename_to.as_deref(), Some(new));
 }
 
 #[test]
