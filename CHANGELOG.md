@@ -9,6 +9,135 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.200
+
+### Breaking
+
+- **Per-call provider capture (#11325).** Model calls and agent loops can select a transcript directory
+  and override raw provider capture, with redacted diagnostics when capture cannot be written.
+  Rust `LlmCallOptions` adds two optional public fields, so exhaustive struct literals must initialize them.
+
+  Migration: add `llm_transcript_dir: None` and `llm_transcript_raw: None` to exhaustive Rust
+  `LlmCallOptions` literals. Literals using `..Default::default()` and existing Harn scripts need no change.
+- On Unix, foreground command tools require the process guardian startup hook.
+
+  Migration: Rust applications embedding these tools must call
+  `harn_hostlib::process::owner_death::run_if_requested()` at the beginning of
+  `main`, before argument parsing. `harn-serve` exposes the same hook as
+  `run_process_guardian_if_requested()`. Missing initialization now refuses
+  command startup with `ProcessError::GuardianNotInitialized`. Libtest
+  executables can declare `harn_hostlib::process_guardian_test_fixture!();`
+  once at the crate root.
+- ACP hosts can cancel a tool call's background command by passing its `handleId`
+  to `session/cancel_tool_call`. Cancellation uses Harn's command registry and
+  refuses handles owned by another session. The public Rust request struct
+  `AcpSessionCancelToolCallParams` gains an optional `handle_id` field.
+
+  Migration: use `AcpSessionCancelToolCallParams::new(session_id, tool_call_id)`,
+  or add `handle_id: None` to existing struct literals. Set it to the background
+  command handle to cancel that command after the original tool call returns.
+- Migration: Rust embedders constructing `ToolContractViolation` must initialize its new
+  `wire_failure: Option<Box<WireFailure>>` field, or use `..` when matching it.
+  The optional value retains the wire failure code, declaration source and
+  structural path without rejected application values.
+
+  `ManifestCheck::ValidAfterRecheck.refreshed` now holds `Box<ContextManifest>`.
+  Wrap constructed refreshed manifests with `Box::new`; dereference the box when
+  moving the manifest into an unboxed destination.
+
+  Typed tool clients should follow [Migrate typed tool clients](https://harnlang.com/migrate-typed-tools.html)
+  for the corrected public wire representations.
+- Migration: Rust callers exhaustively matching `WireShape` must handle the
+  runtime-only `RuntimeJson` variant. Runtime preparation retains its compiled
+  catalog schema validator. Portable graph construction and serialization reject
+  this variant; the portable wire protocol is unchanged.
+
+### Added
+
+- Native embedders can check a proposed SSH agent socket grant with
+  `process_sandbox::ssh_agent_grant_available`, using the same enforcement rules
+  and refusal reason as process validation.
+- Compile tool contracts with `harn codegen ir`, validate frozen IR documents, and
+  run installed code-generation backends with deterministic, confined artifact
+  publication. The closed wire graph preserves nominal and recursive types,
+  signed 64-bit integers, bytes, decimals, sets, tuples, absent fields, and declared
+  application errors across generated clients and native handlers.
+
+  Bind verified ordinary MCP workers through `std/tools.native_tool_registry`.
+  Native handlers retain the original tool registry's governance and adapter
+  metadata, with request-specific cancellation and an exact concurrency limit.
+  For MCP `2026-07-28`, closing a direct HTTP response cancels that request while
+  preserving independently owned background tasks.
+
+  See [Migrate typed tool clients](https://harnlang.com/migrate-typed-tools.html)
+  for the corrected wire representations and client update checks.
+- Rust embedders can select which execution events a `RunEventSink` consumes.
+  Observing command preparation no longer requires capturing program stdout,
+  stderr, or unrelated transcript events. Existing sinks retain full capture.
+- An embedder can serve `harn_vm::stdlib::sandbox::signing_agent::SigningAgent` in front of
+  the user's ssh-agent and grant its socket as the process sandbox's SSH agent.
+  It lists one configured key and signs only SSHSIG payloads for one namespace
+  with it, so a confined child can sign git objects without reaching the
+  agent's other keys, SSH authentication, or key management.
+  Each client is served on its own bounded thread with a total deadline, so a
+  stalled client cannot block another or hold teardown. The socket directory
+  must be private to the user.
+
+### Changed
+
+- Record the remaining provider accounting blockers and renew their research
+  deadline through November 22 without changing accounting declarations.
+- Foreground Rust embedding checks reuse the test build profile and run in the lighter CI test partition,
+  reducing repeated compilation while retaining both executable variants and the initialization controls.
+  Linux and macOS embedding builds honor their existing measured compiler budgets.
+
+### Fixed
+
+- OpenAI-compatible routes without an accounting declaration retain usage frames
+  after the content finishes, while omitted counters stay unknown.
+- Contain foreground command descendants when the owning Harn process is killed,
+  including commands using file output capture. Foreground completion also cleans
+  up descendants instead of leaving escaped subprocesses running.
+- Keep Cargo targets while a process or active claim holds their owning checkout,
+  including standalone clones. Setup records target ownership across search roots;
+  dependency seeds do not carry another checkout's ownership.
+- Keep readable UTF-8 error details in connector byte responses, using the same
+  text truncation and redaction policy as ordinary HTTP failures.
+- Reclaim an idle target's compiler incremental cache with
+  `scripts/prune_stale_targets.sh --prune-incremental-entry NAME` while retaining
+  linked binaries, dependencies and unrelated targets. The collector refuses
+  live or unmeasured ownership and reports interrupted partial reclamation.
+- A command run through the long-running path, which includes any command with
+  an auto-background window, now receives its command-bound grant, the same as
+  a plain foreground command. Before, a granted program run that way got none.
+  Its output is redacted as it is read, so progress snapshots, output waits, and
+  the output files carry no granted value, even one split across reads. A
+  prompt ending in the first byte of a granted value still reaches an output
+  wait while its program waits for input.
+- **Saved run transcripts retain their referenced raw provider files.** Moving a
+  run bundle preserves captured requests, responses, and transport failures.
+  Missing, malformed, or symlinked artifacts mark the transcript unavailable
+  without changing the model answer or run outcome. Failed snapshots no longer
+  reuse an older transcript as verified evidence.
+- Preserve native bytes and other declared wire values in runtime tool catalogs
+  that also accept ordinary JSON metadata, string enums or constrained JSON Schema
+  alternatives. Keep the original schema validation and reference context; portable
+  code generation continues to refuse runtime-only JSON regions.
+- **Saved transcript descriptors stay within the run directory.** Legacy
+  absolute paths can no longer escape through parent components or symlinks.
+  Relative run-record paths and aliases within the run directory remain valid;
+  unavailable files keep their distinct availability error.
+
+### Security
+
+- `process_sandbox_writable_roots` names every directory a confined child may
+  write under, for a host that must decide whether a file was planted before
+  any sandbox exists. It counts the host `/dev/shm` a direct Landlock launch
+  falls back to granting, and resolves a root that does not exist yet through
+  its deepest existing ancestor, so a linked parent cannot hide a later write
+  from the reader. The per-spawn credential root resolves the same way when
+  the Harn home is not created yet.
+
 ## v0.10.199
 
 ### Added
