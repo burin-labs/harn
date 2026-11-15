@@ -7,7 +7,7 @@ pub(super) fn tag_mcp_tool(
     eager_schemas: bool,
 ) -> serde_json::Value {
     if let Some(obj) = tool.as_object_mut() {
-        if let Some(metadata) = obj.get("_meta").cloned() {
+        if let Some(mut metadata) = obj.get("_meta").cloned() {
             if let Some(policy) = metadata
                 .get(crate::tool_registry::HARN_MCP_TOOL_CONTRACT_META_KEY)
                 .and_then(|contract| contract.get("policy"))
@@ -16,6 +16,11 @@ pub(super) fn tag_mcp_tool(
                 })
             {
                 obj.insert("execution_policy".into(), serde_json::json!(policy));
+            }
+            // Retain the original wire metadata, but do not re-author Harn's
+            // reserved adapter contract as application-owned catalog metadata.
+            if let Some(fields) = metadata.as_object_mut() {
+                fields.remove(crate::tool_registry::HARN_MCP_TOOL_CONTRACT_META_KEY);
             }
             obj.insert("meta".into(), metadata);
         }
@@ -118,12 +123,17 @@ mod tests {
             let projected = crate::tool_registry::tool_catalog_entry_to_mcp(&entry);
             let imported = tag_mcp_tool(projected, "server", false);
             assert_eq!(imported["execution_policy"], policy);
+            assert_eq!(
+                imported["_meta"][crate::tool_registry::HARN_MCP_TOOL_CONTRACT_META_KEY]["policy"],
+                policy
+            );
             assert_eq!(imported["name"], "server__check");
             let registry = crate::json_to_vm_value(&serde_json::json!({"tools": [imported]}));
             let normalized =
                 crate::tool_registry::tool_registry_catalog_for_tool(&registry, "server__check")
                     .unwrap();
             assert_eq!(normalized.tools[0].policy, entry.policy);
+            crate::tool_registry::PreparedToolCatalog::prepare(normalized).unwrap();
         }
         let advisory = tag_mcp_tool(
             serde_json::json!({"name": "check", "annotations": {"readOnlyHint": true}}),
