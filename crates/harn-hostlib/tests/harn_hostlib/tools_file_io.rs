@@ -51,6 +51,108 @@ fn read_file_offset_and_limit_apply() {
     ));
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn session_reads_keep_physical_offset_reads_bounded() {
+    use std::io::{Seek, Write};
+
+    fn characters_read() -> u64 {
+        fs::read_to_string("/proc/self/io")
+            .unwrap()
+            .lines()
+            .find_map(|line| line.strip_prefix("rchar: "))
+            .unwrap()
+            .parse()
+            .unwrap()
+    }
+
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("sparse");
+    let length = 8 * 1024 * 1024;
+    let mut file = fs::File::create(&path).unwrap();
+    file.set_len(length).unwrap();
+    file.seek(std::io::SeekFrom::Start(length - 4)).unwrap();
+    file.write_all(b"END!").unwrap();
+    let registry = tools_registry();
+    let read = registry.find("hostlib_tools_read_file").unwrap();
+    for mode in [
+        harn_hostlib::fs::FsMode::Immediate,
+        harn_hostlib::fs::FsMode::Staged,
+    ] {
+        let session = uuid::Uuid::new_v4().to_string();
+        harn_hostlib::fs::set_mode(&session, mode, Some(dir.path())).unwrap();
+        let before = characters_read();
+        let result = (read.handler)(&dict_arg(&[
+            ("path", vm_string(&path_str(&path))),
+            ("session_id", vm_string(&session)),
+            ("offset", VmValue::Int((length - 4) as i64)),
+            ("limit_bytes", VmValue::Int(4)),
+        ]))
+        .unwrap();
+        let read_characters = characters_read() - before;
+        assert!(matches!(dict_get(&result, "content"), VmValue::String(s) if s.as_str() == "END!"));
+        assert!(matches!(
+            dict_get(&result, "truncated"),
+            VmValue::Bool(false)
+        ));
+        assert!(
+            read_characters < 8192,
+            "bounded read consumed {read_characters} bytes"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn session_fifo_reads_refuse_without_blocking_other_session_reads() {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let dir = TempDir::new().unwrap();
+    let fifo = dir.path().join("fifo");
+    let c_path = std::ffi::CString::new(path_str(&fifo)).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0);
+    // A regressed reader can open the FIFO but cannot reach EOF until cleanup.
+    let keeper = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(&fifo)
+        .unwrap();
+    let session = uuid::Uuid::new_v4().to_string();
+    harn_hostlib::fs::configure_session_root(&session, dir.path());
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let registry = tools_registry();
+        let read = registry.find("hostlib_tools_read_file").unwrap();
+        let result = (read.handler)(&dict_arg(&[
+            ("path", vm_string(&path_str(&fifo))),
+            ("session_id", vm_string(&session)),
+        ]));
+        sender
+            .send(result.err().map(|error| error.to_string()))
+            .unwrap();
+    });
+    let result = std::panic::catch_unwind(|| {
+        harn_clock::test_support::recv_within("FIFO reader's regular-file refusal", &receiver)
+    });
+    drop(keeper);
+    worker.join().unwrap();
+    let error = result.unwrap().expect("FIFO is not a regular file");
+    assert!(error.contains("not a regular file"), "{error}");
+    let path = dir.path().join("other-session");
+    fs::write(&path, b"other session remains usable").unwrap();
+    let registry = tools_registry();
+    let read = registry.find("hostlib_tools_read_file").unwrap();
+    let result = (read.handler)(&dict_arg(&[
+        ("path", vm_string(&path_str(&path))),
+        ("session_id", vm_string(&uuid::Uuid::new_v4().to_string())),
+    ]))
+    .unwrap();
+    assert!(
+        matches!(dict_get(&result, "content"), VmValue::String(s) if s.as_str() == "other session remains usable")
+    );
+}
+
 #[test]
 fn read_file_binary_returns_base64() {
     let dir = TempDir::new().unwrap();

@@ -494,14 +494,27 @@ fn read_bytes(
     offset: u64,
     limit_bytes: u64,
 ) -> Result<(Vec<u8>, u64), HostlibError> {
-    if let Some(result) = crate::fs::read(path, session_id) {
-        let bytes = result.map_err(|err| HostlibError::Backend {
-            builtin: READ_FILE_BUILTIN,
-            message: format!("read `{path_str}`: {err}"),
-        })?;
-        return slice_bytes(bytes, offset, limit_bytes);
+    if let Some(result) = crate::fs::read_with(path, session_id, |overlay| match overlay {
+        Some(result) => {
+            let bytes = result.map_err(|err| HostlibError::Backend {
+                builtin: READ_FILE_BUILTIN,
+                message: format!("read `{path_str}`: {err}"),
+            })?;
+            slice_bytes(bytes, offset, limit_bytes)
+        }
+        None => read_physical_bytes(path, path_str, offset, limit_bytes),
+    }) {
+        return result;
     }
+    read_physical_bytes(path, path_str, offset, limit_bytes)
+}
 
+fn read_physical_bytes(
+    path: &Path,
+    path_str: &str,
+    offset: u64,
+    limit_bytes: u64,
+) -> Result<(Vec<u8>, u64), HostlibError> {
     let metadata = stdfs::metadata(path).map_err(|err| HostlibError::Backend {
         builtin: READ_FILE_BUILTIN,
         message: format!("stat `{path_str}`: {err}"),

@@ -492,26 +492,41 @@ pub(crate) fn read(
     path: &Path,
     explicit_session_id: Option<&str>,
 ) -> Option<std::io::Result<Vec<u8>>> {
+    read_with(path, explicit_session_id, |overlay| {
+        overlay.unwrap_or_else(|| stdfs::read(path))
+    })
+}
+
+/// Keep the session view locked while its caller applies the physical reader's
+/// own bounds and file-kind admission when no staged body overrides the path.
+pub(crate) fn read_with<T>(
+    path: &Path,
+    explicit_session_id: Option<&str>,
+    consume: impl FnOnce(Option<std::io::Result<Vec<u8>>>) -> T,
+) -> Option<T> {
     let session_id = active_session_id(explicit_session_id)?;
     let (mut guard, state, _manifest_locks) =
         match locked_state(&session_id, None, READ_TEXT_BUILTIN) {
             Ok(locked) => locked,
-            Err(error) => return Some(Err(std::io::Error::other(error.to_string()))),
+            Err(error) => {
+                return Some(consume(Some(Err(std::io::Error::other(error.to_string())))))
+            }
         };
     if state
         .atomic_groups
         .values()
         .any(batch::Group::needs_recovery)
     {
-        return Some(Err(std::io::Error::other(
+        return Some(consume(Some(Err(std::io::Error::other(
             "staged filesystem has an incomplete file transaction",
-        )));
+        )))));
     }
     let result = if state.mode == FsMode::Staged {
-        overlay_read(&state, path).unwrap_or_else(|| stdfs::read(path))
+        overlay_read(&state, path)
     } else {
-        stdfs::read(path)
+        None
     };
+    let result = consume(result);
     guard.insert(session_id, state);
     Some(result)
 }
@@ -1208,7 +1223,7 @@ fn read_dir_view(state: &SessionState, path: &Path) -> std::io::Result<Vec<Overl
     {
         return Err(not_found(&dir_key));
     }
-    if !path.exists() && !(staged && has_staged_descendant(state, &dir_key)) {
+    if !(path.exists() || staged && has_staged_descendant(state, &dir_key)) {
         return Err(not_found(&dir_key));
     }
 
