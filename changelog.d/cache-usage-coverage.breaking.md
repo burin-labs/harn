@@ -1,4 +1,4 @@
-- **Run and session usage retain measured cache coverage.** Public usage views
+- **Run and session usage retain measured cache coverage (#11397).** Public usage views
   include the canonical cache-category report counts and an optional physical
   provider-call count, so clients can distinguish complete totals, partial
   subtotals, measured zero, and legacy unknown coverage. The JSON fields remain
