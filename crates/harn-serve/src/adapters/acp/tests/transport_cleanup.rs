@@ -70,11 +70,11 @@ async fn disconnected_and_shutdown_transports_reap_only_their_own_background_com
             }
             server.await.unwrap();
             assert!(handle.is_terminated());
-            assert!(!is_running(child.pid), "transport-owned child survived termination");
-            assert!(is_running(bystander.pid), "another transport's child was killed");
             let result = tokio::task::spawn_blocking(move || {
                 harn_clock::test_support::recv_within("transport child cleanup receipt", &result)
             }).await.unwrap();
+            assert!(!is_running(child.pid), "transport-owned child survived termination");
+            assert!(is_running(bystander.pid), "another transport's child was killed");
             let VmValue::Dict(result) = result else { panic!("expected command receipt") };
             let Some(VmValue::Dict(cleanup)) = result.get("process_cleanup") else {
                 panic!("missing process cleanup observation: {result:?}");

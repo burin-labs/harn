@@ -120,9 +120,9 @@ jobs:
     # unrestricted DTrace, so the process confinement probe refuses there and
     # every confinement test fails.
     runs-on: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && fromJSON('["self-hosted","harn-trusted-macos"]') || 'macos-latest' }}
-    # A cold hosted build plus the complete workspace suite needs this fuse;
-    # the separate feedback budget still reports slow routine PR runs.
-    timeout-minutes: 90
+    # Restore, workspace tests, and the separate foreground embedding build
+    # share this fuse. Routine PR feedback still warns after 20 minutes.
+    timeout-minutes: 120
     # Don't run forks of the repo on a fork's own schedule.
     if: github.repository == 'burin-labs/harn' && (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main')
     steps:
@@ -274,7 +274,7 @@ jobs:
         shell: bash
         env:
           CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
-          RUST_TEST_JOB_LIMIT_MINUTES: 90
+          RUST_TEST_JOB_LIMIT_MINUTES: 120
           HARN_EXT_LSP_FIXTURES_REQUIRED: "1"
           # Routine feedback gets an early signal, separate from the cold-build fuse.
           RUST_TEST_FEEDBACK_BUDGET_SECONDS: ${{ github.event_name == 'pull_request' && '1200' || '' }}
@@ -307,7 +307,7 @@ jobs:
         env:
           SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
           HARN_EXT_LSP_FIXTURES_REQUIRED: "1"
-          RUST_TEST_JOB_LIMIT_MINUTES: 90
+          RUST_TEST_JOB_LIMIT_MINUTES: 120
         run: bash "$RUNNER_TEMP/native-qualification-tools/hostlib_macos_stress.sh"
       - name: Upload hostlib stress evidence
         if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.hostlib_stress }}
