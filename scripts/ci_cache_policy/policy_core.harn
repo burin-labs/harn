@@ -1721,7 +1721,7 @@ pub fn cache_families_for_step(job_definition: CiJob?, step: CiStep?) -> list<st
     return [family]
   }
   let families: list<string> = []
-  for entry in job_definition?.strategy?.matrix?.include ?? [] {
+  for entry in matrix_include_rows(job_definition) {
     const matrix_key = trim(to_string(entry?.cache_key ?? ""))
     if matrix_key != "" {
       families = families + [replace(family, "$" + "{{ matrix.cache_key }}", matrix_key)]
@@ -1848,7 +1848,7 @@ pub fn ci_cache_policy_errors(
           let expanded_keys: list<string> = [shared_key]
           if contains(shared_key, "matrix.cache_key") {
             expanded_keys = []
-            for entry in jobs[job]?.strategy?.matrix?.include ?? [] {
+            for entry in matrix_include_rows(jobs[job]) {
               const matrix_key = trim(entry?.cache_key ?? "")
               if matrix_key != "" {
                 expanded_keys = expanded_keys + [matrix_key]
@@ -1977,8 +1977,13 @@ fn runner_selector_expressions(
   if depth >= 4 {
     return texts
   }
-  const matrix = job?.strategy?.matrix ?? {}
-  for {key: name, value: values} in matrix {
+  const configured_matrix = job?.strategy?.matrix
+  if type_of(configured_matrix) == "string" {
+    return texts.unique()
+  }
+  const matrix = configured_matrix ?? {}
+  for name in matrix.keys().sorted() {
+    const values = matrix[name]
     if name != "include" && name != "exclude" && contains(expression, "matrix.${name}") {
       if type_of(values) == "list" {
         for value in values {
@@ -1989,8 +1994,11 @@ fn runner_selector_expressions(
       }
     }
   }
-  for row in matrix?.include ?? [] {
-    for {key: name, value: value} in row {
+  if type_of(matrix.include) == "string" {
+    return texts.unique()
+  }
+  for row in matrix_include_rows(job) {
+    for (name, value) in row.iter() {
       if contains(expression, "matrix.${name}") {
         texts = texts + runner_selector_expressions(workflow, job, value, depth + 1)
       }

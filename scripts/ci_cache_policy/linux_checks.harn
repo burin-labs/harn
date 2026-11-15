@@ -628,8 +628,8 @@ fn rust_cache_refresh_errors(workflow: CiWorkflow?) -> list<string> {
     + rust_cache_refresh_concurrency_errors(workflow)
   // Matrix legs write each Linux merge-gate key with that lane's env fingerprint.
   let matrix_keys: list<string> = []
-  const profiles = (workflow?.jobs?.["rust-cache-refresh-cli"]?.strategy?.matrix?.include ?? [])
-    + (job?.strategy?.matrix?.include ?? [])
+  const profiles = matrix_include_rows(workflow?.jobs?.["rust-cache-refresh-cli"])
+    + matrix_include_rows(job)
   for entry in profiles {
     const cache_key = trim(entry?.cache_key ?? "")
     matrix_keys = matrix_keys + [cache_key]
@@ -1305,7 +1305,7 @@ pub fn cache_refresh_workflow_errors(workflow: CiWorkflow?) -> list<string> {
  */
 fn residual_docs_proof_errors(workflow: CiWorkflow?) -> list<string> {
   let docs_job = ""
-  for entry in workflow?.jobs?.["harn-audit"]?.strategy?.matrix?.include ?? [] {
+  for entry in matrix_include_rows(workflow?.jobs?.["harn-audit"]) {
     if trim(to_string(entry?.selector ?? "")) == "--group=docs" {
       docs_job = trim(to_string(entry?.name ?? ""))
     }
