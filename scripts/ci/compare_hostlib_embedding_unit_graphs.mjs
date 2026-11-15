@@ -60,6 +60,16 @@ assert.ok(
   "Expected workspace selection, writer, build and test graphs",
 );
 const writer = graph(writerPath);
+const embeddingPackages = new Set(
+  writer.units
+    .filter((unit) => unit.target.name === "harn_hostlib")
+    .map((unit) => unit.pkg_id),
+);
+assert.equal(
+  embeddingPackages.size,
+  1,
+  "Workspace embedding package is ambiguous",
+);
 for (const [operation, path] of [
   ["build", buildPath],
   ["test", testPath],
@@ -71,6 +81,10 @@ for (const [operation, path] of [
     "Embedding must select only its example",
   );
   const root = candidate.units[candidate.roots[0]];
+  assert.ok(
+    embeddingPackages.has(root.pkg_id),
+    "Example must belong to the workspace hostlib package",
+  );
   assert.equal(root.target.name, "foreground_command");
   assert.deepEqual(root.target.kind, ["example"]);
   assert.equal(
