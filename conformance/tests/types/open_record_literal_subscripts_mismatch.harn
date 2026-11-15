@@ -1,0 +1,9 @@
+type Counts = {count: int, ...dict}
+
+fn wrong(row: Counts) -> string {
+  return row[r"count"]
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(wrong({count: 7}))
+}

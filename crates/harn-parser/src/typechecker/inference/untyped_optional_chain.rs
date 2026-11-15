@@ -8,38 +8,42 @@ use super::super::{is_gradual_type_name, TypeChecker};
 
 const RULE: &str = "untyped-optional-chain";
 
+fn optional_field_name(node: &SNode) -> Option<&str> {
+    match &node.node {
+        Node::OptionalPropertyAccess { property, .. } => Some(property),
+        Node::OptionalSubscriptAccess { index, .. } => TypeChecker::literal_index_key(index),
+        _ => None,
+    }
+}
+
+fn optional_receiver(node: &SNode) -> Option<&SNode> {
+    match &node.node {
+        Node::OptionalPropertyAccess { object, .. }
+        | Node::OptionalSubscriptAccess { object, .. } => Some(object),
+        _ => None,
+    }
+}
+
 impl TypeChecker {
-    /// Warn on the second `?.` link of a chain whose first optional receiver
-    /// is untyped (`any`, `unknown`, an open `dict`, or nothing inferred), or
-    /// whose first link reads an untyped value out of a typed one.
+    /// Report the first pair of optional links that crosses an untyped field.
     ///
     /// `data?.repository?.pullRequest` hedges every field because nothing
     /// declared the shape. Decoding once with `schema_parse(value,
     /// schema_of(T))` validates it and leaves typed fields behind. A chain
     /// over a typed record with optional fields is real nil handling and is
-    /// left alone. Reporting only the second link gives one warning per chain.
+    /// left alone. Later untyped links do not repeat the same diagnostic.
     pub(in crate::typechecker) fn check_untyped_optional_chain(
         &mut self,
         snode: &SNode,
-        object: &SNode,
         scope: &TypeScope,
     ) {
-        let mut links = 0;
-        let mut innermost_receiver = None;
-        let mut innermost_property = None;
-        let mut cursor = object;
+        let mut links = Vec::new();
+        let mut cursor = snode;
         loop {
             match &cursor.node {
-                Node::OptionalPropertyAccess { object, property } => {
-                    links += 1;
-                    innermost_receiver = Some(object.as_ref());
-                    innermost_property = Some(property.as_str());
-                    cursor = object;
-                }
-                Node::OptionalSubscriptAccess { object, .. } => {
-                    links += 1;
-                    innermost_receiver = Some(object.as_ref());
-                    innermost_property = None;
+                Node::OptionalPropertyAccess { object, .. }
+                | Node::OptionalSubscriptAccess { object, .. } => {
+                    links.push(cursor);
                     cursor = object;
                 }
                 Node::PropertyAccess { object, .. } | Node::SubscriptAccess { object, .. } => {
@@ -48,37 +52,42 @@ impl TypeChecker {
                 _ => break,
             }
         }
-        if links != 1 {
+        if links.len() < 2 {
             return;
         }
-        let Some(receiver) = innermost_receiver else {
-            return;
-        };
-        let receiver_type = self.infer_type(receiver, scope);
-        let receiver_typed = receiver_type
-            .as_ref()
-            .is_some_and(|ty| !self.type_is_untyped_record(ty, innermost_property, scope));
-        // `{data: any}` declares `data`, so the receiver is typed, but the
-        // `?.` after it still hedges an untyped value. A first link with no
-        // inferred type is not evidence either way, so it stays quiet.
-        let first_link_typed = || {
-            self.infer_type(object, scope)
-                .is_none_or(|ty| !self.type_is_untyped_record(&ty, None, scope))
-        };
-        if receiver_typed && first_link_typed() {
-            return;
+        links.reverse();
+        for (index, pair) in links.windows(2).enumerate() {
+            let Some(receiver) = optional_receiver(pair[0]) else {
+                return;
+            };
+            let receiver_typed = self.infer_type(receiver, scope).is_some_and(|ty| {
+                !self.type_is_untyped_record(&ty, optional_field_name(pair[0]), scope)
+            });
+            let Some(next_receiver) = optional_receiver(pair[1]) else {
+                return;
+            };
+            let first_link_typed = self.infer_type(next_receiver, scope).is_some_and(|ty| {
+                !self.type_is_untyped_record(&ty, optional_field_name(pair[1]), scope)
+            });
+            if !receiver_typed || !first_link_typed {
+                // The recursive walk owns an earlier frontier's diagnostic.
+                if index + 2 != links.len() {
+                    return;
+                }
+                self.lint_info_at(
+                    Code::LintUntypedOptionalChain,
+                    RULE,
+                    "`?.` chain over an untyped value hedges every field".to_string(),
+                    snode.span,
+                    "declare a `type` for the value: decode untyped input once with \
+                     `json_decode(text, schema_of(T))` or `schema_parse(value, schema_of(T))`, \
+                     or annotate the parameter or return type that erased it to `dict`; then \
+                     read typed fields with `.`"
+                        .to_string(),
+                );
+                return;
+            }
         }
-        self.lint_info_at(
-            Code::LintUntypedOptionalChain,
-            RULE,
-            "`?.` chain over an untyped value hedges every field".to_string(),
-            snode.span,
-            "declare a `type` for the value: decode untyped input once with \
-             `json_decode(text, schema_of(T))` or `schema_parse(value, schema_of(T))`, \
-             or annotate the parameter or return type that erased it to `dict`; then \
-             read typed fields with `.`"
-                .to_string(),
-        );
     }
 
     /// `any`, `unknown`, a `dict` whose values are untyped, or a union of those
@@ -99,8 +108,8 @@ impl TypeChecker {
             TypeExpr::Named(name) => name == "dict" || is_gradual_type_name(name),
             TypeExpr::Applied { name, args } if name == "dict" => args
                 .last()
-                .is_none_or(|value| self.type_is_untyped_record(value, None, scope)),
-            TypeExpr::DictType(_, value) => self.type_is_untyped_record(value, None, scope),
+                .is_none_or(|value| self.map_value_is_untyped(value, scope)),
+            TypeExpr::DictType(_, value) => self.map_value_is_untyped(value, scope),
             TypeExpr::OpenShape { fields, rests } => {
                 let declared = property.is_some_and(|name| fields.iter().any(|f| f.name == name));
                 !declared
@@ -122,6 +131,23 @@ impl TypeChecker {
                 saw_untyped
             }
             _ => false,
+        }
+    }
+
+    fn map_value_is_untyped(&self, value: &TypeExpr, scope: &TypeScope) -> bool {
+        let value = self.resolve_alias(value, scope);
+        match &value {
+            TypeExpr::OpenShape { fields, .. } if !fields.is_empty() => false,
+            TypeExpr::Union(members) => {
+                let mut non_nil = members
+                    .iter()
+                    .filter(|member| !self.type_is_nil(member, scope));
+                non_nil.next().is_some_and(|first| {
+                    self.map_value_is_untyped(first, scope)
+                        && non_nil.all(|member| self.map_value_is_untyped(member, scope))
+                })
+            }
+            _ => self.type_is_untyped_record(&value, None, scope),
         }
     }
 

@@ -1,0 +1,9 @@
+type Job = {name: string, ...dict}
+
+fn wrong(job: Job?) -> string {
+  return (job ?? {}).name
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(wrong(nil))
+}

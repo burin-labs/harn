@@ -1,0 +1,19 @@
+type Strategy = {matrix: int?, ...dict}
+
+type Job = {strategy: Strategy?, ...dict}
+
+type Counts = {tag: string, ...dict<string, int>}
+
+fn matrix(job: Job?) -> int? {
+  return job?.[r"strategy"]?.["matrix"]
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(matrix({strategy: {matrix: 7}}))
+  harness.stdio.println(matrix(nil) == nil)
+  let counts: Counts = {tag: "counts"}
+  counts["extension"] = 3
+  const value: int? = counts[r"extension"]
+  harness.stdio.println(value)
+  harness.stdio.println(counts["missing"] == nil)
+}

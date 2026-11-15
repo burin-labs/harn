@@ -140,3 +140,195 @@ fn untyped_optional_chain_sees_untyped_declared_fields_and_any_untyped_tail() {
     );
     assert_eq!(mixed_tails, 1, "the generic tail can carry `extra`");
 }
+
+#[test]
+fn untyped_optional_chain_keeps_declared_nested_open_fields_typed() {
+    let source = r"
+type Strategy = {matrix: int?, ...dict}
+type Job = {strategy: Strategy?, ...dict}
+fn read(job: Job?) -> int? { return job?.strategy?.matrix }
+";
+    assert!(errors(source).is_empty());
+    assert_eq!(rule_count(source, "untyped-optional-chain"), 0);
+}
+
+#[test]
+fn untyped_optional_chain_recognizes_literal_open_record_subscripts() {
+    let source = r#"
+type Strategy = {matrix: int?, ...dict}
+type Job = {strategy: Strategy?, ...dict}
+fn read(job: Job?) -> any {
+  return [job?.["strategy"]?.matrix, job?.strategy?.["matrix"], job?.[r"strategy"]?.[r"matrix"]]
+}
+"#;
+    assert!(errors(source).is_empty());
+    assert_eq!(rule_count(source, "untyped-optional-chain"), 0);
+}
+
+#[test]
+fn untyped_optional_chain_still_reports_unknown_open_fields_and_declared_any() {
+    let source = r#"
+type Strategy = {matrix: int?, ...dict}
+type Job = {strategy: Strategy?, payload: any, ...dict}
+fn read(job: Job?, field: string) -> any {
+  return [job?.strategy?.[field], job?.strategy?.extension, job?.["payload"]?.value]
+}
+"#;
+    assert!(errors(source).is_empty());
+    assert_eq!(rule_count(source, "untyped-optional-chain"), 3);
+}
+
+#[test]
+fn literal_record_subscripts_preserve_declared_field_types() {
+    let correct = r#"
+type Open = {count: int, ...dict}
+type Closed = {count: int}
+fn open(row: Open?) -> int? { return row?.["count"] }
+fn closed(row: Closed) -> int { return row[r"count"] }
+"#;
+    let correct_errors = errors(correct);
+    assert!(correct_errors.is_empty(), "{correct_errors:?}");
+    let wrong = r#"
+type Open = {count: int, ...dict}
+type Closed = {count: int}
+fn open(row: Open) -> string { return row["count"] }
+fn open_raw(row: Open) -> string { return row[r"count"] }
+fn closed(row: Closed) -> string { return row["count"] }
+fn closed_raw(row: Closed) -> string { return row[r"count"] }
+"#;
+    let wrong_errors = errors(wrong);
+    assert_eq!(wrong_errors.len(), 4, "{wrong_errors:?}");
+    assert!(
+        wrong_errors
+            .iter()
+            .all(|error| error.contains("expected string, found int")),
+        "{wrong_errors:?}"
+    );
+}
+
+#[test]
+fn open_record_subscripts_keep_typed_row_tail_read_and_write_rules() {
+    let source = r#"
+type Row = {tag: string, ...dict<string, int>}
+fn read(row: Row) -> int? { return row["extension"] }
+fn write() {
+  let row: Row = {tag: "row"}
+  row["extension"] = 7
+}
+"#;
+    let checked = errors(source);
+    assert!(checked.is_empty(), "{checked:?}");
+    let missing = errors(
+        r#"type Row = {tag: string, ...dict<string, int>}
+fn read(row: Row) -> int { return row["extension"] }"#,
+    );
+    assert_eq!(missing.len(), 1, "{missing:?}");
+}
+
+#[test]
+fn open_record_literal_writes_check_declared_and_tail_types() {
+    let source = r#"
+type Row = {count: int, ...dict<string, int>}
+fn tail() {
+  let row: Row = {count: 0}
+  row["extension"] = "wrong"
+}
+fn declared() {
+  let row: Row = {count: 0}
+  row["count"] = "wrong"
+}
+"#;
+    let checked = check_source_with_source(source);
+    assert_eq!(errors(source).len(), 2, "{checked:?}");
+    assert_eq!(
+        checked
+            .iter()
+            .filter(|diagnostic| diagnostic.code
+                == crate::diagnostic_codes::Code::AssignmentTypeMismatch)
+            .count(),
+        2,
+        "{checked:?}"
+    );
+}
+
+#[test]
+fn untyped_optional_chain_keeps_open_map_values_typed() {
+    let source = r"
+type Job = {name?: string, ...dict}
+type Workflow = {jobs?: dict<string, Job>, ...dict}
+fn read(workflow: Workflow?) -> string? { return workflow?.jobs?.build?.name }
+fn nullable(jobs: dict<string, Job?>) -> string? { return jobs?.build?.name }
+";
+    assert!(errors(source).is_empty());
+    assert_eq!(rule_count(source, "untyped-optional-chain"), 0);
+    let wrong = errors(&source.replace("-> string?", "-> int"));
+    assert_eq!(wrong.len(), 2, "{wrong:?}");
+    assert!(
+        wrong
+            .iter()
+            .all(|error| error.contains("expected int, found string?")),
+        "{wrong:?}"
+    );
+}
+
+#[test]
+fn untyped_optional_chain_reports_the_first_late_untyped_frontier_once() {
+    for (job, tail, frontier) in [
+        (
+            "{name?: string, payload?: any, ...dict}",
+            "extension?.child?.grandchild",
+            "workflow?.jobs?.build?.extension",
+        ),
+        (
+            "{name?: string, payload?: any, ...dict}",
+            "payload?.child?.grandchild",
+            "workflow?.jobs?.build?.payload?.child",
+        ),
+        (
+            "{name?: string, payload?: any}",
+            "payload?.child?.grandchild",
+            "workflow?.jobs?.build?.payload?.child",
+        ),
+        (
+            "{name?: string, payload?: unknown}",
+            "payload?.child?.grandchild",
+            "workflow?.jobs?.build?.payload?.child",
+        ),
+        (
+            "{name?: string, payload?: any}",
+            "payload.child?.grandchild",
+            "workflow?.jobs?.build?.payload.child?.grandchild",
+        ),
+    ] {
+        let source = format!(
+            "type Job = {job}\n\
+             type Workflow = {{jobs?: dict<string, Job>}}\n\
+             fn read(workflow: Workflow?) -> any {{ return workflow?.jobs?.build?.{tail} }}"
+        );
+        let diagnostics: Vec<_> = check_source_with_source(&source)
+            .into_iter()
+            .filter(|diagnostic| diagnostic.code == Code::LintUntypedOptionalChain)
+            .collect();
+        assert_eq!(diagnostics.len(), 1, "{source}\n{diagnostics:?}");
+        let span = diagnostics[0].span.expect("the frontier has a source span");
+        assert_eq!(source.get(span.start..span.end), Some(frontier), "{source}");
+    }
+}
+
+#[test]
+fn untyped_optional_chain_distinguishes_nil_alias_maps_from_any_alias_maps() {
+    let known = r"
+type First = nil
+type Value = First?
+fn read(rows: dict<string, Value>) -> nil { return rows?.entry?.name }
+";
+    assert!(errors(known).is_empty());
+    assert_eq!(rule_count(known, "untyped-optional-chain"), 0);
+    let wrong = errors(&known.replace("-> nil", "-> int"));
+    assert_eq!(wrong.len(), 1, "{wrong:?}");
+    assert!(wrong[0].contains("expected int, found nil"), "{wrong:?}");
+    let untyped = known
+        .replace("First = nil", "First = any")
+        .replace("-> nil", "-> any");
+    assert_eq!(rule_count(&untyped, "untyped-optional-chain"), 1);
+}

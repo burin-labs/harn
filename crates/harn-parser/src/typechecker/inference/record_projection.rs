@@ -39,8 +39,7 @@ struct RecordFields {
 }
 
 impl TypeChecker {
-    /// Whether `value` is a `pick` call or a `const` alias of one. Such a
-    /// binding takes the strict field-access path without a written annotation.
+    /// Preserve record contracts through projections, coalescing, and aliases.
     pub(in crate::typechecker) fn has_projection_contract(
         &self,
         value: &SNode,
@@ -61,6 +60,13 @@ impl TypeChecker {
                 right,
                 ..
             } => self.has_projection_contract(right, scope),
+            Node::BinaryOp {
+                op: BinaryOperator::NilCoalesce,
+                left,
+                ..
+            } => self
+                .infer_type(left, scope)
+                .is_some_and(|raw| self.is_strict_access_source(left, &raw, scope)),
             _ => false,
         }
     }

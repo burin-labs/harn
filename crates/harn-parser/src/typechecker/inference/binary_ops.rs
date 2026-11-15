@@ -8,7 +8,28 @@
 use crate::ast::*;
 use harn_lexer::{FixEdit, Span};
 
+use super::super::binary_ops::infer_binary_op_type;
+use super::super::scope::{InferredType, TypeScope};
+use super::super::union::{contains_nil, without_nil};
 use super::super::TypeChecker;
+
+fn empty_dict_fallback_type(left: &TypeExpr) -> InferredType {
+    if !contains_nil(left) {
+        return Some(left.clone());
+    }
+    let mut non_nil = without_nil(left)?;
+    match &mut non_nil {
+        TypeExpr::DictType(..) => Some(non_nil),
+        TypeExpr::Applied { name, .. } if name == "dict" => Some(non_nil),
+        TypeExpr::Shape(fields) | TypeExpr::OpenShape { fields, .. } => {
+            for field in fields {
+                field.optional = true;
+            }
+            Some(non_nil)
+        }
+        _ => None,
+    }
+}
 
 /// Whether `l <op> r` is a valid numeric arithmetic pair. `int` promotes to
 /// either `float` or `decimal`, but `float` and `decimal` never mix (binary
@@ -21,6 +42,31 @@ pub(in crate::typechecker) fn numeric_binop_ok(l: &str, r: &str) -> bool {
 }
 
 impl TypeChecker {
+    pub(super) fn infer_nil_coalesce_type(
+        &self,
+        left: &SNode,
+        right: &SNode,
+        scope: &TypeScope,
+    ) -> InferredType {
+        // Resolve aliases before removing nil, including aliases of nilable records.
+        let left_type = self
+            .infer_type(left, scope)
+            .map(|ty| self.resolve_alias(&ty, scope));
+        if matches!(&right.node, Node::DictLiteral(entries) if entries.is_empty()) {
+            if let Some(joined) = left_type.as_ref().and_then(empty_dict_fallback_type) {
+                return Some(joined);
+            }
+        }
+        // An empty fallback contributes no elements to a typed collection.
+        let right_type = match &right.node {
+            Node::ListLiteral(items) if items.is_empty() => {
+                Some(TypeExpr::List(Box::new(TypeExpr::Never)))
+            }
+            _ => self.infer_type(right, scope),
+        };
+        infer_binary_op_type(BinaryOperator::NilCoalesce, &left_type, &right_type)
+    }
+
     /// Build a fix that converts `"str" + expr` or `expr + "str"` to string interpolation.
     pub(in crate::typechecker) fn build_interpolation_fix(
         &self,

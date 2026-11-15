@@ -492,27 +492,11 @@ impl TypeChecker {
                 if matches!(op, BinaryOperator::Pipe) {
                     return self.infer_pipe_type(left, right, scope);
                 }
-                let lt = self.infer_type(left, scope);
-                let mut rt = self.infer_type(right, scope);
                 if matches!(op, BinaryOperator::NilCoalesce) {
-                    // An empty fallback contributes no elements. Its usual
-                    // gradual type supports mutable empty bindings, but would
-                    // erase a typed collection on the other coalesce branch.
-                    rt = match &right.node {
-                        Node::ListLiteral(items) if items.is_empty() => {
-                            Some(TypeExpr::List(Box::new(TypeExpr::Never)))
-                        }
-                        _ => rt,
-                    };
-                    // `??` strips the nil arm from its left operand, but the
-                    // structural `without_nil`/`contains_nil` helpers can't see
-                    // through a named alias — so `type T = {..}?; x: T; x ?? d`
-                    // would keep `T` (still nilable) as the result. Resolve
-                    // aliases first so the coalesce drops nil for aliased
-                    // nilable types exactly as it does for inline unions.
-                    let lt = lt.map(|t| self.resolve_alias(&t, scope));
-                    return infer_binary_op_type(*op, &lt, &rt);
+                    return self.infer_nil_coalesce_type(left, right, scope);
                 }
+                let lt = self.infer_type(left, scope);
+                let rt = self.infer_type(right, scope);
                 infer_binary_op_type(*op, &lt, &rt)
             }
 
@@ -944,6 +928,13 @@ impl TypeChecker {
         natural
     }
 
+    pub(super) fn literal_index_key(index: &SNode) -> Option<&str> {
+        match &index.node {
+            Node::StringLiteral(value) | Node::RawStringLiteral(value) => Some(value),
+            _ => None,
+        }
+    }
+
     pub(super) fn infer_subscript_type_from_type(
         &self,
         ty: &TypeExpr,
@@ -1032,11 +1023,19 @@ impl TypeChecker {
             },
             TypeExpr::DictType(_, value) => Some(Self::index_slot_type((**value).clone(), mode)),
             TypeExpr::Shape(fields) => {
-                if let Node::StringLiteral(key) = &index.node {
-                    Self::shape_property_type(fields, key, optional)
-                } else {
-                    None
+                let key = Self::literal_index_key(index)?;
+                Self::shape_property_type(fields, key, optional)
+            }
+            TypeExpr::OpenShape { fields, rests } => {
+                let key = Self::literal_index_key(index)?;
+                if fields.iter().any(|field| field.name == key) {
+                    return Self::shape_property_type(fields, key, optional);
                 }
+                let inferred = rests
+                    .iter()
+                    .map(|rest| self.subscript_slot_type(rest, index, scope, optional, mode))
+                    .collect::<Option<Vec<_>>>()?;
+                (!inferred.is_empty()).then(|| simplify_union(inferred))
             }
             // A `string` index is a one-character `string`, absent (`nil`) when
             // the index is out of bounds — the same optionality rule as `list`.
