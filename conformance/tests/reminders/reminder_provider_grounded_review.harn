@@ -44,7 +44,7 @@ pipeline main(harness: Harness) {
     opts + {reminders: opts.reminders + {config: {grounded_review: {text_scan: true}}}},
   )
   const reminders = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
-  require report.reports.any({ report -> report.provider == "grounded_review" }),
+  require report.reports.any({ provider_report -> provider_report.provider == "grounded_review" }),
     "the same provider path must produce a nonzero read with text scanning enabled"
   const reminder = reminders[0].reminder
   harness.stdio.println(report.fired_count)
