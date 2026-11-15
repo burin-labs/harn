@@ -1,0 +1,134 @@
+pub import { MessageSegment, MessageTemplate } from "std/cli/message_template"
+
+pub type Registry = {
+  schema_version: int,
+  locale_env: string,
+  messages: dict<string, int>,
+  sources: dict<string, {calls: dict<string, int>}>,
+}
+
+pub type Catalog = dict<string, string>
+
+pub type MessagePlan = list<MessageSegment>
+
+/** Compile only catalog syntax; supplied argument text is never interpreted. */
+pub fn message_plan(template: string, arity: int) -> MessagePlan {
+  require template.trim() != "", "missing script translation"
+  let pieces: MessagePlan = []
+  let slots: list<int> = []
+  let literal = ""
+  let cursor = 0
+  while cursor < len(template) {
+    const character = template.substring(cursor, cursor + 1)
+    const pair = template.substring(cursor, cursor + 2)
+    if pair == "{{" || pair == "}}" {
+      literal = "${literal}${character}"
+      cursor += 2
+    } else if character == "{" {
+      const suffix = template.substring(cursor)
+      const token = (regex_match("^\\{[0-9]+\\}", suffix) ?? [])[0]
+      require token != nil, "unregistered template syntax: ${template}"
+      const slot = to_int(token.substring(1, len(token) - 1))
+      require slot < arity, "out-of-range slot: ${template}"
+      if literal != "" {
+        pieces.push(literal)
+        literal = ""
+      }
+      slots.push(slot)
+      pieces.push(slot)
+      cursor += len(token)
+    } else {
+      require character != "}", "unregistered template syntax: ${template}"
+      literal = "${literal}${character}"
+      cursor += 1
+    }
+  }
+  if literal != "" {
+    pieces.push(literal)
+  }
+  let expected: list<int> = []
+  for slot in range(0, arity) {
+    expected.push(slot)
+  }
+  require slots.sorted() == expected, "changed argument slots: ${template}"
+  return pieces
+}
+
+type AstNode = {kind: string, fields: unknown, ...dict<string, unknown>}
+
+type AstObject = dict<string, unknown>
+
+type AstList = list<unknown>
+
+type AstString = string
+
+type ImportFields = {path: string, names: list<string>, ...dict<string, unknown>}
+
+type CallFields = {name: string, args: list<AstNode>, ...dict<string, unknown>}
+
+type ParsedProgram = {
+  schemaVersion: int,
+  ok: bool,
+  data: {kind: string, body: list<AstNode>, ...dict<string, unknown>},
+  ...dict<string, unknown>,
+}
+
+fn localization_calls(value: unknown) -> list<CallFields> {
+  let calls: list<CallFields> = []
+  if schema_is(value, schema_of(AstList)) {
+    for item in value {
+      calls.extend(localization_calls(item))
+    }
+  } else if schema_is(value, schema_of(AstObject)) {
+    if value.keys().contains("kind") && value.keys().contains("fields") {
+      const node: AstNode = schema_expect(value, schema_of(AstNode))
+      if node.kind == "FunctionCall" {
+        const call: CallFields = schema_expect(node.fields, schema_of(CallFields))
+        if call.name == "cli_message" {
+          calls.push(call)
+        }
+      }
+    }
+    for (_, item) in value.iter() {
+      calls.extend(localization_calls(item))
+    }
+  }
+  return calls
+}
+
+/** Verify the compiler's actual import and call nodes against the registry. */
+pub fn measured_calls(
+  text: string,
+  relative: string,
+  namespace: string,
+  messages: dict<string, int>,
+) -> dict<string, int> {
+  const parsed = schema_expect(json_parse(text), schema_of(ParsedProgram))
+  require parsed.ok && parsed.schemaVersion == 1 && parsed.data.kind == "Program",
+    "unmeasured script: ${relative}"
+  let imported = false
+  for node in parsed.data.body {
+    if node.kind == "SelectiveImport" {
+      const fields: ImportFields = schema_expect(node.fields, schema_of(ImportFields))
+      if fields.path == "std/cli/localization/${namespace}"
+        && fields.names.contains("cli_message") {
+        imported = true
+      }
+    }
+  }
+  require imported, "missing owning localization import: ${relative}"
+  let counts: dict<string, int> = {}
+  for call in localization_calls(parsed.data) {
+    const args = call.args
+    require len(args) == 3, "invalid explicit localization call: ${relative}"
+    require args[0].kind == "Identifier" && args[0].fields == "__cli_locale"
+      && args[1].kind == "StringLiteral"
+      && args[2].kind == "ListLiteral",
+      "invalid explicit localization call: ${relative}"
+    const key = schema_expect(args[1].fields, schema_of(AstString))
+    const values: AstList = schema_expect(args[2].fields, schema_of(AstList))
+    require messages[key] == len(values), "changed argument contract in ${relative}: ${key}"
+    counts[key] = (counts[key] ?? 0) + 1
+  }
+  return counts
+}
