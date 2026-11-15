@@ -242,7 +242,7 @@ impl Fixture {
                     plant(&dir);
                     let _launch = spawn.launching();
                     let mut command = std::process::Command::new(&spawn.program);
-                    command.args(&spawn.args).current_dir(self.ws());
+                    command.args(spawn.args()).current_dir(self.ws());
                     for key in &spawn.remove {
                         command.env_remove(key);
                     }
@@ -917,7 +917,7 @@ fn a_confined_granted_fetch_push_and_clone_land() {
             closed_env: true,
             ..Default::default()
         };
-        let output = crate::stdlib::sandbox::command_output(&spawn.program, &spawn.args, &config);
+        let output = crate::stdlib::sandbox::command_output(&spawn.program, spawn.args(), &config);
         drop(_launch);
         spawn.complete(output.as_ref().is_ok_and(|output| output.status.success()))?;
         output
