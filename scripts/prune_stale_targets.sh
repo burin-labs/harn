@@ -362,6 +362,7 @@ if [ "$incremental_only" -eq 1 ]; then
   gc_policy_version="$gc_policy_version-incremental-$(cksum "$SCRIPT_DIR/lib/target_gc_incremental.py" | awk '{print $1 "-" $2}')"
 fi
 scanned=0; removed=0; kept=0; pending_candidates=0; blocked_named_entries=0; ceiling_unproven_roots=0; pressure_unproven_roots=0; summary_printed=0
+unscanned_roots=0
 incremental_reclaims=0
 reclaimed_bytes=0; retained_bytes=0; unmeasured_entries=0
 completed=0
@@ -420,7 +421,8 @@ print_summary() {
     status="complete"
     if [ "$dry_run" -eq 1 ]; then
       status="dry-run"
-    elif [ "$ceiling_unproven_roots" -gt 0 ] || [ "$pressure_unproven_roots" -gt 0 ] || [ "$blocked_named_entries" -gt 0 ]; then
+    elif [ "$ceiling_unproven_roots" -gt 0 ] || [ "$pressure_unproven_roots" -gt 0 ] || [ "$blocked_named_entries" -gt 0 ] ||
+      [ "$unscanned_roots" -gt 0 ]; then
       status="partial"
     fi
   fi
@@ -435,7 +437,7 @@ print_summary() {
   fi
   # scanned is reported alongside the verdict so a zero here is readable as
   # "walked these roots and found nothing" rather than "walked nothing".
-  echo "harn-target GC: policy=$gc_policy_version status=$status last_success=$last_success last_success_policy=$last_success_policy scanned=$scanned kept=$kept removed=$removed reclaimed_bytes=$reported_reclaimed retained_bytes=$reported_retained pending_candidates=$reported_pending unmeasured_entries=$unmeasured_entries ceiling_unproven_roots=$ceiling_unproven_roots pressure_unproven_roots=$pressure_unproven_roots blocked_named_entries=$blocked_named_entries incremental_only=$incremental_only incremental_reclaims=$incremental_reclaims (roots=$roots)$suffix"
+  echo "harn-target GC: policy=$gc_policy_version status=$status last_success=$last_success last_success_policy=$last_success_policy scanned=$scanned kept=$kept removed=$removed reclaimed_bytes=$reported_reclaimed retained_bytes=$reported_retained pending_candidates=$reported_pending unmeasured_entries=$unmeasured_entries ceiling_unproven_roots=$ceiling_unproven_roots pressure_unproven_roots=$pressure_unproven_roots unscanned_roots=$unscanned_roots blocked_named_entries=$blocked_named_entries incremental_only=$incremental_only incremental_reclaims=$incremental_reclaims (roots=$roots)$suffix"
 }
 
 record_success() {
@@ -1055,10 +1057,16 @@ prune_root() {
   # between roots would let one root's ceiling evict another root's entries.
   : > "$evictable_file"
   pressure_recent_paths=()
-  local warm_entry=0
-  for d in "$target_root"/*; do
+  local warm_entry=0 root_scanned=0 root_entries
+  # Count the root's directories independently of the walk. A checkout under a
+  # dot-named parent (for example `.cache/src`) derives a dot-named entry, and a
+  # walk that misses an entry must not report that root as fully scanned.
+  root_entries="$(find "$target_root" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null | tr -cd '\000' | wc -c | tr -d ' ')" ||
+    root_entries=""
+  for d in "$target_root"/* "$target_root"/.[!.]* "$target_root"/..?*; do
     [ -d "$d" ] || continue
     scanned=$((scanned + 1))
+    root_scanned=$((root_scanned + 1))
     name="$(basename "$d")"
     warm_entry=0
     if entry_requested "$name"; then
@@ -1148,6 +1156,13 @@ prune_root() {
 
     remove_entry "$target_root" "$d" "orphan"
   done
+  if ! [[ "$root_entries" =~ ^[0-9]+$ ]]; then
+    echo "warning: could not count the entries in $target_root; its scan is unproven" >&2
+    unscanned_roots=$((unscanned_roots + 1))
+  elif [ "$root_scanned" -lt "$root_entries" ]; then
+    echo "warning: $target_root holds $root_entries entries but $root_scanned were scanned" >&2
+    unscanned_roots=$((unscanned_roots + 1))
+  fi
 
   # Second pass: the retention cap, over the entries the first pass kept only
   # because a live worktree still points at them. Rank by recency, keep the
