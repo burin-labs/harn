@@ -1,0 +1,195 @@
+{
+  "components": {
+    "schemas": {}
+  },
+  "adapters": [
+    {
+      "name": "send_multipart",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "$defs": {
+              "media_source": {
+                "additionalProperties": false,
+                "properties": {
+                  "file": {},
+                  "tags": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            },
+            "additionalProperties": false,
+            "properties": {
+              "file": {
+                "additionalProperties": false,
+                "properties": {
+                  "content_type": {
+                    "enum": [
+                      "application/octet-stream"
+                    ],
+                    "type": "string"
+                  },
+                  "filename": {
+                    "type": "string"
+                  },
+                  "headers": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "X-Part": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "X-Part"
+                    ],
+                    "type": "object"
+                  },
+                  "value": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "$bytes_b64": {
+                        "contentEncoding": "base64",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "$bytes_b64"
+                    ],
+                    "type": "object",
+                    "x-harn-type": "bytes"
+                  }
+                },
+                "required": [
+                  "value",
+                  "headers"
+                ],
+                "type": "object"
+              },
+              "tags": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "content_type": {
+                      "enum": [
+                        "text/plain"
+                      ],
+                      "type": "string"
+                    },
+                    "filename": {
+                      "type": "string"
+                    },
+                    "headers": {
+                      "additionalProperties": false,
+                      "properties": {},
+                      "required": [],
+                      "type": "object"
+                    },
+                    "value": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "value"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "title": {
+                "additionalProperties": false,
+                "properties": {
+                  "content_type": {
+                    "enum": [
+                      "text/plain"
+                    ],
+                    "type": "string"
+                  },
+                  "filename": {
+                    "type": "string"
+                  },
+                  "headers": {
+                    "additionalProperties": false,
+                    "properties": {},
+                    "required": [],
+                    "type": "object"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "type": "object"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "type": "object"
+      },
+      "output_schema": {
+        "type": "null"
+      }
+    },
+    {
+      "name": "receive_multiple",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "output_schema": {
+        "$defs": {
+          "response_media_1": {
+            "$defs": {
+              "media_source": {
+                "type": "string"
+              }
+            },
+            "allOf": [
+              {
+                "$ref": "#/$defs/response_media_1/$defs/media_source"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "$bytes_b64": {
+                "contentEncoding": "base64",
+                "type": "string"
+              }
+            },
+            "required": [
+              "$bytes_b64"
+            ],
+            "type": "object",
+            "x-harn-type": "bytes"
+          },
+          {
+            "$ref": "#/$defs/response_media_1"
+          }
+        ]
+      }
+    }
+  ]
+}

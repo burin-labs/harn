@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::value::VmValue;
-use crate::wire::{PreparedWireType, WireFailure, WireFailureCode, WireSourceRef};
+use crate::wire::{PreparedWireType, WireFailure};
 
 type WirePreparation = Result<PreparedWireType, WireFailure>;
 
@@ -19,42 +19,18 @@ impl PreparedWireEntry {
         resources: &RuntimeSchemaResources,
     ) -> Result<Self, PreparedToolCatalogError> {
         let prepared = Self {
-            input: prepare_schema(&tool.input_schema, resources),
+            input: prepare_schema(&tool.name, &tool.input_schema, resources)?,
             output: tool
                 .output_schema
                 .as_ref()
-                .map(|schema| prepare_schema(schema, resources)),
+                .map(|schema| prepare_schema(&tool.name, schema, resources))
+                .transpose()?,
             error: tool
                 .error_schema
                 .as_ref()
-                .map(|schema| prepare_schema(schema, resources)),
+                .map(|schema| prepare_schema(&tool.name, schema, resources))
+                .transpose()?,
         };
-        for (phase, schema) in [
-            (ToolContractPhase::Input, Some(&tool.input_schema)),
-            (ToolContractPhase::Output, tool.output_schema.as_ref()),
-            (
-                ToolContractPhase::ApplicationError,
-                tool.error_schema.as_ref(),
-            ),
-        ] {
-            let Some(schema) = schema else { continue };
-            let mut declared_wire = false;
-            let mut schema = schema.clone();
-            crate::tool_registry::transform_codegen_schema(&mut schema, &mut |object| {
-                declared_wire |=
-                    object.contains_key("x-harn-wire-id") || object.contains_key("x-harn-type");
-                Ok::<(), std::convert::Infallible>(())
-            })
-            .expect("infallible metadata census");
-            if declared_wire {
-                if let Some(Err(failure)) = prepared.get(phase) {
-                    return Err(PreparedToolCatalogError::new(format!(
-                        "tool {:?} has invalid declared wire contract: {failure}",
-                        tool.name
-                    )));
-                }
-            }
-        }
         Ok(prepared)
     }
 
@@ -67,28 +43,48 @@ impl PreparedWireEntry {
     }
 }
 
-fn prepare_schema(schema: &JsonValue, resources: &RuntimeSchemaResources) -> WirePreparation {
-    let failure = || WireFailure {
-        code: WireFailureCode::InvalidContract,
-        type_id: None,
-        source: WireSourceRef::Synthetic {
-            owner: "tool_catalog".into(),
-        },
-        structural_path: String::new(),
+fn prepare_schema(
+    tool: &str,
+    schema: &JsonValue,
+    resources: &RuntimeSchemaResources,
+) -> Result<WirePreparation, PreparedToolCatalogError> {
+    let resource_failure = || {
+        PreparedToolCatalogError::new(format!(
+            "tool {tool:?} has invalid runtime schema resources"
+        ))
     };
-    let schema = resources.rewrite(schema).map_err(|_| failure())?;
+    let schema = resources.rewrite(schema)?;
     let registry = resources
         .registry
         .add(RUNTIME_SCHEMA_ROOT_URI, schema)
         .and_then(|builder| builder.prepare())
-        .map_err(|_| failure())?;
+        .map_err(|_| resource_failure())?;
     let resolver = registry
         .resolver(jsonschema::uri::from_str(RUNTIME_SCHEMA_ROOT_URI).expect("fixed runtime URI"));
-    let root = resolver.lookup("").map_err(|_| failure())?;
+    let root = resolver.lookup("").map_err(|_| resource_failure())?;
     let (schema, resolver, _) = root.into_inner();
-    let mut builder = crate::wire::schema::SchemaWireBuilder::new();
-    let root = builder.lower(schema, resolver, RUNTIME_SCHEMA_ROOT_URI)?;
-    Ok(PreparedWireType::from_graph(builder.finish()?, root))
+    let annotations = crate::wire::schema::wire_annotations(schema, resolver.clone());
+    let mut builder = if annotations.declared {
+        crate::wire::schema::SchemaWireBuilder::runtime(registry.clone())
+    } else {
+        crate::wire::schema::SchemaWireBuilder::new()
+    };
+    let prepared = builder
+        .lower(schema, resolver, RUNTIME_SCHEMA_ROOT_URI)
+        .and_then(|root| {
+            builder
+                .finish()
+                .map(|graph| PreparedWireType::from_graph(graph, root))
+        });
+    if annotations.declared {
+        prepared.map(Ok).map_err(|failure| {
+            PreparedToolCatalogError::new(format!(
+                "tool {tool:?} has invalid declared wire contract: {failure}"
+            ))
+        })
+    } else {
+        Ok(prepared)
+    }
 }
 
 impl PreparedToolCatalog {

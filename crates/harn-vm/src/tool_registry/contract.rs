@@ -16,7 +16,9 @@ mod native_binding;
 mod prepared;
 mod schema;
 
+pub(crate) use prepared::compile_runtime_schema;
 pub(crate) use schema::try_transform_schema_nodes as transform_codegen_schema;
+pub(crate) use schema::try_visit_schema_nodes_with_context as visit_schema_with_context;
 use schema::{
     decode_json_pointer_segment, encode_json_pointer_segment, try_transform_schema_nodes,
     try_visit_schema_nodes,

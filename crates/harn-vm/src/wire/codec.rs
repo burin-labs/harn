@@ -40,6 +40,12 @@ impl PreparedWireGraph {
         let ty = self.codec_type(id, depth, path)?;
         let fail = |code| at(ty, code, path);
         match &ty.shape {
+            WireShape::RuntimeJson => {
+                if !self.runtime_json_accepts(&ty.id, value) {
+                    return Err(fail(WireFailureCode::InvalidValue));
+                }
+                Ok(crate::value::json::json_to_vm_value(value))
+            }
             WireShape::Null if value.is_null() => Ok(VmValue::Nil),
             WireShape::Boolean => value
                 .as_bool()
@@ -238,6 +244,14 @@ impl PreparedWireGraph {
         let ty = self.codec_type(id, depth, path)?;
         let fail = |code| at(ty, code, path);
         match (&ty.shape, value) {
+            (WireShape::RuntimeJson, _) => {
+                let json = crate::llm::helpers::vm_value_to_export_json_strict(value, path)
+                    .map_err(|_| fail(WireFailureCode::WrongRuntimeType))?;
+                if !self.runtime_json_accepts(&ty.id, &json) {
+                    return Err(fail(WireFailureCode::InvalidValue));
+                }
+                Ok(json)
+            }
             (WireShape::Null, VmValue::Nil) => Ok(Value::Null),
             (WireShape::Boolean, VmValue::Bool(value)) => Ok(json!(value)),
             (

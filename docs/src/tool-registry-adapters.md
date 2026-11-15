@@ -92,6 +92,24 @@ lifecycle, inline-result, and artifact-emission annotations remain runtime-only.
 Legacy `kind` and `side_effect_level` values normalize into the typed `policy`
 field rather than presentation metadata.
 
+## Runtime value conversion
+
+A runtime registry can combine declared wire values, such as bytes, with ordinary
+JSON fields. An object with `additionalProperties: true` keeps its JSON values,
+including keys that resemble byte or enum envelopes. Declared byte fields still
+become native bytes before handler entry. The original catalog schemas enforce
+required properties, enums, patterns and other JSON Schema constraints before
+invocation and before publishing a result.
+
+Unannotated JSON regions retain their compiled schema and reference context.
+For a runtime alternative such as bytes or a constrained string, Harn selects the
+single valid value conversion. A value with more than one interpretation is
+refused rather than choosing a conversion.
+
+These runtime-only JSON regions cannot enter the closed
+[code generation contract](./code-generation.md#portable-contract). Generation
+refuses an unsupported wire type; use closed portable types for generated SDKs.
+
 ## CLI projection
 
 `tool_registry_validate(registry) -> ToolRegistry` checks a generated registry

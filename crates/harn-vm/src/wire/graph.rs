@@ -16,12 +16,31 @@ pub const WIRE_INTEGER_TOKEN_PATTERN: &str = "^(0|-?[1-9][0-9]*)$";
 pub struct PreparedWireGraph {
     types: BTreeMap<WireTypeId, WireType>,
     alias_targets: BTreeMap<WireTypeId, WireTypeId>,
+    runtime_json: BTreeMap<WireTypeId, super::schema::RuntimeJsonCodec>,
+    runtime_reachable: BTreeSet<WireTypeId>,
 }
 
 impl PreparedWireGraph {
     pub fn prepare(types: impl IntoIterator<Item = WireType>) -> Result<Self, WireFailure> {
+        Self::prepare_with_runtime_json(types, None)
+    }
+
+    pub(crate) fn prepare_runtime(
+        types: impl IntoIterator<Item = WireType>,
+        codecs: BTreeMap<WireTypeId, super::schema::RuntimeJsonCodec>,
+    ) -> Result<Self, WireFailure> {
+        Self::prepare_with_runtime_json(types, Some(codecs))
+    }
+
+    fn prepare_with_runtime_json(
+        types: impl IntoIterator<Item = WireType>,
+        runtime_json: Option<BTreeMap<WireTypeId, super::schema::RuntimeJsonCodec>>,
+    ) -> Result<Self, WireFailure> {
         let mut entries = BTreeMap::new();
         for ty in types {
+            if runtime_json.is_none() && matches!(ty.shape, WireShape::RuntimeJson) {
+                return Err(failure(&ty, WireFailureCode::UnsupportedType));
+            }
             if ty.id.0.is_empty() || entries.contains_key(&ty.id) {
                 return Err(failure(&ty, WireFailureCode::InvalidContract));
             }
@@ -32,8 +51,31 @@ impl PreparedWireGraph {
         let mut graph = Self {
             types: entries,
             alias_targets: BTreeMap::new(),
+            runtime_json: runtime_json.unwrap_or_default(),
+            runtime_reachable: BTreeSet::new(),
         };
+        for id in graph.runtime_json.keys() {
+            if graph
+                .types
+                .get(id)
+                .is_none_or(|ty| !matches!(ty.shape, WireShape::RuntimeJson))
+            {
+                return Err(WireFailure {
+                    code: WireFailureCode::InvalidContract,
+                    type_id: Some(id.clone()),
+                    source: WireSourceRef::Synthetic {
+                        owner: "wire".into(),
+                    },
+                    structural_path: String::new(),
+                });
+            }
+        }
         for ty in graph.types.values() {
+            if matches!(ty.shape, WireShape::RuntimeJson)
+                && !graph.runtime_json.contains_key(&ty.id)
+            {
+                return Err(failure(ty, WireFailureCode::InvalidContract));
+            }
             for reference in references(&ty.shape) {
                 if !graph.types.contains_key(reference) {
                     return Err(failure(ty, WireFailureCode::UnresolvedReference));
@@ -103,12 +145,16 @@ impl PreparedWireGraph {
             }
         }
         graph.resolve_alias_targets()?;
+        graph.mark_runtime_ancestors();
         // All primitive bounds and references are valid before disjointness reads them.
         for ty in graph.types.values() {
             if let WireShape::Union { members } = &ty.shape {
                 for (index, left) in members.iter().enumerate() {
                     for right in &members[index + 1..] {
-                        if !graph.disjoint(left, right, &mut BTreeSet::new())? {
+                        if !graph.disjoint(left, right, &mut BTreeSet::new())?
+                            && !graph.runtime_reachable.contains(left)
+                            && !graph.runtime_reachable.contains(right)
+                        {
                             return Err(failure(ty, WireFailureCode::AmbiguousUnion));
                         }
                     }
@@ -116,6 +162,30 @@ impl PreparedWireGraph {
             }
         }
         Ok(graph)
+    }
+
+    fn mark_runtime_ancestors(&mut self) {
+        if self.runtime_json.is_empty() {
+            return;
+        }
+        let mut parents: BTreeMap<&WireTypeId, Vec<&WireTypeId>> = BTreeMap::new();
+        for ty in self.types.values() {
+            for child in references(&ty.shape) {
+                parents.entry(child).or_default().push(&ty.id);
+            }
+        }
+        let mut pending: Vec<_> = self.runtime_json.keys().collect();
+        while let Some(id) = pending.pop() {
+            if self.runtime_reachable.insert(id.clone()) {
+                pending.extend(parents.get(id).into_iter().flatten().copied());
+            }
+        }
+    }
+
+    pub(super) fn runtime_json_accepts(&self, id: &WireTypeId, value: &Value) -> bool {
+        self.runtime_json
+            .get(id)
+            .is_some_and(|codec| codec.accepts(value))
     }
 
     pub fn get(&self, id: &WireTypeId) -> Option<&WireType> {
@@ -245,6 +315,7 @@ impl PreparedWireGraph {
                 "additionalProperties":additional.as_ref().map_or(json!(false), |id| json!({"$ref":pointer(id)}))})
         };
         let mut result = match &ty.shape {
+            WireShape::RuntimeJson => return json!({}),
             WireShape::Null => json!({"type":"null"}),
             WireShape::Boolean => json!({"type":"boolean"}),
             WireShape::Integer {
@@ -525,7 +596,7 @@ fn category(shape: &WireShape) -> u8 {
         | WireShape::Record { .. }
         | WireShape::Enum { .. }
         | WireShape::Bytes { .. } => 32,
-        WireShape::Union { .. } | WireShape::Alias { .. } => 63,
+        WireShape::Union { .. } | WireShape::Alias { .. } | WireShape::RuntimeJson => 63,
     }
 }
 
