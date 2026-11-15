@@ -28,10 +28,13 @@ pub(crate) enum StageOutput {
 }
 
 pub(crate) struct StageOutputBytes<'a> {
+    #[cfg(unix)]
     pub(crate) relay_complete: bool,
     pub(crate) stdout: &'a [u8],
     pub(crate) stderr: &'a [u8],
+    #[cfg(unix)]
     pub(crate) stage_stdout: &'a [u8],
+    #[cfg(unix)]
     pub(crate) stage_stderr: &'a [u8],
 }
 

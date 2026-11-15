@@ -743,20 +743,15 @@ fn waiter_thread(
     }
     done.store(true, Ordering::Release);
     drop(progress_thread);
-    let (stdout, mut stderr, stage_stdout, stage_stderr, capture_read_failed) = {
-        let state = context
-            .output_feed
-            .state
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        (
-            state.stdout.clone(),
-            state.stderr.clone(),
-            state.stage_stdout.clone(),
-            state.stage_stderr.clone(),
-            state.capture_read_failed,
-        )
-    };
+    let output::CompletedOutput {
+        stdout,
+        mut stderr,
+        #[cfg(unix)]
+        stage_stdout,
+        #[cfg(unix)]
+        stage_stderr,
+        capture_read_failed,
+    } = output::completed(&context.output_feed);
     if let Err(error) = waited.as_ref() {
         stderr
             .extend_from_slice(format!("\nharn: process completion refused: {error}\n").as_bytes());
@@ -879,10 +874,13 @@ fn waiter_thread(
                 .finish(
                     &context.command_id,
                     proc::stage_output::StageOutputBytes {
+                        #[cfg(unix)]
                         relay_complete: handle.stage_output_complete(),
                         stdout: &stdout,
                         stderr: &stderr,
+                        #[cfg(unix)]
                         stage_stdout: &stage_stdout,
+                        #[cfg(unix)]
                         stage_stderr: &stage_stderr,
                     },
                     command_status == CommandStatus::Completed && signal_name.is_none(),

@@ -360,7 +360,9 @@ pub(crate) fn run_with_filter(
     };
     let stdout_bytes = private_filter.redact_bytes(&stdout_bytes);
     let stderr_bytes = private_filter.redact_bytes(&stderr_bytes);
+    #[cfg(unix)]
     let stage_stdout_bytes = private_filter.redact_bytes(&stage_stdout_drain.bytes);
+    #[cfg(unix)]
     let stage_stderr_bytes = private_filter.redact_bytes(&stage_stderr_drain.bytes);
     let drain_timed_out = stdout_drain.timed_out
         || stderr_drain.timed_out
@@ -496,10 +498,13 @@ pub(crate) fn run_with_filter(
             stage.finish(
                 &command_id,
                 stage_output::StageOutputBytes {
+                    #[cfg(unix)]
                     relay_complete: handle.stage_output_complete(),
                     stdout: &stdout_bytes,
                     stderr: &stderr_bytes,
+                    #[cfg(unix)]
                     stage_stdout: &stage_stdout_bytes,
+                    #[cfg(unix)]
                     stage_stderr: &stage_stderr_bytes,
                 },
                 command_status == CommandStatus::Completed && signal.is_none(),

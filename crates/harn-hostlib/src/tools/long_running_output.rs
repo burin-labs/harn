@@ -15,6 +15,33 @@ pub(super) struct DrainContext<'a> {
     pub(super) combined_file: Option<Arc<Mutex<std::fs::File>>>,
 }
 
+pub(super) struct CompletedOutput {
+    pub(super) stdout: Vec<u8>,
+    pub(super) stderr: Vec<u8>,
+    #[cfg(unix)]
+    pub(super) stage_stdout: Vec<u8>,
+    #[cfg(unix)]
+    pub(super) stage_stderr: Vec<u8>,
+    pub(super) capture_read_failed: bool,
+}
+
+/// Snapshot the output after the owning waiter has joined every drain.
+pub(super) fn completed(feed: &OutputFeed) -> CompletedOutput {
+    let state = feed
+        .state
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    CompletedOutput {
+        stdout: state.stdout.clone(),
+        stderr: state.stderr.clone(),
+        #[cfg(unix)]
+        stage_stdout: state.stage_stdout.clone(),
+        #[cfg(unix)]
+        stage_stderr: state.stage_stderr.clone(),
+        capture_read_failed: state.capture_read_failed,
+    }
+}
+
 struct LogicalStream {
     redactor: StreamRedactor,
     readers: usize,
