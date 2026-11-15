@@ -76,6 +76,7 @@ fn assert_runtime_content_fingerprint(value: &serde_json::Value) {
             .expect("typed runtime content fingerprint");
     // Each executable owns its native artifact identity.
     assert_eq!(actual.schema, expected.schema);
+    assert_eq!(actual.schema, "harn.runtime_content_fingerprint.v1");
     assert_eq!(actual.harn_version, expected.harn_version);
     assert_eq!(actual.compatibility, expected.compatibility);
     assert_eq!(
