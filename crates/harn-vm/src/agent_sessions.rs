@@ -341,6 +341,7 @@ pub enum LiveClientMode {
 
 mod control_events;
 mod delegation;
+mod directive_nonce;
 mod goal;
 mod host_injection;
 mod live_clients;
@@ -353,7 +354,9 @@ mod transcript_lifecycle;
 mod types;
 mod workspace_roots;
 
+pub use directive_nonce::directive_nonce_for_session;
 pub(crate) use metadata::prepare_workspace_mount_verified;
+pub(crate) use metadata::DIRECTIVE_NONCE_METADATA_KEY;
 
 pub(crate) use text_tool_call_seq::{next_text_tool_call_seq_for_parse, restore_text_call_seq};
 use text_tool_call_seq::{

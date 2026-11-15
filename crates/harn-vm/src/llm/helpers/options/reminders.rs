@@ -7,64 +7,8 @@ pub(super) const DIRECTIVE_ENVELOPE_INSTRUCTIONS_ASSET: &str =
 pub(super) const DIRECTIVE_NONCE_AUTHORITY_ASSET: &str =
     "llm/prompts/directive_nonce_authority.harn.prompt";
 pub const DIRECTIVE_IDS_KEY: &str = "_harn_directive_ids";
-pub(crate) const DIRECTIVE_NONCE_KEY: &str = "_harn_directive_nonce";
-
-fn recorded_directive_nonce<M: MessageView>(messages: &[M]) -> Option<String> {
-    messages.iter().find_map(|message| {
-        has_directive_commit_metadata(message)
-            .then(|| message.str_field(DIRECTIVE_NONCE_KEY))
-            .flatten()
-            .filter(|nonce| !nonce.is_empty())
-            .map(str::to_string)
-    })
-}
-
-/// Return the stable authority nonce for one agent session.
-///
-/// The session transcript owns the nonce even before a directive is committed.
-/// Legacy directive receipts can recover it during replay. Neither path trusts
-/// message text or tool output, and a new session gets a fresh marker.
-pub fn directive_nonce_for_session(session_id: &str) -> String {
-    static NONCES: std::sync::OnceLock<
-        std::sync::Mutex<std::collections::HashMap<String, String>>,
-    > = std::sync::OnceLock::new();
-
-    let recorded = crate::agent_sessions::directive_nonce(session_id).or_else(|| {
-        crate::agent_sessions::transcript(session_id)
-            .as_ref()
-            .and_then(|transcript| transcript.as_dict())
-            .and_then(|transcript| transcript.get("messages"))
-            .and_then(|messages| match messages {
-                VmValue::List(messages) => recorded_directive_nonce(messages.as_slice()),
-                _ => None,
-            })
-    });
-
-    if let Some(recorded) = recorded {
-        let _ = crate::agent_sessions::record_directive_nonce(session_id, &recorded);
-        return recorded;
-    }
-    let fresh =
-        || crate::run_tape::taped_random("directive_nonce", || uuid::Uuid::now_v7().to_string());
-    if crate::agent_sessions::exists(session_id) {
-        let generated = fresh();
-        return crate::agent_sessions::record_directive_nonce(session_id, &generated)
-            .ok()
-            .flatten()
-            .unwrap_or(generated);
-    }
-
-    // Standalone reminder rendering has no session transcript. Keep its marker
-    // stable until that direct rendering caller exits.
-    let mut nonces = NONCES
-        .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    nonces
-        .entry(session_id.to_string())
-        .or_insert_with(fresh)
-        .clone()
-}
+pub use crate::agent_sessions::directive_nonce_for_session;
+pub(crate) use crate::agent_sessions::DIRECTIVE_NONCE_METADATA_KEY as DIRECTIVE_NONCE_KEY;
 
 /// The session's directive contract for the system prompt: which nonce is
 /// authoritative, then how to read an envelope. A request whose system prompt
