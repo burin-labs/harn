@@ -254,7 +254,7 @@ impl OwnSpawnLaunch {
                 read_root: dir.to_path_buf(),
                 #[cfg(target_os = "macos")]
                 write_roots: write_roots.to_vec(),
-            })
+            });
         });
         Self(())
     }

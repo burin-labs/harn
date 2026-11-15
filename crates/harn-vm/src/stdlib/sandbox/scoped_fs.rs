@@ -634,12 +634,8 @@ pub(super) fn sync_dir_fd(fd: libc::c_int) -> bool {
 pub(super) fn c_name(name: impl AsRef<std::ffi::OsStr>) -> io::Result<std::ffi::CString> {
     use std::os::unix::ffi::OsStrExt;
     let name = name.as_ref();
-    std::ffi::CString::new(name.as_bytes()).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("path component contains NUL: {name:?}"),
-        )
-    })
+    std::ffi::CString::new(name.as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path component contains NUL"))
 }
 
 // ---------------------------------------------------------------------------

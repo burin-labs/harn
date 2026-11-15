@@ -544,10 +544,7 @@ fn hostile_repository_config_runs_nothing_and_never_sees_the_login() {
             .unwrap()
     };
     assert!(!plain(&["fetch", "origin"], &[]).status.success());
-    assert!(
-        dialed.recv().is_ok(),
-        "plain git dials the repository proxy"
-    );
+    harn_clock::test_support::recv_within("plain Git dials the repository proxy", &dialed);
     ok(&ws, &["config", "--unset", "http.proxy"]);
     ok(&ws, &["config", "--unset", "remote.origin.pushurl"]);
     let traced = plain(&["push", "origin", "HEAD:refs/heads/plain"], &ambient);
@@ -1092,10 +1089,7 @@ fn granted_clone_ignores_hostile_templates_helpers_proxy_and_tracing() {
         command.output().unwrap()
     };
     assert!(!plain("plain-proxy", true).status.success());
-    assert!(
-        dialed.recv().is_ok(),
-        "the same ambient proxy is reachable by plain Git"
-    );
+    harn_clock::test_support::recv_within("plain Git reaches the ambient proxy", &dialed);
     ok(
         root,
         &[
