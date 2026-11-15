@@ -3,7 +3,12 @@ use crate::stdlib::sandbox;
 use crate::stdlib::sandbox::{sandbox_rejection, CapabilityPolicy};
 use crate::VmError;
 
-pub(in crate::stdlib::sandbox) fn validate(policy: &CapabilityPolicy) -> Result<(), VmError> {
+/// Check whether this host can enforce the policy's proposed SSH agent grant.
+///
+/// An absent grant succeeds. Refusals use the same `ToolRejected` error as
+/// process validation. This checks metadata and host enforcement without
+/// connecting to the agent; the grant is still checked again when used.
+pub fn validate(policy: &CapabilityPolicy) -> Result<(), VmError> {
     let Some(socket) = &policy.process_sandbox.ssh_agent_socket else {
         return Ok(());
     };
