@@ -194,7 +194,7 @@ impl CloneCompletion {
 #[cfg(unix)]
 fn copy_tree(source: &Path, destination: std::os::fd::OwnedFd) -> io::Result<()> {
     use std::os::fd::AsRawFd;
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     struct Frame {
         entries: std::fs::ReadDir,
