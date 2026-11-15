@@ -627,7 +627,6 @@ fn seed_network_spawn(request: &SeedRequest<'_>) -> std::io::Result<Option<Seede
         ));
     }
     let dir = request.dir;
-    super::grant_spawn::write_private_file(&dir.join(GLOBAL_CONFIG), "")?;
     // Linux is not granted until a same-user process's access to the granted
     // git's memory is measured; Windows has no confinement for it.
     if !cfg!(target_os = "macos") {
@@ -636,6 +635,7 @@ fn seed_network_spawn(request: &SeedRequest<'_>) -> std::io::Result<Option<Seede
     if invocation.command == Command::Clone {
         return clone::seed(request, &invocation);
     }
+    super::grant_spawn::write_private_file(&dir.join(GLOBAL_CONFIG), "")?;
     let repository = Repository::discover(request.cwd)?;
     let (projection, head, remotes, urls) = match &repository {
         Some(repository) => {

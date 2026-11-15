@@ -994,7 +994,11 @@ fn granted_clone_ignores_hostile_templates_helpers_proxy_and_tracing() {
     )
     .unwrap();
     std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-    let config = root.join("hostile-global");
+    let global = tempfile::Builder::new()
+        .prefix(".harn-git-hostile-global-")
+        .tempdir_in(crate::user_dirs::home_dir().expect("configured user home"))
+        .unwrap();
+    let config = global.path().join("gitconfig");
     let store = root.join("plain-store");
     let stored = fixture
         .url
