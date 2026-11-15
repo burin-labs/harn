@@ -1053,6 +1053,10 @@ jobs:
       # Every test share compiles the graph the cache writer warms. A share
       # whose selection resolves different dependency features recompiles them
       # and everything above them after an exact cache hit.
+      - name: Install Node for Cargo unit-graph checks
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
       - name: Check test shares compile the cached graph
         timeout-minutes: 2
         run: bash scripts/ci/check_test_share_unit_graphs.sh

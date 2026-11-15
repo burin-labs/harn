@@ -45,4 +45,5 @@ for partition in "${partitions[@]}"; do
     comm -13 "$scratch/writer" "$scratch/share" | head -n 10 >&2
   fi
 done
+bash "$script_dir/check_hostlib_embedding_unit_graphs.sh" || diverged=1
 exit "$diverged"
