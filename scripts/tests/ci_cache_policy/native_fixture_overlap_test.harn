@@ -16,6 +16,7 @@ pipeline test_native_fixture_overlap_preserves_the_test_prerequisite(harness: Ha
     "optional-expression",
     "conditional-installer",
     "skippable-fixtures",
+    "misleading-wait-name",
   ] {
     let broken = json_decode(json_stringify(workflow), schema_of(CiWorkflow))?
     let steps = broken.jobs.nextest.steps
@@ -48,6 +49,14 @@ pipeline test_native_fixture_overlap_preserves_the_test_prerequisite(harness: Ha
       steps[wait_index]["continue-on-error"] = "$" + "{{ true }}"
     } else if mutation == "conditional-installer" {
       steps[install_index].if = "false"
+    } else if mutation == "misleading-wait-name" {
+      const setup_index = steps.index_of(
+        steps.filter(fn(step) { step.name == "Install cargo-nextest" })[0],
+      )
+      const wait = steps[wait_index]
+      steps[setup_index].name = wait.name
+      steps = steps.filter({ step -> step.wait != wait.wait }).to_list()
+      steps.push(wait)
     } else {
       const test_index = steps.index_of(
         steps.filter(fn(step) { step.name == "Run workspace nextest" })[0],
