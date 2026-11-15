@@ -20,6 +20,15 @@ by [`std/decision`](../stdlib/decision.md).
 under qualification from fresh graded executions. Owned by
 [`std/agent/learned`](../stdlib/learned-workflows.md).
 
+**Learned assessment.** A model's advisory choice of a reviewed capability.
+
+**Learned preflight.** A read-only check of bound arguments and current project
+conditions through the capability's declared validation tool.
+
+**Learned commitment.** The recorded decision to invoke the capability's mutation
+tool after binding and any preflight pass. Every failed or unverified committed
+call counts as an execution error; earlier refusals are explicit abstentions.
+
 **Token reference.** One token ID paired with its exact tokenizer vocabulary.
 Harn's `TokenRef` prevents a bare integer from crossing into a model that gives
 that integer another meaning. See [Exact token references](../llm/tokenizer.md).

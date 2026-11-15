@@ -1,10 +1,53 @@
 import {
   LearnedIdentity,
+  LearnedObservation,
   LearnedQualification,
   LearnedQualificationOptions,
   LearnedTrial,
 } from "std/agent/learned/contracts"
 import { selective_risk_report } from "std/eval/selective_risk"
+
+/**
+ * Build a trial from an explicit runtime disposition and independent grading.
+ * Missing disposition is unmeasured, never an abstention. A committed call
+ * without execution evidence remains an accepted error in learned_qualify.
+ * @effects: []
+ * @errors: ["invalid learned observation"]
+ */
+pub fn learned_trial(observation: LearnedObservation) -> LearnedTrial {
+  const decision = observation.assessment
+  const disposition = observation.disposition
+  if disposition.kind == "abstained" {
+    require trim(disposition.reason) != "" && observation.execution.kind == "not_run",
+      "std/agent/learned: abstention requires an explicit reason and no execution"
+    return {
+      id: observation.id,
+      expected: observation.expected,
+      selected: "",
+      confidence: 0.0,
+      abstained: true,
+      execution: observation.execution,
+    }
+  }
+  guard decision.kind == "selected" else {
+    throw "std/agent/learned: commitment requires an assessment"
+  }
+  require decision.capability.id == disposition.capability_id
+    && decision.evidence.route == disposition.capability_id
+    && decision.evidence.receipt == disposition.decision_receipt,
+    "std/agent/learned: commitment differs from the assessed capability"
+  return {
+    id: observation.id,
+    expected: observation.expected,
+    selected: disposition.capability_id,
+    confidence: min(
+      decision.evidence.applicability_probability,
+      decision.evidence.route_probability,
+    ),
+    abstained: false,
+    execution: observation.execution,
+  }
+}
 
 /**
  * Measure accepted execution errors, rather than selector agreement alone.

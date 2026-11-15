@@ -1,0 +1,20 @@
+import { LearnedIdentity, LearnedObservation, learned_trial } from "std/agent/learned"
+
+type Evidence = {identity: LearnedIdentity, observations: list<LearnedObservation>}
+
+fn main(harness: Harness) {
+  const input = argv[0]
+  const output = argv[1]
+  guard input != nil && output != nil else {
+    throw "usage: observations.harn OBSERVATIONS.json TRIALS.json"
+  }
+  const evidence: Evidence = schema_expect(
+    json_parse(harness.fs.read_text(input)),
+    schema_of(Evidence),
+  )
+  const trials = evidence.observations.map(learned_trial)
+  harness.fs.write_text(output, json_stringify({identity: evidence.identity, trials: trials}))
+  harness.stdio.println(
+    json_stringify({observations: len(evidence.observations), trials: len(trials)}),
+  )
+}

@@ -30,12 +30,12 @@ pub(crate) use contract::finish_typescript_projection;
 pub(crate) use contract::transform_codegen_schema;
 pub(crate) use contract::visit_schema_with_context;
 pub use contract::*;
-pub(crate) use invocation::tool_registry_catalog_for_tool;
 pub use invocation::{
     application_error_cli_envelope, application_error_mcp_result, classify_tool_failure,
     classify_tool_result, result_to_json, tool_runtime_error_summary, ToolFailureClassification,
     ToolInvocationError, ToolInvocationOutcome,
 };
+pub(crate) use invocation::{scope_tool_handler, tool_registry_catalog_for_tool};
 
 use cli_projection::cli_spec;
 

@@ -13,6 +13,7 @@ pub type LearnedCapability = {
   id: string,
   meaning: string,
   tool: ToolCatalogEntry,
+  preflight_tool?: ToolCatalogEntry,
   package_digest: string,
   project_digest: string,
   verification_digest: string,
@@ -25,7 +26,7 @@ pub type LearnedExecutionEvidence = {kind: "not_run"} \
   | {kind: "failed", receipt: string, workspace_digest: string} \
   | {kind: "passed", receipt: string, workspace_digest: string}
 
-/** One end-to-end observation, including execution when the selector accepted. */
+/** One end-to-end observation, including every committed tool call's outcome. */
 pub type LearnedTrial = {
   id: string,
   expected: string,
@@ -34,6 +35,18 @@ pub type LearnedTrial = {
   abstained: bool,
   execution: LearnedExecutionEvidence,
 }
+
+/** Assessment is advisory; commitment begins after argument and preflight checks. */
+pub type LearnedObservation = {
+  id: string,
+  expected: string,
+  assessment: LearnedAssessment,
+  disposition: {kind: "abstained", reason: string} \
+    | {kind: "committed", capability_id: string, decision_receipt: string},
+  execution: LearnedExecutionEvidence,
+}
+
+pub type LearnedPreflight = {kind: "ready"} | {kind: "declined", reason: string}
 
 pub type LearnedIdentity = {
   definition_digest: string,

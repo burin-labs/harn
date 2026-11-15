@@ -4,6 +4,7 @@ import {
   LearnedCapability,
   LearnedDispatcher,
   LearnedIdentity,
+  LearnedPreflight,
   LearnedQualification,
   LearnedRequest,
 } from "std/agent/learned/contracts"
@@ -88,13 +89,15 @@ fn is_request_content(content: unknown, request: string) -> bool {
   return block != nil && block.text == request
 }
 
-type PreparedAction = {
+type ReadyAction = {
   kind: "prepared",
   capability: LearnedCapability,
   evidence: DecisionEvidence,
   arguments: dict<string, unknown>,
-} \
-  | {kind: "fallback", reason: string, assessment?: LearnedAssessment}
+}
+
+type PreparedAction = ReadyAction \
+  | {kind: "fallback", reason: string, detail?: string, assessment?: LearnedAssessment}
 
 type ToolCallIdentity = {call_id: string, tool_name: string, turn: {session_id: string}}
 
@@ -149,6 +152,26 @@ fn verified_mutation(result: dict) -> bool {
     }
   }
   return true
+}
+
+type PreflightOutcome = {kind: "ready"} | {kind: "refused", reason: string, detail: string}
+
+fn preflight_outcome(result: dict) -> PreflightOutcome {
+  const unmeasured = {kind: "refused", reason: "preflight_unmeasured", detail: ""}
+  if !(result?.ok ?? false) {
+    return unmeasured
+  }
+  const verdict = match schema_parse(agent_tool_result_data(result), schema_of(LearnedPreflight)) {
+    Ok(value) -> { value }
+    Err(_error) -> { return unmeasured }
+  }
+  if verdict.kind == "ready" {
+    return verdict
+  }
+  if trim(verdict.reason) == "" {
+    return unmeasured
+  }
+  return {kind: "refused", reason: "preflight_declined", detail: verdict.reason}
 }
 
 fn checkpoint(agent: HarnessAgent, call: LlmCallerRequest, phase: string, details: dict) -> nil {
@@ -223,7 +246,9 @@ fn prepare_action(
     Err(_error) -> { return {kind: "fallback", reason: "tool_unavailable"} }
   }
   if type_of(capability.tool.inputSchema) != "dict"
-    || !current_tool_matches(registry, capability.tool) {
+    || !current_tool_matches(registry, capability.tool)
+    || (capability.preflight_tool != nil
+      && !current_tool_matches(registry, capability.preflight_tool)) {
     return {kind: "fallback", reason: "tool_unavailable"}
   }
   const bound: BindingResult = schema_expect(
@@ -245,7 +270,7 @@ fn prepare_action(
     Err(_error) -> { return {kind: "fallback", reason: "invalid_arguments"} }
   }
   if arguments.kind == "unbound" {
-    return {kind: "fallback", reason: "incomplete_arguments"}
+    return {kind: "fallback", reason: "incomplete_arguments", detail: arguments.reason}
   }
   return {
     kind: "prepared",
@@ -272,8 +297,73 @@ fn build_agent_options(
   let pending_name = ""
   let summary = ""
   let origin: dict = {}
+  let prepared: ReadyAction? = nil
+  let disposition_recorded = false
+  const record_disposition = { session_id: string, disposition: dict ->
+    require !disposition_recorded, "std/agent/learned: duplicate runtime disposition"
+    disposition_recorded = true
+    agent_emit_event(
+      harness.agent,
+      session_id,
+      "typed_checkpoint",
+      {kind: "learned_dispatch", phase: "disposition", disposition: disposition},
+    )
+  }
+  const issue_call =
+    { call: LlmCallerRequest, action: ReadyAction, tool: ToolCatalogEntry, stage: string ->
+    pending_id = harness.random.uuid()
+    pending_name = tool.name
+    phase = stage
+    origin = {
+      kind: "learned_capability",
+      capability_id: action.capability.id,
+      definition_digest: setup.dispatcher.identity.definition_digest,
+      package_digest: action.capability.package_digest,
+      decision_receipt: action.evidence.receipt,
+      qualification_digest: setup.qualification?.trials_digest ?? "",
+      execution_mode: trial == nil ? "qualified" : "qualification_trial",
+      trial_id: trial?.id ?? "",
+    }
+    checkpoint(harness.agent, call, stage == "preflighting" ? "preflight" : "selected", origin)
+    if stage == "executing" {
+      record_disposition(
+        call.turn?.session_id ?? "",
+        {
+          kind: "committed",
+          capability_id: action.capability.id,
+          decision_receipt: action.evidence.receipt,
+        },
+      )
+    }
+    return {
+      ok: true,
+      value: {
+        text: "",
+        native_tool_calls: [{id: pending_id, name: pending_name, arguments: action.arguments}],
+        generation_origin: {
+          kind: "local",
+          producer: "harn.learned_dispatch",
+          receipt: pending_id,
+          details: origin,
+        },
+      },
+    }
+  }
   const caller: LlmCaller = { call: LlmCallerRequest ->
     const session_id = call.turn?.session_id ?? ""
+    if phase == "prepared" {
+      if !current_identity(setup) || !fresh_request(harness.agent, session_id, setup.request) {
+        phase = "fallback"
+        checkpoint(harness.agent, call, "fallback", {reason: "execution_contract_changed"})
+        record_disposition(session_id, {kind: "abstained", reason: "execution_contract_changed"})
+        return setup.caller(call)
+      }
+      const action = prepared
+      guard action != nil else {
+        throw "std/agent/learned: missing prepared action"
+      }
+      return issue_call(call, action, action.capability.tool, "executing")
+    }
     if phase == "verified" {
       if !fresh_request(harness.agent, session_id, setup.request) {
         phase = "fallback"
@@ -302,45 +392,33 @@ fn build_agent_options(
     const action = prepare_action(harness, setup, call, trial)
     if action.kind != "prepared" {
       checkpoint(harness.agent, call, "fallback", action)
+      record_disposition(session_id, {kind: "abstained", reason: action.reason})
       return setup.caller(call)
     }
-    const capability = action.capability
-    pending_id = harness.random.uuid()
-    pending_name = capability.tool.name
-    phase = "executing"
-    origin = {
-      kind: "learned_capability",
-      capability_id: capability.id,
-      definition_digest: setup.dispatcher.identity.definition_digest,
-      package_digest: capability.package_digest,
-      decision_receipt: action.evidence.receipt,
-      qualification_digest: setup.qualification?.trials_digest ?? "",
-      execution_mode: trial == nil ? "qualified" : "qualification_trial",
-      trial_id: trial?.id ?? "",
-    }
-    checkpoint(harness.agent, call, "selected", origin)
-    return {
-      ok: true,
-      value: {
-        text: "",
-        native_tool_calls: [{id: pending_id, name: pending_name, arguments: action.arguments}],
-        generation_origin: {
-          kind: "local",
-          producer: "harn.learned_dispatch",
-          receipt: pending_id,
-          details: origin,
-        },
-      },
-    }
+    prepared = action
+    const preflight = action.capability.preflight_tool
+    return preflight == nil ? issue_call(
+      call,
+      action,
+      action.capability.tool,
+      "executing",
+    ) : issue_call(call, action, preflight, "preflighting")
   }
   const tool_caller: ToolCaller = { call: dict, next: fn(dict) -> dict ->
     const identity: ToolCallIdentity = schema_expect(call, schema_of(ToolCallIdentity))
-    const selected = phase == "executing" && identity.call_id == pending_id
+    const preflighting = phase == "preflighting"
+    const selected = (phase == "executing" || preflighting) && identity.call_id == pending_id
       && identity.tool_name == pending_name
     if selected
       && (!current_identity(setup)
         || !fresh_request(harness.agent, identity.turn.session_id, setup.request)) {
       phase = "fallback"
+      if preflighting {
+        record_disposition(
+          identity.turn.session_id,
+          {kind: "abstained", reason: "execution_contract_changed"},
+        )
+      }
       return {
         ok: false,
         status: "scope_violation",
@@ -366,7 +444,27 @@ fn build_agent_options(
       setup.tool_caller(guarded, next)
     }
     if selected {
-      if verified_mutation(result) {
+      if preflighting {
+        const outcome = preflight_outcome(result)
+        if outcome.kind == "ready" {
+          phase = "prepared"
+          return result
+        }
+        phase = "fallback"
+        record_disposition(identity.turn.session_id, {kind: "abstained", reason: outcome.reason})
+        agent_emit_event(
+          harness.agent,
+          identity.turn.session_id,
+          "typed_checkpoint",
+          {
+            kind: "learned_dispatch",
+            phase: "fallback",
+            reason: outcome.reason,
+            detail: outcome.detail,
+            call_id: identity.call_id,
+          },
+        )
+      } else if verified_mutation(result) {
         phase = "verified"
         summary = to_string(
           result?.rendered_result ?? result?.observation ?? "Completed the learned workflow.",

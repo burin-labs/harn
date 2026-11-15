@@ -5,6 +5,7 @@ pub type LearnedFileSet = {root: string, files: list<string>}
 
 pub type LearnedDispatchDeclaration = {
   tool_name: string,
+  preflight_tool_name?: string,
   meaning: string,
   project_files: list<string>,
   verification_files: list<string>,
@@ -21,6 +22,7 @@ pub type LearnedCapabilityDeclaration = {
   id: string,
   meaning: string,
   tool: ToolCatalogEntry,
+  preflight_tool?: ToolCatalogEntry,
   minimum_probability: float,
 }
 
@@ -63,6 +65,9 @@ pub fn learned_dispatch_declaration(
     schema_of(LearnedDispatchDeclaration),
   )
   if !tool_names.contains(declaration.tool_name) || trim(declaration.meaning) == ""
+    || (declaration.preflight_tool_name != nil
+      && (!tool_names.contains(declaration.preflight_tool_name)
+        || declaration.preflight_tool_name == declaration.tool_name))
     || !(declaration.minimum_probability > 0.5 && declaration.minimum_probability <= 1.0)
     || file_set_issue(declaration.project_files) != ""
     || file_set_issue(declaration.verification_files) != "" {
@@ -113,6 +118,7 @@ pub fn learned_capability_snapshot(
       id: declaration.id,
       meaning: declaration.meaning,
       tool: declaration.tool,
+      preflight_tool: declaration.preflight_tool,
       minimum_probability: declaration.minimum_probability,
       package_digest: digests.package,
       project_digest: digests.project,

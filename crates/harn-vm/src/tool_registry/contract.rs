@@ -894,13 +894,18 @@ fn tool_catalog_entry_to_mcp_with_components(
     if let Some(output_schema) = entry.output_schema.as_ref() {
         tool["outputSchema"] = mcp_output_schema(&public_mcp_schema(output_schema, components)?);
     }
+    let mut contract = serde_json::Map::new();
     if let Some(error_schema) = entry.error_schema.as_ref() {
-        let error_schema = public_mcp_schema(error_schema, components)?;
-        tool.as_object_mut()
-            .expect("MCP tool projection is an object")
-            .entry("_meta")
-            .or_insert_with(|| json!({}))[HARN_MCP_TOOL_CONTRACT_META_KEY] =
-            json!({"errorSchema": error_schema});
+        contract.insert(
+            "errorSchema".into(),
+            public_mcp_schema(error_schema, components)?,
+        );
+    }
+    if let Some(policy) = entry.policy.as_ref() {
+        contract.insert("policy".into(), json!(policy));
+    }
+    if !contract.is_empty() {
+        tool["_meta"] = json!({HARN_MCP_TOOL_CONTRACT_META_KEY: contract});
     }
     if let Some(annotations) = entry.annotations.as_ref() {
         let mut annotations = annotations.clone();

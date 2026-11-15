@@ -10,7 +10,11 @@ pub import {
   learned_agent_options,
   learned_probe_agent_options,
 } from "std/agent/learned/middleware"
-pub import { learned_qualification_issue, learned_qualify } from "std/agent/learned/qualification"
+pub import {
+  learned_qualification_issue,
+  learned_qualify,
+  learned_trial,
+} from "std/agent/learned/qualification"
 pub import {
   LearnedCapabilityDeclaration,
   LearnedCapabilitySnapshot,
@@ -38,6 +42,15 @@ pub fn learned_dispatcher(options: LearnedDispatcherOptions) -> LearnedDispatche
   }
   let routes: list<DecisionRoute<LearnedRequest, string>> = []
   for capability in options.capabilities {
+    const preflight = capability.preflight_tool
+    if preflight != nil {
+      require preflight.name != capability.tool.name
+        && preflight.inputSchema == capability.tool.inputSchema
+        && preflight.annotations?.readOnlyHint == true
+        && preflight.policy?.side_effect_level == "read_only"
+        && preflight.annotations?.destructiveHint != true,
+        "std/agent/learned: preflight requires a distinct read-only tool with the same input schema"
+    }
     if trim(capability.package_digest) == "" || trim(capability.project_digest) == ""
       || trim(capability.verification_digest) == "" {
       throw "std/agent/learned: package, project, and verification identities are required"

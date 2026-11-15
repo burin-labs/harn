@@ -9,6 +9,25 @@ use super::{
 };
 use crate::value::{VmError, VmValue};
 
+/// Run a handler under its declared execution policy. MCP presentation hints
+/// are advisory; only the normalized policy installs this mandatory ceiling.
+pub(crate) async fn scope_tool_handler<T>(
+    entry: Option<&super::ToolCatalogEntry>,
+    future: impl std::future::Future<Output = Result<T, VmError>>,
+) -> Result<T, VmError> {
+    let handler = crate::tool_handler_scope::scope(future);
+    if entry
+        .and_then(|entry| entry.policy.as_ref())
+        .is_some_and(|policy| {
+            policy.side_effect_level == crate::tool_annotations::SideEffectLevel::ReadOnly
+        })
+    {
+        crate::orchestration::scope_read_only_effects(handler).await
+    } else {
+        handler.await
+    }
+}
+
 /// Convert a handler result to portable JSON without stringifying unsupported
 /// runtime-only values such as closures or capability handles.
 pub fn result_to_json(value: &VmValue) -> Result<JsonValue, String> {

@@ -8,6 +8,15 @@ pub(super) fn tag_mcp_tool(
 ) -> serde_json::Value {
     if let Some(obj) = tool.as_object_mut() {
         if let Some(metadata) = obj.get("_meta").cloned() {
+            if let Some(policy) = metadata
+                .get(crate::tool_registry::HARN_MCP_TOOL_CONTRACT_META_KEY)
+                .and_then(|contract| contract.get("policy"))
+                .and_then(|policy| {
+                    serde_json::from_value::<crate::tool_registry::ToolPolicy>(policy.clone()).ok()
+                })
+            {
+                obj.insert("execution_policy".into(), serde_json::json!(policy));
+            }
             obj.insert("meta".into(), metadata);
         }
         let original_name = obj
@@ -89,6 +98,40 @@ pub(super) fn descriptor_for(
 mod tests {
     use super::*;
     use crate::tool_annotations::ToolKind;
+
+    #[test]
+    fn mcp_execution_policy_round_trips_through_the_owned_contract() {
+        for policy in [
+            serde_json::json!({"kind": "read", "side_effect_level": "read_only"}),
+            serde_json::json!({"kind": "edit", "side_effect_level": "workspace_write"}),
+        ] {
+            let mut catalog: crate::tool_registry::ToolCatalog =
+                serde_json::from_value(serde_json::json!({
+                    "schema_version": "harn-tools/2.0", "tools": [{
+                    "name": "check", "inputSchema": {"type": "object"}, "policy": policy,
+                    "governance": {"audiences": ["mcp"]},
+                    "cli": {"command": ["check"], "hidden": false}, "deferLoading": false
+                    }]
+                }))
+                .unwrap();
+            let entry = catalog.tools.remove(0);
+            let projected = crate::tool_registry::tool_catalog_entry_to_mcp(&entry);
+            let imported = tag_mcp_tool(projected, "server", false);
+            assert_eq!(imported["execution_policy"], policy);
+            assert_eq!(imported["name"], "server__check");
+            let registry = crate::json_to_vm_value(&serde_json::json!({"tools": [imported]}));
+            let normalized =
+                crate::tool_registry::tool_registry_catalog_for_tool(&registry, "server__check")
+                    .unwrap();
+            assert_eq!(normalized.tools[0].policy, entry.policy);
+        }
+        let advisory = tag_mcp_tool(
+            serde_json::json!({"name": "check", "annotations": {"readOnlyHint": true}}),
+            "server",
+            false,
+        );
+        assert!(advisory.get("execution_policy").is_none());
+    }
 
     #[test]
     fn descriptor_and_annotations_come_from_the_dispatch_catalog() {

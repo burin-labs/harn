@@ -20,6 +20,16 @@ Options require `id`, `instructions`, `capabilities`, `policy`,
 `ToolCatalogEntry`, `package_digest`, `project_digest`, `verification_digest`,
 and `minimum_probability`. Empty required identities throw.
 
+An optional `preflight_tool` checks bound arguments and current project state
+before the mutating tool is selected. It must have a distinct name, the same
+input schema, `annotations.readOnlyHint: true`, and
+`policy.side_effect_level: "read_only"`. Harn enforces the declared effect
+ceiling for local and served MCP handlers. A presentation hint alone supplies
+no execution policy. The preflight returns canonical tool-result data matching
+`LearnedPreflight`: `{kind: "ready"}` or
+`{kind: "declined", reason: string}`. Missing or invalid results cause fallback.
+The mutating handler must recheck mutable preconditions before writing.
+
 The returned assessment is `selected`, `unqualified`, or a non-match from
 [`std/decision`](decision.md). An empty capability list requires no inference.
 
@@ -32,14 +42,26 @@ threshold certification to `std/eval/selective_risk`. Each `LearnedTrial` has:
 | --- | --- |
 | `id` | Unique nonempty trial identifier. |
 | `expected` | Expected capability identifier; empty for an incompatible request. |
-| `selected` | Selected capability identifier; empty when abstaining. |
+| `selected` | Committed capability identifier; empty when abstaining. |
 | `confidence` | Confidence used by the declared threshold family. |
-| `abstained` | Whether the selector declined execution. |
+| `abstained` | Whether dispatch explicitly declined commitment. |
 | `execution` | `not_run`, or `passed`/`failed` with a unique receipt and workspace digest. |
 
-Accepted selections without passing execution evidence count as errors.
+`learned_trial(observation: LearnedObservation) -> LearnedTrial` constructs a
+trial from the assessment, explicit runtime disposition, expected label, and
+independent execution evidence. Disposition is `abstained` with a nonempty
+reason, or `committed` with the assessed capability and decision receipt.
+The middleware emits one `disposition` checkpoint. Missing records are
+unmeasured; absence of a mutation is insufficient to establish abstention.
+
+Committed calls without passing execution evidence count as errors.
 Abstained trials mustn't execute. Duplicate identifiers, reused receipts, and
 empty execution identities throw.
+
+Declare whether a study measures assessment alone or the combined dispatch
+path before collecting evidence. Report assessment mistakes and coverage
+alongside execution risk. Changing that protocol requires a new study;
+constructing observations cannot repair an earlier failed report.
 
 `learned_qualification_issue(identity, qualification) -> string` returns an
 empty string when qualification is usable. Otherwise it returns

@@ -1,5 +1,72 @@
 use super::*;
 
+#[tokio::test]
+async fn declared_read_only_policy_blocks_mcp_handler_writes_but_hints_do_not() {
+    use crate::tool_annotations::{SideEffectLevel, ToolKind};
+    for effect in [
+        None,
+        Some(SideEffectLevel::ReadOnly),
+        Some(SideEffectLevel::WorkspaceWrite),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("effect.txt");
+        let mut vm = crate::new_vm();
+        crate::register_vm_stdlib(&mut vm);
+        vm.set_harness(crate::Harness::real());
+        let harness = vm.root_harness_value().unwrap();
+        let factory = compiled_closure(
+            "make",
+            r#"
+          fn make(harness: Harness) {
+            return { input: dict ->
+              harness.fs.write_text(input.path, "written")
+              return "written"
+            }
+          }
+        "#,
+        );
+        let VmValue::Closure(handler) = vm.call_closure_pub(&factory, &[harness]).await.unwrap()
+        else {
+            panic!("factory must return a handler");
+        };
+        let mut tool = tool_def(
+            "write",
+            "Try a write",
+            None,
+            crate::mcp_tasks::McpTaskSupport::Forbidden,
+        );
+        tool.handler = (*handler).clone();
+        tool.catalog.annotations =
+            Some(serde_json::from_value(serde_json::json!({"readOnlyHint": true})).unwrap());
+        tool.catalog.policy = effect.map(|side_effect_level| crate::tool_registry::ToolPolicy {
+            kind: ToolKind::Read,
+            side_effect_level,
+        });
+        let registry = script_registry(tool_set(vec![tool]));
+        let response = registry
+            .call_tool(
+                &serde_json::json!(1),
+                &serde_json::json!({
+                    "name": "write", "arguments": {"path": path.to_str().unwrap()}
+                }),
+                &mut vm,
+                None,
+                false,
+            )
+            .await;
+        let refused = effect == Some(SideEffectLevel::ReadOnly);
+        assert_eq!(
+            response["result"]["isError"].as_bool().unwrap_or(false),
+            refused,
+            "{response}"
+        );
+        assert_eq!(path.exists(), !refused, "{response}");
+        if !refused {
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "written");
+        }
+    }
+}
+
 fn throwing_closure(name: &str) -> VmClosure {
     let source = format!(
         "type LookupError = {{variant: \"NotFound\", message: string}}\nfn {name}(input: dict) throws LookupError {{ throw {{variant: \"NotFound\", message: \"PRIVATE-CUSTOMER-DIAGNOSTIC-123456\"}} }}"

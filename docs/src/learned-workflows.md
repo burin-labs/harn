@@ -13,8 +13,15 @@ the agent's existing caller.
 
 Selector agreement alone doesn't establish that a workflow works. Qualification
 uses fresh executions in isolated workspaces, independent expected labels, and
-a grader that checks the resulting behavior. An accepted selection without a
-successful execution counts as an error. Reused execution receipts are refused.
+a grader that checks the resulting behavior. The assessed candidate can still
+be declined during argument binding or an optional read-only preflight. A
+committed call without successful execution counts as an error. Missing
+disposition records remain unmeasured. Reused execution receipts are refused.
+
+A study must declare its acceptance boundary before collecting evidence.
+Assessment accuracy, explicit fallback coverage, and committed execution risk
+answer different questions. A failed assessment-based study stays failed when
+a later study adds deterministic preflight checks.
 
 [`learned_qualify`](stdlib/learned-workflows.md) uses the existing selective-risk
 report to choose among thresholds declared before measuring the corpus. Empty
@@ -33,6 +40,10 @@ Changing them requires new evidence. A source revision alone doesn't identify
 the running runtime; use its [linked content fingerprint](runtime-content-fingerprint.md).
 
 The middleware checks identity before selection and again before dispatch.
+When a capability declares a preflight tool, Harn runs it under an enforced
+read-only policy before committing to the mutation. Preflight and mutation can
+share their preparation function; the mutation rechecks it because project
+state may change between calls.
 An execution guard repeats the check after approval and interception, before
 the executor receives the call. A waiting approval can't preserve a stale result.
 Unavailable measurements cause fallback. It also requires the original user
