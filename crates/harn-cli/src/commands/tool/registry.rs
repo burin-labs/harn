@@ -76,12 +76,16 @@ async fn run_loaded_registry(
                 invocation.tool_name
             )
         })?;
-    tool.invocation_requirement
-        .require_direct(&tool.catalog.name)
+    let input = prepared
+        .decode_input(&tool.catalog.name, &invocation.arguments)
         .map_err(|error| error.to_string())?;
-    let input = harn_vm::schema::json_to_vm_value(&invocation.arguments);
     let result = tokio::task::LocalSet::new()
-        .run_until(loaded.vm.call_closure_pub(&tool.handler, &[input]))
+        .run_until(harn_vm::tool_registry::call_tool_handler(
+            &mut loaded.vm,
+            tool,
+            harn_vm::tool_registry::ToolAudience::Cli,
+            input,
+        ))
         .await;
     let outcome =
         harn_vm::tool_registry::classify_tool_result(&prepared, &tool.catalog.name, result)
@@ -1158,9 +1162,9 @@ pub fn inspect(input: {id: string}) -> {id: string} { return input }
             .expect("offline export catalog");
         assert_eq!(catalog.tools.len(), 1);
         assert_eq!(catalog.tools[0].name, "inspect");
-        assert_eq!(
-            catalog.tools[0].input_schema["properties"]["input"]["properties"]["id"]["type"],
-            "string"
-        );
+        let schema = jsonschema::validator_for(&catalog.tools[0].input_schema).unwrap();
+        assert!(schema.is_valid(&serde_json::json!({"input":{"id":"known"}})));
+        assert!(!schema.is_valid(&serde_json::json!({"input":{"id":17}})));
+        assert!(!schema.is_valid(&serde_json::json!({"input":{}})));
     }
 }

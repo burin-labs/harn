@@ -1,0 +1,24 @@
+import { Failure, Payload } from "./types"
+
+/** Return the complete typed payload. */
+@annotations(readOnly: true, idempotent: true)
+pub fn echo(input: Payload) -> Payload {
+  return input
+}
+
+/** Model a mutating native registration with the same closed data contract. */
+@annotations(readOnly: false, destructive: true, idempotent: false)
+pub fn mutate(input: Payload) -> Payload {
+  return input
+}
+
+/** Return a declared application failure. */
+pub fn reject(input: Payload) -> Payload throws Failure {
+  throw Failure.Rejected("rejected")
+}
+
+/** Give the public Harn task store ownership of asynchronous completion. */
+@job("echo")
+pub fn scheduled(input: Payload) -> Payload {
+  return input
+}

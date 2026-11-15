@@ -165,6 +165,7 @@ calls. The available history and recovery options depend on what the run recorde
 | Manage long conversations | Sessions, context selection, and conversation compaction. |
 | Test changes | Recorded responses, capability fixtures, replay, and evaluation tools. |
 | Connect an existing application | CLI commands, packages, and editor and agent protocols. |
+| Share typed business logic | [Generated clients](docs/src/code-generation.md) and [native tool bindings](docs/src/native-tool-bindings.md) through the same Harn tool contract. |
 
 Harn owns execution and its history. Your application owns its interface,
 approval presentation, and how changes appear to people, including undo and redo.

@@ -12,9 +12,11 @@ use serde_json::{json, Value as JsonValue};
 use ts_rs::{Config, TS};
 
 mod cli;
+mod native_binding;
 mod prepared;
 mod schema;
 
+pub(crate) use schema::try_transform_schema_nodes as transform_codegen_schema;
 use schema::{
     decode_json_pointer_segment, encode_json_pointer_segment, try_transform_schema_nodes,
     try_visit_schema_nodes,
@@ -25,6 +27,10 @@ use crate::tool_annotations::{SideEffectLevel, ToolKind};
 pub use cli::{
     ToolCliArgumentSpec, ToolCliBooleanStyle, ToolCliCommandSpec, ToolCliSpec, ToolCliTreeSpec,
     ToolCliValueHint,
+};
+pub use native_binding::{
+    NativeMcpBindingProfile, NativeMcpBindingVersion, NativeMcpBindingViolation,
+    NativeMcpOperationBinding, HARN_NATIVE_BINDING_META_KEY,
 };
 pub use prepared::{
     PreparedCliArgument, PreparedCliCommand, PreparedCliTree, PreparedToolCatalog,
@@ -42,6 +48,14 @@ pub const TOOL_CATALOG_TYPESCRIPT_ARTIFACT: &str = "harn-tools.ts";
 /// typed-tool payload below one key prevents collisions with caller metadata
 /// and leaves room for compatible additions to the Harn projection.
 pub const HARN_MCP_TOOL_CONTRACT_META_KEY: &str = "com.harnlang/toolContract";
+
+/// MCP requires object structured content even for scalar Harn results.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum McpOutputEnvelope {
+    Bare,
+    ResultProperty,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolCatalogProjectionError {
@@ -147,6 +161,10 @@ pub struct ToolSource {
     #[ts(optional = nullable)]
     #[schemars(length(min = 1), pattern(r".*\S.*"))]
     pub id: Option<String>,
+    /// Portable declaration coordinates; never a host filesystem authority.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub location: Option<crate::wire::WireSourceRef>,
     /// Protocol-specific coordinates. This and `_meta` are the only open
     /// metadata records in the contract.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -425,6 +443,10 @@ impl ToolCatalog {
             if let Some(source) = tool.source.as_ref() {
                 require_non_empty(&source.kind, &format!("{context}.source.kind"))?;
                 require_optional_non_empty(source.id.as_deref(), &format!("{context}.source.id"))?;
+                if let Some(location) = &source.location {
+                    crate::wire::graph::validate_source(location)
+                        .map_err(|()| format!("{context}.source.location is invalid"))?;
+                }
             }
             if tool
                 .meta
@@ -533,6 +555,25 @@ impl ToolCatalog {
                 .map(|components| &components.schemas),
         )?;
         Ok(tool_output_to_mcp_structured_content(Some(&schema), result))
+    }
+
+    pub fn mcp_output_envelope(
+        &self,
+        entry: &ToolCatalogEntry,
+    ) -> Result<Option<McpOutputEnvelope>, ToolCatalogProjectionError> {
+        entry
+            .output_schema
+            .as_ref()
+            .map(|schema| {
+                standalone_schema(
+                    schema,
+                    self.components
+                        .as_ref()
+                        .map(|components| &components.schemas),
+                )
+                .map(|schema| mcp_output_envelope(&schema))
+            })
+            .transpose()
     }
 }
 
@@ -844,13 +885,13 @@ fn tool_catalog_entry_to_mcp_with_components(
         "name": entry.name,
         "title": title,
         "description": description,
-        "inputSchema": standalone_schema(&entry.input_schema, components)?,
+        "inputSchema": public_mcp_schema(&entry.input_schema, components)?,
     });
     if let Some(output_schema) = entry.output_schema.as_ref() {
-        tool["outputSchema"] = mcp_output_schema(&standalone_schema(output_schema, components)?);
+        tool["outputSchema"] = mcp_output_schema(&public_mcp_schema(output_schema, components)?);
     }
     if let Some(error_schema) = entry.error_schema.as_ref() {
-        let error_schema = standalone_schema(error_schema, components)?;
+        let error_schema = public_mcp_schema(error_schema, components)?;
         tool.as_object_mut()
             .expect("MCP tool projection is an object")
             .entry("_meta")
@@ -885,6 +926,21 @@ fn tool_catalog_entry_to_mcp_with_components(
         }
     }
     Ok(tool)
+}
+
+fn public_mcp_schema(
+    schema: &JsonValue,
+    components: Option<&BTreeMap<String, JsonValue>>,
+) -> Result<JsonValue, ToolCatalogProjectionError> {
+    let mut schema = standalone_schema(schema, components)?;
+    try_transform_schema_nodes(&mut schema, &mut |object| {
+        for key in crate::wire::metadata::PRIVATE_SCHEMA_METADATA {
+            object.remove(*key);
+        }
+        Ok::<(), std::convert::Infallible>(())
+    })
+    .expect("infallible schema metadata projection");
+    Ok(schema)
 }
 
 fn standalone_schema(
@@ -1043,17 +1099,14 @@ fn tool_output_to_mcp_structured_content(
     output_schema: Option<&JsonValue>,
     result: JsonValue,
 ) -> Option<JsonValue> {
-    output_schema.map(|schema| {
-        if mcp_schema_has_object_root(schema) {
-            result
-        } else {
-            json!({"result": result})
-        }
+    output_schema.map(|schema| match mcp_output_envelope(schema) {
+        McpOutputEnvelope::Bare => result,
+        McpOutputEnvelope::ResultProperty => json!({"result": result}),
     })
 }
 
 fn mcp_output_schema(output_schema: &JsonValue) -> JsonValue {
-    if mcp_schema_has_object_root(output_schema) {
+    if mcp_output_envelope(output_schema) == McpOutputEnvelope::Bare {
         output_schema.clone()
     } else {
         json!({
@@ -1067,6 +1120,14 @@ fn mcp_output_schema(output_schema: &JsonValue) -> JsonValue {
 
 fn mcp_schema_has_object_root(schema: &JsonValue) -> bool {
     schema_requires_object(schema, schema, &mut std::collections::BTreeSet::new())
+}
+
+fn mcp_output_envelope(schema: &JsonValue) -> McpOutputEnvelope {
+    if mcp_schema_has_object_root(schema) {
+        McpOutputEnvelope::Bare
+    } else {
+        McpOutputEnvelope::ResultProperty
+    }
 }
 
 fn schema_requires_object<'a>(
@@ -1153,10 +1214,28 @@ pub fn tool_catalog_typescript() -> String {
          export type JsonValue = null | boolean | number | string | readonly JsonValue[] | { readonly [key: string]: JsonValue };\n\
          export type JsonSchema202012 = boolean | { readonly [keyword: string]: JsonValue };\n\n",
     );
+    append_tool_catalog_typescript(&mut output, &config);
+    finish_typescript_projection(output)
+}
+
+pub(crate) fn finish_typescript_projection(output: String) -> String {
+    let mut output = output
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n");
+    while output.ends_with('\n') {
+        output.pop();
+    }
+    output.push('\n');
+    output
+}
+
+pub(crate) fn append_tool_catalog_typescript(output: &mut String, config: &Config) {
     macro_rules! declaration {
         ($type:ty) => {{
             output.push_str("export ");
-            output.push_str(&<$type as TS>::decl(&config));
+            output.push_str(&<$type as TS>::decl(config));
             output.push_str("\n\n");
         }};
     }
@@ -1174,6 +1253,7 @@ pub fn tool_catalog_typescript() -> String {
     declaration!(ToolCliTreeSpec);
     declaration!(ToolCliSpec);
     declaration!(ToolGovernance);
+    declaration!(crate::wire::WireSourceRef);
     declaration!(ToolSource);
     declaration!(ToolPresentationAnnotations);
     declaration!(ToolIcon);
@@ -1182,16 +1262,6 @@ pub fn tool_catalog_typescript() -> String {
     declaration!(ToolCatalogComponents);
     declaration!(ToolCatalogEntry);
     declaration!(ToolCatalog);
-    let mut output = output
-        .lines()
-        .map(str::trim_end)
-        .collect::<Vec<_>>()
-        .join("\n");
-    while output.ends_with('\n') {
-        output.pop();
-    }
-    output.push('\n');
-    output
 }
 
 #[cfg(test)]

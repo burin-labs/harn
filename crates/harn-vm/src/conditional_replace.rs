@@ -18,7 +18,9 @@ pub(crate) fn scope_native_lock_root() -> Option<ScopedConditionalReplaceLockRoo
     ))
 }
 
-pub(crate) fn acquire_lock(
+/// Hold the native mutation lock for a destination across a compound host operation.
+/// File replacements beneath a directory still use their own conditional-write locks.
+pub fn acquire_lock(
     path: &Path,
 ) -> io::Result<harn_vm_core::conditional_replace::ConditionalReplaceLock> {
     let _scope = scope_native_lock_root();

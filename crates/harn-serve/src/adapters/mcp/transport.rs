@@ -53,6 +53,7 @@ pub(super) async fn http_post_request(
         // A client that cannot read an event stream gets the terminal
         // response as JSON; progress notifications have nowhere to go.
         ImmediateResult::Stream(job) if !accepts_media(&headers, "text/event-stream") => {
+            let _cancellation = HttpCallCancellation::for_job(&job);
             let response = state.server.run_job_to_response(*job).await;
             let mut http = match response {
                 Some(response) => Json(response).into_response(),
@@ -132,6 +133,9 @@ fn spawn_http_stream_inner(
     prelude: Option<JsonValue>,
 ) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
     let (tx, rx) = unbounded::<JsonValue>();
+    // A task survives this response: its lease, not the transport, owns its
+    // lifetime. Only a stable direct call belongs to this HTTP stream.
+    let cancellation = HttpCallCancellation::for_job(&job);
     if let Some(prelude) = prelude {
         let _ = tx.unbounded_send(prelude);
     }
@@ -141,11 +145,49 @@ fn spawn_http_stream_inner(
         });
         server.execute_streaming_job(job, notifier).await;
     });
-    sse_response(rx)
+    sse_response(HttpCallStream {
+        receiver: rx,
+        _cancellation: cancellation,
+    })
+}
+
+struct HttpCallCancellation(Option<ActiveCall>);
+
+impl HttpCallCancellation {
+    fn for_job(job: &StreamJob) -> Self {
+        Self(
+            (job.task.is_none() && job.request_profile.cancels_direct_call_on_disconnect())
+                .then(|| job.active.clone()),
+        )
+    }
+}
+
+impl Drop for HttpCallCancellation {
+    fn drop(&mut self) {
+        if let Some(active) = &self.0 {
+            active.cancel();
+        }
+    }
+}
+
+struct HttpCallStream {
+    receiver: UnboundedReceiver<JsonValue>,
+    _cancellation: HttpCallCancellation,
+}
+
+impl futures::Stream for HttpCallStream {
+    type Item = JsonValue;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        std::pin::Pin::new(&mut self.receiver).poll_next(cx)
+    }
 }
 
 pub(super) fn sse_response(
-    rx: UnboundedReceiver<JsonValue>,
+    rx: impl futures::Stream<Item = JsonValue> + Send + 'static,
 ) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
     let prime = Event::default().id(Uuid::now_v7().to_string()).data("");
     let stream = stream::once(async move { Ok::<Event, Infallible>(prime) }).chain(sse_events(rx));
@@ -153,7 +195,7 @@ pub(super) fn sse_response(
 }
 
 pub(super) fn sse_events(
-    rx: UnboundedReceiver<JsonValue>,
+    rx: impl futures::Stream<Item = JsonValue> + Send + 'static,
 ) -> impl futures::Stream<Item = Result<Event, Infallible>> {
     rx.map(|message| {
         Ok(Event::default()

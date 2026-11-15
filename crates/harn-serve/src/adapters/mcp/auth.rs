@@ -59,7 +59,7 @@ pub fn negotiate_routing_headers(
     let id = request.get("id").cloned().unwrap_or(JsonValue::Null);
     let method = request.get("method").and_then(JsonValue::as_str);
     let params = request.get("params").unwrap_or(&JsonValue::Null);
-    let name = method.and_then(|m| standard_name_header_value(m, params));
+    let name = method.and_then(|m| standard_name_body_value(m, params));
     negotiate_http_request(
         |key| headers.get(key).and_then(|value| value.to_str().ok()),
         method,

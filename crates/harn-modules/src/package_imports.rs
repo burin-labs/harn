@@ -272,15 +272,31 @@ pub fn resolve_import_path_with_guard(
 /// made a whole-tree build pay it once per FILE. Every real invocation resolves
 /// many files under a single root, so all but one of those was thrown away.
 pub(crate) fn acquire_package_snapshots(files: &[PathBuf]) -> Vec<PackageSnapshot> {
-    let mut walked_roots = HashSet::new();
-    let mut canonical_roots = HashSet::new();
     let mut snapshots = Vec::new();
+    extend_package_snapshots(files, &mut snapshots);
+    snapshots
+}
+
+/// Retain the nearest scopes reached by a graph wave before resolving its
+/// imports. Reuse the leases already acquired for earlier waves.
+pub(crate) fn extend_package_snapshots(files: &[PathBuf], snapshots: &mut Vec<PackageSnapshot>) {
+    let mut walked_roots = HashSet::new();
+    let mut canonical_roots = snapshots
+        .iter()
+        .map(|snapshot| snapshot.project_root().to_path_buf())
+        .collect::<HashSet<_>>();
     for file in files {
+        if crate::stdlib_module_name(file).is_some() {
+            continue;
+        }
         // Cheap: a handful of stats up the ancestors.
         let Some(root) = PackageSnapshot::nearest_project_root(file) else {
             continue;
         };
         if !walked_roots.insert(root.clone()) {
+            continue;
+        }
+        if canonical_roots.contains(&canonicalize_with_existing_parent(&root)) {
             continue;
         }
         // Expensive: reached at most once per distinct walked root.
@@ -295,7 +311,6 @@ pub(crate) fn acquire_package_snapshots(files: &[PathBuf]) -> Vec<PackageSnapsho
             snapshots.push(snapshot);
         }
     }
-    snapshots
 }
 
 fn resolve_package_import(

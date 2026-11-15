@@ -53,6 +53,14 @@ use std::process;
 
 use crate::commands::generated_artifact::write_file;
 
+use harn_vm::codegen::{
+    codegen_diagnostic_json_schema, codegen_ir_json_schema, codegen_protocol_facts,
+    codegen_request_json_schema, codegen_response_json_schema, codegen_typescript,
+    native_mcp_binding_json_schema, CODEGEN_DIAGNOSTIC_SCHEMA_ARTIFACT, CODEGEN_IR_SCHEMA_ARTIFACT,
+    CODEGEN_PROTOCOL_FACTS_ARTIFACT, CODEGEN_REQUEST_SCHEMA_ARTIFACT,
+    CODEGEN_RESPONSE_SCHEMA_ARTIFACT, CODEGEN_TYPESCRIPT_ARTIFACT,
+    NATIVE_MCP_BINDING_SCHEMA_ARTIFACT,
+};
 use harn_vm::llm::plan::PLAN_DOCUMENT_SCHEMA_ARTIFACT;
 use harn_vm::llm::receipts::TOOL_CALL_RECEIPT_SCHEMA_ARTIFACT;
 use harn_vm::tool_registry::{
@@ -254,6 +262,46 @@ fn generate_artifacts(source: &ProtocolArtifactSource) -> Result<Vec<Artifact>, 
                 .map_err(|error| format!("failed to encode tool catalog schema: {error}"))?,
         ),
         Artifact::new(TOOL_CATALOG_TYPESCRIPT_ARTIFACT, tool_catalog_typescript()),
+        Artifact::new(CODEGEN_TYPESCRIPT_ARTIFACT, codegen_typescript()),
+        Artifact::new(
+            harn_vm::codegen::CODEGEN_NAMES_FIXTURE_ARTIFACT,
+            serde_json::to_string_pretty(
+                harn_vm::codegen::codegen_names_fixture()
+                    .map_err(|_| "failed to lower the owned name conformance catalog".to_string())?
+                    .ir(),
+            )
+            .map_err(|error| format!("failed to encode codegen name fixture: {error}"))?,
+        ),
+        Artifact::new(
+            CODEGEN_PROTOCOL_FACTS_ARTIFACT,
+            serde_json::to_string_pretty(&codegen_protocol_facts())
+                .map_err(|error| format!("failed to encode codegen protocol facts: {error}"))?,
+        ),
+        Artifact::new(
+            CODEGEN_IR_SCHEMA_ARTIFACT,
+            serde_json::to_string_pretty(&codegen_ir_json_schema())
+                .map_err(|error| format!("failed to encode codegen IR schema: {error}"))?,
+        ),
+        Artifact::new(
+            CODEGEN_REQUEST_SCHEMA_ARTIFACT,
+            serde_json::to_string_pretty(&codegen_request_json_schema())
+                .map_err(|error| format!("failed to encode codegen request schema: {error}"))?,
+        ),
+        Artifact::new(
+            CODEGEN_RESPONSE_SCHEMA_ARTIFACT,
+            serde_json::to_string_pretty(&codegen_response_json_schema())
+                .map_err(|error| format!("failed to encode codegen response schema: {error}"))?,
+        ),
+        Artifact::new(
+            CODEGEN_DIAGNOSTIC_SCHEMA_ARTIFACT,
+            serde_json::to_string_pretty(&codegen_diagnostic_json_schema())
+                .map_err(|error| format!("failed to encode codegen diagnostic schema: {error}"))?,
+        ),
+        Artifact::new(
+            NATIVE_MCP_BINDING_SCHEMA_ARTIFACT,
+            serde_json::to_string_pretty(&native_mcp_binding_json_schema())
+                .map_err(|error| format!("failed to encode native MCP binding schema: {error}"))?,
+        ),
         Artifact::new(
             harn_vm::session_recap::SESSION_RECAP_SCHEMA_ARTIFACT,
             serde_json::to_string_pretty(&harn_vm::session_recap::session_recap_json_schema())

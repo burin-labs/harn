@@ -5,7 +5,7 @@ use serde_json::Value as JsonValue;
 use super::handler_result::parse_handler_result;
 use super::{
     PreparedToolCatalog, ToolApplicationError, ToolContractPhase, ToolContractViolation,
-    ToolContractViolationDetail, ToolThrownClassification, HARN_MCP_TOOL_CONTRACT_META_KEY,
+    ToolThrownClassification, HARN_MCP_TOOL_CONTRACT_META_KEY,
 };
 use crate::value::{VmError, VmValue};
 
@@ -118,6 +118,7 @@ impl std::error::Error for ToolInvocationError {}
 /// or MCP content. Typed application data takes the separate
 /// [`ToolApplicationError`] path.
 pub fn tool_runtime_error_summary(error: &VmError) -> String {
+    let error = error.unwrapped();
     match crate::value::error_to_category(error) {
         // Keep the stable classifier token so A2A can retain its resumable
         // auth-required state without recovering the original thrown value.
@@ -148,8 +149,9 @@ pub fn classify_tool_result(
                 parse_handler_result(&value).map_err(ToolInvocationError::Runtime)?
             {
                 if let Some(outcome) = result.outcome.application_outcome() {
-                    let json =
-                        portable_value(tool, ToolContractPhase::ApplicationError, result.data)?;
+                    let json = prepared
+                        .encode_wire_value(tool, ToolContractPhase::ApplicationError, result.data)
+                        .map_err(ToolInvocationError::Contract)?;
                     return prepared
                         .declared_failure(tool, &json, outcome)
                         .map(ToolInvocationOutcome::ApplicationError)
@@ -159,7 +161,9 @@ pub fn classify_tool_result(
             } else {
                 (value, None)
             };
-            let json = portable_value(tool, ToolContractPhase::Output, &value)?;
+            let json = prepared
+                .encode_wire_value(tool, ToolContractPhase::Output, &value)
+                .map_err(ToolInvocationError::Contract)?;
             prepared
                 .validate_output(tool, &json)
                 .map_err(ToolInvocationError::Contract)?;
@@ -180,6 +184,14 @@ pub fn classify_tool_failure(
     tool: &str,
     error: VmError,
 ) -> ToolFailureClassification {
+    if !error.permits_automatic_replay() {
+        return match classify_tool_failure(prepared, tool, error.into_unwrapped()) {
+            ToolFailureClassification::Runtime(error) => {
+                ToolFailureClassification::Runtime(VmError::NonReplayable(Box::new(error)))
+            }
+            classified => classified,
+        };
+    }
     if is_reserved_control_error(&error) {
         return ToolFailureClassification::Runtime(error);
     }
@@ -192,12 +204,9 @@ pub fn classify_tool_failure(
     {
         return ToolFailureClassification::Runtime(VmError::DeclaredThrown(value));
     }
-    let json = match portable_value(tool, ToolContractPhase::ApplicationError, &value) {
+    let json = match prepared.encode_wire_value(tool, ToolContractPhase::ApplicationError, &value) {
         Ok(json) => json,
-        Err(ToolInvocationError::Contract(error)) => {
-            return ToolFailureClassification::Contract(error)
-        }
-        Err(_) => unreachable!("portable_value only returns contract failures"),
+        Err(error) => return ToolFailureClassification::Contract(error),
     };
     match prepared.classify_thrown_json(tool, &json) {
         ToolThrownClassification::Application(error) => {
@@ -244,25 +253,6 @@ fn is_reserved_control_error(error: &VmError) -> bool {
         }
         _ => false,
     }
-}
-
-fn portable_value(
-    tool: &str,
-    phase: ToolContractPhase,
-    value: &VmValue,
-) -> Result<JsonValue, ToolInvocationError> {
-    result_to_json(value).map_err(|_| {
-        ToolInvocationError::Contract(ToolContractViolation {
-            tool: tool.to_string(),
-            phase,
-            violations: vec![ToolContractViolationDetail {
-                structural_path: String::new(),
-                schema_path: String::new(),
-                keyword: "portableJson".to_string(),
-                missing_property: None,
-            }],
-        })
-    })
 }
 
 #[cfg(test)]

@@ -232,10 +232,11 @@ impl ClientHandler for HarnSdkClientHandler {
 }
 
 pub(crate) struct SdkMcpClientInner {
+    pub(crate) verified_native: Option<Arc<super::native_binding::NativeBindingState>>,
     pub(crate) running: RunningService<RoleClient, HarnSdkClientHandler>,
     pub(crate) handler: HarnSdkClientHandler,
     pub(crate) raw_responses: super::raw_stdio::RawResponseLog,
-    pub(crate) child: tokio::process::Child,
+    pub(crate) process_owner: Box<dyn super::McpProcessOwner>,
 }
 
 pub(crate) fn sdk_protocol_version(value: &str) -> ProtocolVersion {

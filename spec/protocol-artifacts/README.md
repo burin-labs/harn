@@ -64,6 +64,9 @@ aliases, and constants mirroring the Python and Swift bindings.
 - `fixtures/round_trip.json`: representative JSON envelopes used by
 `make check-bindings` to exercise Python, Go, and TypeScript, and
 `make check-swift-protocol-binding` for the macOS projection.
+- `fixtures/harn-codegen-names.ir.json`: a production-lowered portable
+catalog with reserved names, Unicode, normalized collisions, and
+host runtime type names for target backend conformance.
 - `fixtures/mcp/`: hand-authored MCP 2026-07-28 wire fixtures
 (stable success, unsupported-version retry, cache hints,
 input-required, header mismatch, no-session HTTP, recursive

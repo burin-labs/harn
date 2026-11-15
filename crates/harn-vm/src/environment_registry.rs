@@ -1076,12 +1076,13 @@ mod tests {
     /// environment reads. Exclude both their generator and generated output so
     /// a public constant cannot accidentally keep an environment variable alive.
     fn is_protocol_artifact_projection(path: &std::path::Path) -> bool {
-        path.components().any(|component| {
-            matches!(
-                component.as_os_str().to_str(),
-                Some("dump_protocol_artifacts" | "protocol-artifacts")
-            )
-        })
+        path.ends_with("crates/harn-vm/src/codegen/projections.rs")
+            || path.components().any(|component| {
+                matches!(
+                    component.as_os_str().to_str(),
+                    Some("dump_protocol_artifacts" | "protocol-artifacts")
+                )
+            })
     }
 
     /// Prose can mention a retired name forever, so release notes and docs do
@@ -1122,12 +1123,18 @@ mod tests {
             "crates/harn-cli/src/commands/dump_protocol_artifacts/typescript.rs",
         );
         let projection = std::path::Path::new("spec/protocol-artifacts/harn-protocol.ts");
+        let codegen_generator = std::path::Path::new("crates/harn-vm/src/codegen/projections.rs");
+        let codegen_runtime = std::path::Path::new("crates/harn-vm/src/codegen/validate.rs");
         let runtime = std::path::Path::new("crates/harn-vm/src/llm/call.rs");
 
         assert!(is_protocol_artifact_projection(generator));
         assert!(is_protocol_artifact_projection(projection));
+        assert!(is_protocol_artifact_projection(codegen_generator));
         assert!(!is_reference_source(generator));
         assert!(!is_reference_source(projection));
+        assert!(!is_reference_source(codegen_generator));
+        assert!(!is_protocol_artifact_projection(codegen_runtime));
+        assert!(is_reference_source(codegen_runtime));
         assert!(is_reference_source(runtime));
         assert!(variable_spec("HARN_AGENT_EVENT_KINDS").is_none());
         assert!(variable_spec("HARN_WORKER_STATUSES").is_none());

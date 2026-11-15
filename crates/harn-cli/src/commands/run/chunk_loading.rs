@@ -85,6 +85,10 @@ pub(crate) struct LoadedChunk {
     /// Handing it to the VM lets module loading resolve each module's artifact
     /// from a recorded digest instead of re-reading the graph to rederive one.
     pub(crate) link_table: Option<Arc<harn_vm::context_manifest::GraphLinkTable>>,
+    /// Complete source census from the same compilation context, including
+    /// modules whose handlers have not executed yet. Cache persistence is not
+    /// required for the cold compiler path to retain this context.
+    pub(crate) source_context: Option<harn_vm::context_manifest::ContextManifest>,
 }
 
 /// Load the entry pipeline as a runnable [`harn_vm::Chunk`], using the
@@ -170,6 +174,7 @@ pub(crate) fn compile_or_load_chunk_with_timing(
         return Ok(LoadedChunk {
             source,
             chunk,
+            source_context: lookup.as_ref().and_then(|lookup| lookup.manifest.clone()),
             link_table: lookup.and_then(|lookup| lookup.link_table),
         });
     }
@@ -254,6 +259,7 @@ pub(crate) fn compile_or_load_chunk_with_timing(
     // sandboxes are common in CI environments. Surface the failure as a
     // single-line warning when explicitly requested via the audit hook;
     // otherwise stay quiet to avoid bloating happy-path output.
+    let mut source_context = None;
     if project_context == ProjectContextMode::Project {
         let mut store = harn_vm::bytecode_cache::prepare_entry_store(Path::new(path), &source);
         if let Some(manifest) = store.manifest.as_mut() {
@@ -278,6 +284,7 @@ pub(crate) fn compile_or_load_chunk_with_timing(
                 }
             }
         }
+        source_context = store.manifest.clone();
         if let Err(err) = store.store(&chunk) {
             if std::env::var_os(crate::dispatch::CACHE_DEBUG_ENV).is_some() {
                 harn_vm::events::log_info("cache", &format!("bytecode cache write skipped: {err}"));
@@ -292,6 +299,7 @@ pub(crate) fn compile_or_load_chunk_with_timing(
         source,
         chunk,
         link_table: lookup.and_then(|lookup| lookup.link_table),
+        source_context,
     })
 }
 

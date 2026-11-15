@@ -11,13 +11,7 @@ pub struct McpServerMetadata {
 }
 
 /// A tool extracted from a Harn tool_registry, ready to serve over MCP.
-pub struct McpToolDef {
-    /// The one transport-neutral entry projected by CLI, MCP, documentation,
-    /// and generated clients.
-    pub catalog: crate::tool_registry::ToolCatalogEntry,
-    pub handler: VmClosure,
-    pub invocation_requirement: crate::tool_registry::ToolInvocationRequirement,
-}
+pub type McpToolDef = crate::tool_registry::ExecutableTool;
 
 /// A static resource to serve over MCP.
 pub struct McpResourceDef {

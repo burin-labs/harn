@@ -155,6 +155,43 @@ pub(super) fn generate_manifest_with_vocabularies(
             "schemaVersion": TOOL_CATALOG_SCHEMA_VERSION,
         },
     }));
+    for (artifact, version) in [
+        (
+            harn_vm::codegen::CODEGEN_IR_SCHEMA_ARTIFACT,
+            json!(harn_vm::codegen::CodegenSchemaVersion::V1),
+        ),
+        (
+            harn_vm::codegen::CODEGEN_REQUEST_SCHEMA_ARTIFACT,
+            json!(harn_vm::codegen::CodegenRequestVersion::V1),
+        ),
+        (
+            harn_vm::codegen::CODEGEN_RESPONSE_SCHEMA_ARTIFACT,
+            json!(harn_vm::codegen::CodegenResponseVersion::V1),
+        ),
+        (
+            harn_vm::codegen::CODEGEN_DIAGNOSTIC_SCHEMA_ARTIFACT,
+            json!(harn_vm::codegen::CodegenSchemaVersion::V1),
+        ),
+    ] {
+        schemas.push(json!({
+            "protocol": "harn-codegen",
+            "source": "crates/harn-vm/src/codegen/contract.rs",
+            "artifact": artifact,
+            "provenance": {
+                "owner": "harn-vm::codegen",
+                "schemaVersion": version,
+            },
+        }));
+    }
+    schemas.push(json!({
+        "protocol": "harn-tools-mcp",
+        "source": "crates/harn-vm/src/tool_registry/contract/native_binding.rs",
+        "artifact": harn_vm::codegen::NATIVE_MCP_BINDING_SCHEMA_ARTIFACT,
+        "provenance": {
+            "owner": "harn-vm::tool_registry::NativeMcpBindingProfile",
+            "schemaVersion": harn_vm::tool_registry::NativeMcpBindingVersion::V1,
+        },
+    }));
 
     schemas.push(json!({
         "protocol": "harn",
@@ -204,6 +241,13 @@ pub(super) fn generate_manifest_with_vocabularies(
                 "artifact": TOOL_CATALOG_TYPESCRIPT_ARTIFACT,
                 "schema": TOOL_CATALOG_SCHEMA_ARTIFACT,
                 "schemaVersion": TOOL_CATALOG_SCHEMA_VERSION,
+                "stability": "stable",
+            },
+            "harnCodegenTypescript": {
+                "artifact": harn_vm::codegen::CODEGEN_TYPESCRIPT_ARTIFACT,
+                "schema": harn_vm::codegen::CODEGEN_IR_SCHEMA_ARTIFACT,
+                "protocolFacts": harn_vm::codegen::CODEGEN_PROTOCOL_FACTS_ARTIFACT,
+                "schemaVersion": harn_vm::codegen::CodegenSchemaVersion::V1,
                 "stability": "stable",
             },
         },
@@ -408,6 +452,9 @@ pub(super) fn generate_readme() -> String {
          - `fixtures/round_trip.json`: representative JSON envelopes used by\n\
            `make check-bindings` to exercise Python, Go, and TypeScript, and\n\
            `make check-swift-protocol-binding` for the macOS projection.\n\
+         - `fixtures/harn-codegen-names.ir.json`: a production-lowered portable\n\
+           catalog with reserved names, Unicode, normalized collisions, and\n\
+           host runtime type names for target backend conformance.\n\
          - `fixtures/mcp/`: hand-authored MCP 2026-07-28 wire fixtures\n\
            (stable success, unsupported-version retry, cache hints,\n\
            input-required, header mismatch, no-session HTTP, recursive\n\

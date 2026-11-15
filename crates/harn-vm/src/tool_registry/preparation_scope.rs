@@ -6,11 +6,23 @@ use std::sync::Arc;
 use harn_builtin_meta::BuiltinContract;
 use serde_json::Value;
 
+use super::ToolAudience;
 use crate::value::{ErrorCategory, VmClosure, VmError};
 
 tokio::task_local! {
     static PREPARING: ();
     static INVOCATION: Option<Arc<PreparedInvocation>>;
+    static AUDIENCE: ToolAudience;
+}
+
+pub(crate) fn current_audience() -> ToolAudience {
+    AUDIENCE
+        .try_with(|audience| *audience)
+        .unwrap_or(ToolAudience::Agent)
+}
+
+pub(crate) async fn audience<F: Future>(audience: ToolAudience, future: F) -> F::Output {
+    AUDIENCE.scope(audience, future).await
 }
 
 pub(crate) struct PreparedInvocation {
@@ -64,6 +76,7 @@ pub(crate) fn current_invocation() -> Option<Arc<PreparedInvocation>> {
 pub(crate) struct SubtaskPreparationScope {
     preparing: bool,
     invocation: Option<Arc<PreparedInvocation>>,
+    audience: ToolAudience,
 }
 
 impl SubtaskPreparationScope {
@@ -71,16 +84,23 @@ impl SubtaskPreparationScope {
         Self {
             preparing: PREPARING.try_with(|()| true).unwrap_or(false),
             invocation: inherit_invocation.then(current_invocation).flatten(),
+            audience: if inherit_invocation {
+                current_audience()
+            } else {
+                ToolAudience::Agent
+            },
         }
     }
 
     pub(crate) fn poll<T>(&self, poll: impl FnOnce() -> T) -> T {
-        INVOCATION.sync_scope(self.invocation.clone(), || {
-            if self.preparing {
-                PREPARING.sync_scope((), poll)
-            } else {
-                poll()
-            }
+        AUDIENCE.sync_scope(self.audience, || {
+            INVOCATION.sync_scope(self.invocation.clone(), || {
+                if self.preparing {
+                    PREPARING.sync_scope((), poll)
+                } else {
+                    poll()
+                }
+            })
         })
     }
 }
@@ -89,6 +109,24 @@ impl SubtaskPreparationScope {
 mod tests {
     use super::*;
     use harn_builtin_meta::BuiltinExposure;
+
+    #[tokio::test]
+    async fn adapter_audience_crosses_only_the_inherited_invocation_frame() {
+        assert_eq!(current_audience(), ToolAudience::Agent);
+        audience(ToolAudience::Mcp, async {
+            let inherited = SubtaskPreparationScope::capture(true);
+            let independent = SubtaskPreparationScope::capture(false);
+            assert_eq!(inherited.poll(current_audience), ToolAudience::Mcp);
+            assert_eq!(independent.poll(current_audience), ToolAudience::Agent);
+            audience(ToolAudience::Agent, async {
+                assert_eq!(current_audience(), ToolAudience::Agent);
+            })
+            .await;
+            assert_eq!(current_audience(), ToolAudience::Mcp);
+        })
+        .await;
+        assert_eq!(current_audience(), ToolAudience::Agent);
+    }
 
     #[tokio::test]
     async fn compiler_value_helpers_are_pure_but_other_runtime_internals_stay_denied() {

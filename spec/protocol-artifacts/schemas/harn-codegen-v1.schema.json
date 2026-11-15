@@ -1,0 +1,1244 @@
+{
+  "$defs": {
+    "CodegenBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/CodegenBindingKind"
+        },
+        "operation": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/WireSourceRef"
+        }
+      },
+      "required": [
+        "kind",
+        "operation",
+        "source"
+      ],
+      "type": "object"
+    },
+    "CodegenBindingKind": {
+      "enum": [
+        "harn_export",
+        "registry",
+        "open_api",
+        "mcp"
+      ],
+      "type": "string"
+    },
+    "CodegenCancellation": {
+      "enum": [
+        "mcp_request"
+      ],
+      "type": "string"
+    },
+    "CodegenExecution": {
+      "additionalProperties": false,
+      "properties": {
+        "cancellation": {
+          "$ref": "#/$defs/CodegenCancellation"
+        },
+        "task_support": {
+          "$ref": "#/$defs/ToolTaskSupport"
+        }
+      },
+      "required": [
+        "task_support",
+        "cancellation"
+      ],
+      "type": "object"
+    },
+    "CodegenFeature": {
+      "enum": [
+        "exact_json_integer",
+        "base64_bytes",
+        "canonical_decimal",
+        "sets",
+        "tuples",
+        "string_maps",
+        "optional_fields",
+        "nominal_types",
+        "recursive_types",
+        "disjoint_unions",
+        "declared_application_errors",
+        "mcp_tasks",
+        "request_cancellation"
+      ],
+      "type": "string"
+    },
+    "CodegenIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_digest": {
+          "type": "string"
+        },
+        "catalog_digest": {
+          "type": "string"
+        },
+        "ir_digest": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "catalog_digest",
+        "binding_digest",
+        "ir_digest"
+      ],
+      "type": "object"
+    },
+    "CodegenOperation": {
+      "additionalProperties": false,
+      "properties": {
+        "application_error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WireTypeId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "binding": {
+          "$ref": "#/$defs/CodegenBinding"
+        },
+        "cli": {
+          "$ref": "#/$defs/ToolCliSpec"
+        },
+        "documentation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "execution": {
+          "$ref": "#/$defs/CodegenExecution"
+        },
+        "governance": {
+          "$ref": "#/$defs/ToolGovernance"
+        },
+        "id": {
+          "type": "string"
+        },
+        "input": {
+          "$ref": "#/$defs/WireTypeId"
+        },
+        "name": {
+          "type": "string"
+        },
+        "output": {
+          "$ref": "#/$defs/CodegenOutput"
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/WireSourceRef"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "source",
+        "input",
+        "output",
+        "execution",
+        "governance",
+        "cli",
+        "binding"
+      ],
+      "type": "object"
+    },
+    "CodegenOutput": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "missing",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "value",
+              "type": "string"
+            },
+            "mcp_envelope": {
+              "$ref": "#/$defs/McpOutputEnvelope"
+            },
+            "type_id": {
+              "$ref": "#/$defs/WireTypeId"
+            }
+          },
+          "required": [
+            "kind",
+            "type_id",
+            "mcp_envelope"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "CodegenPackage": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/WireSourceRef"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "source"
+      ],
+      "type": "object"
+    },
+    "CodegenSchemaVersion": {
+      "enum": [
+        "harn-codegen/1.0"
+      ],
+      "type": "string"
+    },
+    "McpOutputEnvelope": {
+      "description": "MCP requires object structured content even for scalar Harn results.",
+      "enum": [
+        "bare",
+        "result_property"
+      ],
+      "type": "string"
+    },
+    "SideEffectLevel": {
+      "description": "Rough side-effect taxonomy for the capability-ceiling check.",
+      "oneOf": [
+        {
+          "const": "none",
+          "description": "No side effect declared (conservative default; permission logic\ntreats this as \"unknown → deny unless explicitly allowed\").",
+          "type": "string"
+        },
+        {
+          "const": "read_only",
+          "description": "Pure reads only.",
+          "type": "string"
+        },
+        {
+          "const": "workspace_write",
+          "description": "Writes to workspace files.",
+          "type": "string"
+        },
+        {
+          "const": "process_exec",
+          "description": "Runs subprocesses.",
+          "type": "string"
+        },
+        {
+          "const": "network_read",
+          "description": "Reads remote content without granting remote mutations or child sockets.",
+          "type": "string"
+        },
+        {
+          "const": "network",
+          "description": "Reaches external services over the network.",
+          "type": "string"
+        },
+        {
+          "const": "desktop_control",
+          "description": "Drives the physical desktop — synthetic mouse/keyboard input and screen\ncapture. The most invasive local class: it can operate ANY application\n(not just a sandboxed subprocess or a single network sink), inject\nkeystrokes that paste secrets or dismiss dialogs, and every screenshot\nexfiltrates whatever is on screen to the model. It therefore sits at the\ntop of the ceiling ladder — a policy must opt into it explicitly, above\neven network access.",
+          "type": "string"
+        }
+      ]
+    },
+    "ToolAudience": {
+      "description": "Adapter projections that may discover and invoke a tool.",
+      "enum": [
+        "cli",
+        "mcp",
+        "catalog",
+        "dashboard",
+        "agent"
+      ],
+      "type": "string"
+    },
+    "ToolCliArgumentSpec": {
+      "additionalProperties": false,
+      "description": "Presentation and token mapping for one input-schema property.",
+      "properties": {
+        "aliases": {
+          "default": [],
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*$",
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "boolean_style": {
+          "$ref": "#/$defs/ToolCliBooleanStyle",
+          "default": "value",
+          "description": "Boolean token behavior. Presence styles never synthesize a value when\nthe option is absent."
+        },
+        "completions": {
+          "default": [],
+          "description": "Ordered advisory completion candidates. These do not constrain input.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "display_order": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "help": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "help_group": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hidden": {
+          "default": false,
+          "description": "Hide the argument from generated help while retaining explicit use.",
+          "type": "boolean"
+        },
+        "long": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*$",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "position": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "repeatable": {
+          "default": false,
+          "type": "boolean"
+        },
+        "short": {
+          "maxLength": 1,
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value_hint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolCliValueHint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value_name": {
+          "minLength": 1,
+          "pattern": ".*\\S.*",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ToolCliBooleanStyle": {
+      "description": "How one boolean property maps from command-line tokens.",
+      "oneOf": [
+        {
+          "const": "value",
+          "description": "Read an explicit `true` or `false` value.",
+          "type": "string"
+        },
+        {
+          "const": "set_true",
+          "description": "Insert `true` when the option is present and omit the property otherwise.",
+          "type": "string"
+        },
+        {
+          "const": "set_false",
+          "description": "Insert `false` when the option is present and omit the property otherwise.",
+          "type": "string"
+        }
+      ]
+    },
+    "ToolCliSpec": {
+      "additionalProperties": false,
+      "description": "Deterministic command-line presentation for one tool.",
+      "properties": {
+        "aliases": {
+          "default": [],
+          "description": "Alternate spellings for the final command component.",
+          "items": {
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]*$",
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "arguments": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ToolCliArgumentSpec"
+          },
+          "default": {},
+          "description": "Token-to-property projections. Omitted properties retain Harn's\nzero-configuration `--property-name` projection.",
+          "type": "object"
+        },
+        "command": {
+          "description": "Non-empty command path below `harn tool run <script>`.",
+          "items": {
+            "pattern": "^[A-Za-z0-9_][A-Za-z0-9_-]*$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "hidden": {
+          "description": "Hide the command from help while retaining explicit invocation.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "command",
+        "hidden"
+      ],
+      "type": "object"
+    },
+    "ToolCliValueHint": {
+      "description": "Closed, shell-portable completion hint for an argument value.",
+      "enum": [
+        "file",
+        "directory",
+        "path",
+        "url",
+        "email",
+        "username",
+        "hostname",
+        "command",
+        "other"
+      ],
+      "type": "string"
+    },
+    "ToolGovernance": {
+      "additionalProperties": false,
+      "description": "Closed adapter-exposure policy owned by one tool entry.",
+      "properties": {
+        "audiences": {
+          "items": {
+            "$ref": "#/$defs/ToolAudience"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "audiences"
+      ],
+      "type": "object"
+    },
+    "ToolKind": {
+      "description": "Canonical tool-kind vocabulary. Matches the ACP `ToolKind` enum so\nharn-cli's ACP server can forward the value unchanged in\n`sessionUpdate` variants.\n\nThe VM treats `Read`, `Search`, `Think`, and `Fetch` as read-only\nfor concurrent-dispatch purposes. `Other` is intentionally NOT\ntreated as read-only — unannotated tools should not slip through\nas auto-approved by default (fail-safe).",
+      "oneOf": [
+        {
+          "const": "read",
+          "description": "Reads file/workspace content without mutation.",
+          "type": "string"
+        },
+        {
+          "const": "edit",
+          "description": "Mutates workspace content (write, patch, edit).",
+          "type": "string"
+        },
+        {
+          "const": "delete",
+          "description": "Removes content irreversibly.",
+          "type": "string"
+        },
+        {
+          "const": "move",
+          "description": "Relocates or renames content.",
+          "type": "string"
+        },
+        {
+          "const": "search",
+          "description": "Queries indexes or directories; no mutation.",
+          "type": "string"
+        },
+        {
+          "const": "execute",
+          "description": "Runs a subprocess or a shell command.",
+          "type": "string"
+        },
+        {
+          "const": "think",
+          "description": "Pure reasoning/thought invocation, no side effects.",
+          "type": "string"
+        },
+        {
+          "const": "fetch",
+          "description": "Retrieves remote content (HTTP, MCP fetch, etc.).",
+          "type": "string"
+        },
+        {
+          "const": "other",
+          "description": "Anything that doesn't map cleanly into the canonical kinds.\nNot treated as read-only — the fail-safe default.",
+          "type": "string"
+        }
+      ]
+    },
+    "ToolPolicy": {
+      "additionalProperties": false,
+      "description": "Harn-owned execution classification, separate from advisory MCP hints.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ToolKind"
+        },
+        "side_effect_level": {
+          "$ref": "#/$defs/SideEffectLevel"
+        }
+      },
+      "required": [
+        "kind",
+        "side_effect_level"
+      ],
+      "type": "object"
+    },
+    "ToolTaskSupport": {
+      "description": "Whether one tool may be invoked as a task, as `tools/list` reports it.\n\nMCP lets a server declare this per tool rather than server-wide, which is\nwhat makes an honest partial implementation possible: a server can serve the\nextension for the tools it can actually run that way and say `forbidden` for\nthe rest, instead of advertising a blanket capability and failing whichever\ncalls it cannot honor.",
+      "oneOf": [
+        {
+          "const": "forbidden",
+          "description": "The client must not ask for a task. This is the default: a tool has to\nopt in, so adding the extension cannot change how an existing tool\nbehaves.",
+          "type": "string"
+        },
+        {
+          "const": "optional",
+          "description": "The client may ask for a task; a plain call still works.",
+          "type": "string"
+        },
+        {
+          "const": "required",
+          "description": "The tool is only invocable as a task.",
+          "type": "string"
+        }
+      ]
+    },
+    "WireBytesEncoding": {
+      "enum": [
+        "base64_envelope"
+      ],
+      "type": "string"
+    },
+    "WireDecimalEncoding": {
+      "enum": [
+        "canonical_string"
+      ],
+      "type": "string"
+    },
+    "WireDeclarationIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "arguments": {
+          "items": {
+            "$ref": "#/$defs/WireTypeId"
+          },
+          "type": "array"
+        },
+        "declaration_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "declaration_id",
+        "name",
+        "arguments"
+      ],
+      "type": "object"
+    },
+    "WireEnumVariant": {
+      "additionalProperties": false,
+      "properties": {
+        "documentation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/WireField"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/WireSourceRef"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "fields",
+        "source"
+      ],
+      "type": "object"
+    },
+    "WireField": {
+      "additionalProperties": false,
+      "properties": {
+        "documentation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "optional": {
+          "type": "boolean"
+        },
+        "source": {
+          "$ref": "#/$defs/WireSourceRef"
+        },
+        "type_id": {
+          "$ref": "#/$defs/WireTypeId"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "type_id",
+        "optional",
+        "source"
+      ],
+      "type": "object"
+    },
+    "WireIntegerEncoding": {
+      "enum": [
+        "json_number"
+      ],
+      "type": "string"
+    },
+    "WireLiteral": {
+      "description": "Exact literal spelling keeps full-width integers out of a host JSON parser.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "null",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "boolean",
+              "type": "string"
+            },
+            "value": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "string",
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "integer",
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "float",
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WireShape": {
+      "description": "Closed, normalized JSON wire algebra. References are graph edges.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "null",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "boolean",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "encoding": {
+              "$ref": "#/$defs/WireIntegerEncoding"
+            },
+            "kind": {
+              "const": "integer",
+              "type": "string"
+            },
+            "maximum": {
+              "type": "string"
+            },
+            "minimum": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "encoding",
+            "minimum",
+            "maximum"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "float",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "string",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "encoding": {
+              "$ref": "#/$defs/WireBytesEncoding"
+            },
+            "kind": {
+              "const": "bytes",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "encoding"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "encoding": {
+              "$ref": "#/$defs/WireDecimalEncoding"
+            },
+            "kind": {
+              "const": "decimal",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "encoding"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "literal",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/WireLiteral"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "item": {
+              "$ref": "#/$defs/WireTypeId"
+            },
+            "kind": {
+              "const": "list",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "item"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "item": {
+              "$ref": "#/$defs/WireTypeId"
+            },
+            "kind": {
+              "const": "set",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "item"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "items": {
+              "items": {
+                "$ref": "#/$defs/WireTypeId"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "tuple",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "items"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "map",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/WireTypeId"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "additional": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/WireTypeId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fields": {
+              "items": {
+                "$ref": "#/$defs/WireField"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "record",
+              "type": "string"
+            },
+            "nominal": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/WireDeclarationIdentity"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "fields"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "enum",
+              "type": "string"
+            },
+            "nominal": {
+              "$ref": "#/$defs/WireDeclarationIdentity"
+            },
+            "variants": {
+              "items": {
+                "$ref": "#/$defs/WireEnumVariant"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "nominal",
+            "variants"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "union",
+              "type": "string"
+            },
+            "members": {
+              "items": {
+                "$ref": "#/$defs/WireTypeId"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "members"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "declaration": {
+              "$ref": "#/$defs/WireDeclarationIdentity"
+            },
+            "kind": {
+              "const": "alias",
+              "type": "string"
+            },
+            "target": {
+              "$ref": "#/$defs/WireTypeId"
+            }
+          },
+          "required": [
+            "kind",
+            "target",
+            "declaration"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WireSourceRef": {
+      "description": "A declaration location, never a rejected invocation value.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "document": {
+              "type": "string"
+            },
+            "end": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "text_span",
+              "type": "string"
+            },
+            "start": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "document",
+            "start",
+            "end"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "document": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "document_pointer",
+              "type": "string"
+            },
+            "pointer": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "document",
+            "pointer"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "synthetic",
+              "type": "string"
+            },
+            "owner": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "owner"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WireType": {
+      "additionalProperties": false,
+      "properties": {
+        "documentation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/WireTypeId"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "shape": {
+          "$ref": "#/$defs/WireShape"
+        },
+        "source": {
+          "$ref": "#/$defs/WireSourceRef"
+        }
+      },
+      "required": [
+        "id",
+        "source",
+        "shape"
+      ],
+      "type": "object"
+    },
+    "WireTypeId": {
+      "description": "Stable semantic identity, independent of a backend's allocated symbol.",
+      "type": "string"
+    }
+  },
+  "$id": "https://harnlang.com/schemas/harn-codegen-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "catalog_canonical_json": {
+      "description": "Canonical commitment payload. Only Harn interprets this catalog.",
+      "type": "string"
+    },
+    "identity": {
+      "$ref": "#/$defs/CodegenIdentity"
+    },
+    "mcp_tools": {
+      "description": "Forwarded unchanged for MCP discovery, never a backend's typing input.",
+      "items": true,
+      "type": "array"
+    },
+    "operations": {
+      "items": {
+        "$ref": "#/$defs/CodegenOperation"
+      },
+      "type": "array"
+    },
+    "package": {
+      "$ref": "#/$defs/CodegenPackage"
+    },
+    "required_features": {
+      "items": {
+        "$ref": "#/$defs/CodegenFeature"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "$ref": "#/$defs/CodegenSchemaVersion"
+    },
+    "sources": {
+      "description": "Complete source authority, retained even when graph nodes are shared.",
+      "items": {
+        "$ref": "#/$defs/WireSourceRef"
+      },
+      "type": "array"
+    },
+    "types": {
+      "items": {
+        "$ref": "#/$defs/WireType"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "required_features",
+    "identity",
+    "catalog_canonical_json",
+    "sources",
+    "package",
+    "types",
+    "operations",
+    "mcp_tools"
+  ],
+  "title": "Harn Codegen IR",
+  "type": "object"
+}

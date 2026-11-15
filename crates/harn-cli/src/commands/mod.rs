@@ -6,6 +6,7 @@ pub(crate) mod bench;
 pub(crate) mod canon;
 pub(crate) mod chat;
 pub(crate) mod check;
+pub(crate) mod codegen;
 pub(crate) mod codemod;
 mod command_probe;
 pub(crate) mod config_cmd;

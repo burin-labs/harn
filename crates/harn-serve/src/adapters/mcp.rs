@@ -62,7 +62,7 @@ use axum::{Json, Router};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver};
 use futures::{stream, StreamExt};
 use harn_vm::mcp_protocol::{
-    self, negotiate_http_request, server_discover_result, standard_name_header_value,
+    self, negotiate_http_request, server_discover_result, standard_name_body_value,
 };
 use serde_json::{json, Value as JsonValue};
 use tokio::sync::mpsc;
@@ -157,6 +157,13 @@ struct ActiveCall {
     cancelled: Arc<AtomicBool>,
 }
 
+impl ActiveCall {
+    fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+        self.cancel_token.store(true, Ordering::SeqCst);
+    }
+}
+
 #[derive(Default)]
 struct SessionState {
     connection: mcp_protocol::McpServerSession,
@@ -208,8 +215,7 @@ impl SharedSession {
         let Some(active) = guard.active_calls.remove(request_id) else {
             return false;
         };
-        active.cancelled.store(true, Ordering::SeqCst);
-        active.cancel_token.store(true, Ordering::SeqCst);
+        active.cancel();
         true
     }
 }
@@ -249,6 +255,9 @@ struct StreamJob {
     progress_token: Option<JsonValue>,
     request_profile: mcp_protocol::McpRequestProfile,
     context: RequestContext,
+    /// Prepared before a transport can close, then registered unchanged when
+    /// execution starts. A disconnected response cannot race registration.
+    active: ActiveCall,
     /// Set when the client asked for a task. This lease owns both terminal
     /// completion and the exact cancellation token installed in dispatch.
     task: Option<harn_vm::mcp_tasks::McpTaskLease>,
@@ -803,6 +812,13 @@ impl McpServer {
             .cloned()
             .filter(harn_vm::mcp_progress::is_valid_progress_token);
         let request_key = request_key(&request_id);
+        let active = ActiveCall {
+            cancel_token: task
+                .as_ref()
+                .map(harn_vm::mcp_tasks::McpTaskLease::cancel_token)
+                .unwrap_or_else(|| Arc::new(AtomicBool::new(false))),
+            cancelled: Arc::new(AtomicBool::new(false)),
+        };
         let job = StreamJob {
             request_id,
             request_key,
@@ -810,6 +826,7 @@ impl McpServer {
             params,
             progress_token,
             request_profile,
+            active,
             context: RequestContext {
                 session,
                 connection,
@@ -825,22 +842,22 @@ impl McpServer {
         job: StreamJob,
         notify: Arc<dyn Fn(JsonValue) + Send + Sync>,
     ) {
-        let cancel_token = job
-            .task
-            .as_ref()
-            .map(harn_vm::mcp_tasks::McpTaskLease::cancel_token)
-            .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
-        let cancelled = Arc::new(AtomicBool::new(false));
-        job.context.session.insert_call(
-            job.request_key.clone(),
-            ActiveCall {
-                cancel_token: cancel_token.clone(),
-                cancelled: cancelled.clone(),
-            },
-        );
+        job.context
+            .session
+            .insert_call(job.request_key.clone(), job.active.clone());
+        if job.active.cancelled.load(Ordering::SeqCst) {
+            job.context.session.remove_call(&job.request_key);
+            return;
+        }
 
         let progress = job.progress_token.clone().map(|token| {
-            let bus = harn_vm::mcp_progress::ProgressBus::new(notify.clone());
+            let active = job.active.clone();
+            let notify = notify.clone();
+            let bus = harn_vm::mcp_progress::ProgressBus::new(Arc::new(move |message| {
+                if !active.cancelled.load(Ordering::SeqCst) {
+                    notify(message);
+                }
+            }));
             harn_vm::mcp_progress::ProgressContext::new(bus, token)
         });
         let invocation = ToolInvocation {
@@ -849,7 +866,7 @@ impl McpServer {
             params: job.params,
             client_identity: job.context.connection.client_identity().to_string(),
             auth: job.context.auth,
-            cancel_token,
+            cancel_token: job.active.cancel_token,
             progress,
             as_task: job.task.is_some(),
         };
@@ -866,7 +883,7 @@ impl McpServer {
             }
             return;
         };
-        if cancelled.load(Ordering::SeqCst) {
+        if job.active.cancelled.load(Ordering::SeqCst) {
             if let Some(task) = job.task {
                 task.cancel();
             }

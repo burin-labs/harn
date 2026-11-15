@@ -24,6 +24,13 @@ that integer another meaning. See [Exact token references](../llm/tokenizer.md).
 inside an iteration; an iteration can contain several. Executed by
 `agent_dispatch_tool_call` or by `agent_loop` automatically.
 
+**Wire graph.** Harn's closed description of the portable values a tool accepts,
+returns, and throws. It owns the types consumed by generated codecs.
+
+**Native tool binding.** A verified ordinary MCP worker attached to an
+independently compiled Harn contract and executed through Harn's tool registry.
+See [Native tool bindings](../native-tool-bindings.md).
+
 **Iteration.** One model round-trip inside an agent loop: prompt-out,
 response-in, optional tool dispatch. Counted in `result.llm.iterations`.
 *Preferred name.*

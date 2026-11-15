@@ -275,6 +275,7 @@ pub fn install_default_with_embed_and_handles(
         registry = registry.with(computer::ComputerUseCapability::new());
     }
     registry.register_into_vm(vm);
+    process::register_native_mcp(vm);
     // Compatibility stub: typed `HarnessTools` replaced the thread-local
     // `hostlib_enable` gate. Legacy ambient callers still invoke
     // `hostlib_enable("tools:deterministic")` before hostlib_* builtins; keep
