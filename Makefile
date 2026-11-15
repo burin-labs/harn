@@ -1805,6 +1805,7 @@ check-rust-test-lane-policy:
 	@bash scripts/tests/host_telemetry_test.sh
 	@bash scripts/tests/consumer_canary_test.sh
 	@bash scripts/tests/consumer_verdict_test.sh
+	@node --test scripts/tests/consumer_failure_identity_test.mjs
 
 check-cargo-lock-contract:
 	@echo "=== Checking CI cargo lock contract ==="

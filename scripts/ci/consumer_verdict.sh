@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# CI status's downstream-consumer decision. A measured pass passes. A measured
-# fail is excused as inherited only when the base rehearsal also measured a
-# fail on the same consumer commit and job set, failing in exactly the same
-# job steps. Any other base outcome (passed, unmeasured, failed elsewhere, or
-# a different consumer) leaves the pull request's measured fail blocking.
-# An expected consumer check without a measured verdict also blocks.
+# CI status's downstream-consumer decision. Only a measured pass from a
+# successful owning workflow passes. A measured failure always blocks.
+# Job/step hashes cannot establish equivalent failed cases or execution phases;
+# they remain diagnostic metadata, never evidence of an inherited failure.
 #
 # Inputs are the CONSUMER_* variables CI status sets. Exit 1 blocks.
 set -uo pipefail
@@ -27,43 +25,26 @@ block() {
 }
 
 echo "Downstream consumer: result=${CONSUMER_RESULT:-} verdict=${CONSUMER_VERDICT:-none} (expected=${CONSUMER_EXPECTED:-})"
-if [ "${CONSUMER_EXPECTED:-}" != "true" ]; then
-  case "${CONSUMER_RESULT%%/*}" in
-    success | skipped) exit 0 ;;
-    *) block "Downstream consumer check ran without being expected and did not pass." ;;
+case "${CONSUMER_EXPECTED:-}" in
+  true | false) ;;
+  *) unmeasured "consumer_scope_unmeasured" ;;
+esac
+case "${CONSUMER_VERDICT:-}" in
+  pass)
+    if [ "${CONSUMER_RESULT:-}" != success ]; then
+      block "Downstream consumer pass has no successful owning workflow (${CONSUMER_RESULT:-unmeasured})."
+    fi
+    exit 0 ;;
+  fail)
+    block "Downstream consumer run ${CONSUMER_RUN:-none} measured a failure. Baseline job/step matches are incomparable without source-bound case evidence and cannot excuse it." ;;
+  "") ;;
+  *) unmeasured "consumer_verdict_invalid" ;;
+esac
+
+if [ "${CONSUMER_EXPECTED:-}" = false ]; then
+  case "${CONSUMER_RESULT:-}" in
+    skipped) exit 0 ;;
+    *) block "Downstream consumer check ran without being expected and did not publish a measured pass." ;;
   esac
 fi
-
-case "${CONSUMER_VERDICT:-}" in
-  pass) exit 0 ;;
-  fail) ;;
-  *) unmeasured "consumer_unmeasured (${CONSUMER_REASONS:-})" ;;
-esac
-
-base=${CONSUMER_BASE:-unknown}
-run=${CONSUMER_RUN:-none}
-base_run=${CONSUMER_BASE_RUN:-none}
-echo "Downstream consumer at base $base: base CLI=${CONSUMER_BASE_CLI_RESULT:-} result=${CONSUMER_BASE_RESULT:-} verdict=${CONSUMER_BASE_VERDICT:-none}"
-identity=${CONSUMER_IDENTITY:-/}
-base_identity=${CONSUMER_BASE_IDENTITY:-/}
-same_head=false
-same_jobs=false
-[ -n "${identity%%/*}" ] && [ "${identity%%/*}" = "${base_identity%%/*}" ] && same_head=true
-[ -n "${identity#*/}" ] && [ "${identity#*/}" = "${base_identity#*/}" ] && same_jobs=true
-
-case "${CONSUMER_BASE_VERDICT:-}" in
-  pass | fail) ;;
-  *) block "Downstream consumer run $run fails with this change and the base rehearsal measured nothing (${CONSUMER_BASE_REASONS:-}, base CLI=${CONSUMER_BASE_CLI_RESULT:-}), so the red is not shown to be inherited." ;;
-esac
-if [ "$same_head" != "true" ] || [ "$same_jobs" != "true" ]; then
-  block "Downstream consumer run $run fails with this change and base run $base_run rehearsed a different consumer (same commit=$same_head, same jobs=$same_jobs), so the red is not shown to be inherited."
-fi
-if [ "$CONSUMER_BASE_VERDICT" = "pass" ]; then
-  block "Downstream consumer run $run fails with this change and consumer run $base_run passes at base $base on the same consumer commit."
-fi
-failures=${CONSUMER_FAILURES:-}
-if [ -z "$failures" ] || [ "$failures" != "${CONSUMER_BASE_FAILURES:-}" ]; then
-  block "Downstream consumer run $run fails with this change and base run $base_run fails in different job steps, so the base did not measure the same failure."
-fi
-echo "::notice::Downstream consumer red is inherited: consumer run $run fails here and consumer run $base_run fails in the same job steps at base $base on the same consumer commit, so it does not block this pull request."
-exit 0
+unmeasured "consumer_unmeasured (${CONSUMER_REASONS:-})"

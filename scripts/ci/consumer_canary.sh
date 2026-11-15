@@ -260,7 +260,8 @@ canary_record() {
         && [[ -n "$jobs" ]]; then
       digest=$(LC_ALL=C sort <<< "$jobs" | sha256sum | cut -d' ' -f1)
     fi
-    # Where the run failed, so a base excuses a red only by failing the same way.
+    # Diagnostic location only. Equal job/step names cannot establish the same
+    # failed cases or execution phase and never authorize excusing a red.
     if canary_api --optional failed consumer_run_failures secret:CONSUMER_CANARY_REPOSITORY \
         "repos/$repo/actions/runs/$run_id/jobs?filter=latest&per_page=100" \
         --jq 'if .total_count <= 100 then .jobs[] | select(.conclusion == "failure") | "\(.name)\t\([.steps[]? | select(.conclusion == "failure") | .name][0] // "")" else empty end' \
