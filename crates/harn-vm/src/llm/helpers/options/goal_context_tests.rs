@@ -20,12 +20,12 @@ fn goal_lookup_does_not_materialize_unrelated_prompt_metadata() {
     )
     .unwrap();
     let mut reminder = SystemReminder::new(
-        "## Goal\nObjective: exact task",
+        "## Goal\nObjective: exact task 🦆",
         ReminderSource::InPipeline,
         0,
     );
     reminder.goal_pin = Some(GoalPinProjection::from_json(json!({
-        "spec":{"objective":"exact task","success_criteria":[],"retired_criteria":[],"constraints":[],"budget":{}},
+        "spec":{"objective":"exact task 🦆","success_criteria":[],"retired_criteria":[],"constraints":[],"budget":{}},
         "lifecycle":"managed", "control_id":null, "objective_covered_body":"## Goal"
     })).unwrap());
     let id = reminder.id.clone();
@@ -71,6 +71,32 @@ fn goal_lookup_does_not_materialize_unrelated_prompt_metadata() {
         super::super::system_prompt::system_prompt_metadata_projections(),
         before,
         "goal lookup and full-envelope equality must never project unrelated metadata"
+    );
+    let mut served = vec![
+        json!({"role": "user", "content": "exact task 🦆"}),
+        envelope,
+    ];
+    let projected = super::project_goal_context(&mut served, Some(sid), &[reminder.clone()]);
+    assert_eq!(
+        projected.len(),
+        1,
+        "the Unicode envelope must really project"
+    );
+    assert_eq!(
+        served[1]["content"],
+        crate::llm::helpers::directive_envelope_message(
+            &crate::llm::helpers::render_pending_reminders(
+                &crate::llm::capabilities::Capabilities::default(),
+                &[{
+                    let mut covered = reminder.clone();
+                    covered.body = "## Goal".to_string();
+                    covered
+                }],
+            ),
+            &nonce,
+        )
+        .unwrap()["content"],
+        "checked ranges must preserve the canonical envelope around the covered objective"
     );
     reminder.goal_pin = None;
     assert!(

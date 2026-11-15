@@ -134,7 +134,7 @@ fn main(harness: Harness) {
         [
           {
             tool_calls: [
-              member_call("deferred-member", "src/a.harn"),
+              member_call("observed-member", "src/a.harn"),
               {id: "ordinary-observation", name: "edit", arguments: {}},
             ],
           },
@@ -168,15 +168,15 @@ fn main(harness: Harness) {
       )
     },
   )
-  let deferred = false
+  let observed_mutation = false
   let blocked = false
   let linked_blocker = false
   let ordinary_receipt = false
   for event in captured.events {
     if event?.type == "tool_batch_disposition" {
       const receipt = event.receipt
-      if receipt.tool_call_id == "deferred-member" {
-        deferred = receipt.disposition == "deferred" && receipt.phase == "mutation"
+      if receipt.tool_call_id == "observed-member" {
+        observed_mutation = receipt.disposition == "executed" && receipt.phase == "mutation"
           && receipt.tool_name == "computer.edit"
       }
       if receipt.tool_call_id == "blocked-member" {
@@ -196,12 +196,13 @@ fn main(harness: Harness) {
         && partial_apply?.skipped_tool_name == "computer.edit"
     }
   }
-  require deferred, "the namespaced mutation must wait for a new inference after observation"
+  require observed_mutation,
+    "a successful observation must allow the namespaced mutation in the same batch"
   require blocked && linked_blocker, "a failed member must block its same-resource sibling"
   require ordinary_receipt, "the ordinary observation receipt must retain its plain name"
   require harness.runtime.atomic_get(observations) == 1, "the ordinary observation must fire"
-  require harness.runtime.atomic_get(mutations) == 2,
-    "only the failed member and independent-resource member may fire"
+  require harness.runtime.atomic_get(mutations) == 3,
+    "the observed, failed and independent-resource members must fire without the blocked sibling"
   require captured.result.status == "done", "the guarded batch must reach terminal completion"
   check_failure_fanout(harness)
   harness.stdio.println("qualified phases and resource guards reached")

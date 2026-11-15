@@ -267,9 +267,11 @@ async fn protected_push_requires_operator_grant_and_records_it() {
     }
     harn_vm::event_log::reset_active_event_log();
     harn_vm::stdlib::reset_stdlib_state();
-    let remote = tempfile::tempdir().expect("remote");
+    let workspace = tempfile::tempdir_in(std::env::current_dir().expect("test workspace"))
+        .expect("workspace fixture");
+    let remote = tempfile::tempdir_in(workspace.path()).expect("remote");
     git(remote.path(), &["init", "--bare"]);
-    let one = tempfile::tempdir().expect("clone one");
+    let one = tempfile::tempdir_in(workspace.path()).expect("clone one");
     git(
         one.path(),
         &["clone", remote.path().to_str().unwrap(), "repo"],

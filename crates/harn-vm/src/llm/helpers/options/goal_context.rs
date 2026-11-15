@@ -72,7 +72,7 @@ pub(super) fn project_goal_context(
     if records.is_empty() {
         return rendered_bytes;
     }
-    for message in messages {
+    'messages: for message in messages {
         let Some(ids) = directive_ids(message) else {
             continue;
         };
@@ -130,13 +130,21 @@ pub(super) fn project_goal_context(
         }
         let mut projected = String::with_capacity(content.len());
         let mut cursor = 0;
-        for (start, end, id, text) in replacements {
-            projected.push_str(&content[cursor..start]);
-            projected.push_str(&text);
-            rendered_bytes.insert(id, text.len());
-            cursor = end;
+        for (start, end, _, text) in &replacements {
+            let Some(unchanged) = content.get(cursor..*start) else {
+                continue 'messages;
+            };
+            projected.push_str(unchanged);
+            projected.push_str(text);
+            cursor = *end;
         }
-        projected.push_str(&content[cursor..]);
+        let Some(unchanged) = content.get(cursor..) else {
+            continue;
+        };
+        projected.push_str(unchanged);
+        for (_, _, id, text) in replacements {
+            rendered_bytes.insert(id, text.len());
+        }
         message["content"] = Value::String(projected);
     }
     rendered_bytes

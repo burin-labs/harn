@@ -6,7 +6,6 @@ import {
 } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { __dispatch_call_tally } from "std/agent/loop_result_status"
-import { agent_session_post_event } from "std/agent/state"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { __tool_registry_name } from "std/llm/call_shape"
 import { llm_text, with_llm_script } from "std/testing"
@@ -257,6 +256,25 @@ fn assert_resolution_events(
   return resolutions
 }
 
+fn apply_reread_control(agent: HarnessAgent, sid: string, variant: string, reads: int) -> nil {
+  if reads != 2 {
+    return nil
+  }
+  if variant == "reread_injected" {
+    agent.inject(sid, {role: "user", content: "Use a new task instead."})
+  }
+  if variant == "reread_inbox" {
+    agent.post_event(sid, "user_interrupt", "Pause this work.")
+  }
+}
+
+fn current_edit_precheck(variant: string, call: dict) -> dict? {
+  if ["denied", "reread_denied"].contains(variant) && call?.tool == "edit_value" {
+    return {deny: true, model_cue: "The current policy refuses this edit."}
+  }
+  return nil
+}
+
 /** Run one deterministic public-loop trial and return its measured observations. */
 pub fn retained_proposal_trial(harness: Harness, variant: string) -> RetainedProposalTrial {
   const sid = "retained-proposal-${harness.random.uuid()}"
@@ -302,13 +320,8 @@ pub fn retained_proposal_trial(harness: Harness, variant: string) -> RetainedPro
           if variant == "reread_failed" {
             return agent_tool_handler_result("Read failed.", {error: "unavailable"}, "error")
           }
-          if variant == "reread_injected" {
-            harness.agent.inject(sid, {role: "user", content: "Use a new task instead."})
-          }
-          if variant == "reread_inbox" {
-            agent_session_post_event(harness.agent, sid, "user_interrupt", "Pause this work.")
-          }
         }
+        apply_reread_control(harness.agent, sid, variant, harness.runtime.atomic_get(reads))
         return variant == "discard" || variant == "revise" ? "The earlier proposal is wrong; discard it." : "Evidence ready. "
           + "x" * 4000
       },
@@ -348,12 +361,7 @@ pub fn retained_proposal_trial(harness: Harness, variant: string) -> RetainedPro
               loop_until_done: true,
               max_iterations: 4,
               final_wrapup: false,
-              tool_precheck: { call ->
-                if ["denied", "reread_denied"].contains(variant) && call?.tool == "edit_value" {
-                  return {deny: true, model_cue: "The current policy refuses this edit."}
-                }
-                return nil
-              },
+              tool_precheck: { call -> current_edit_precheck(variant, call) },
               auto_compact: variant == "compacted" ? {keep_first: 0} : false,
               compact_threshold: 1,
               compact_keep_last: 0,
