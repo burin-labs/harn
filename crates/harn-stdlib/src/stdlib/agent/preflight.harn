@@ -771,11 +771,6 @@ pub fn agent_build_turn_system_fragments(
   )
   fragments = __agent_push_system_fragment(
     fragments,
-    "progress_nudge",
-    opts?._progress_tool_system_prompt_nudge ?? "",
-  )
-  fragments = __agent_push_system_fragment(
-    fragments,
     "operating_guidance",
     if (opts?.loop_until_done ?? false) || agent_has_tools(opts) {
       render_agent_prompt_id(harness.fs, "agent.operating_guidance", {}, opts)

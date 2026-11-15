@@ -1,0 +1,154 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+const NUDGE = "When useful, call agent_progress to report concise progress."
+
+fn anchor_tools() -> dict {
+  return tool_define(
+    tool_registry(),
+    "lookup",
+    "Read a record",
+    {parameters: {}, handler: { _ -> "record" }},
+  )
+}
+
+fn progress_description(call: dict, name: string = "agent_progress") -> string {
+  for tool in call?.tools ?? [] {
+    if (tool?.name ?? tool?.function?.name) == name {
+      return tool?.description ?? tool?.function?.description ?? ""
+    }
+  }
+  return ""
+}
+
+fn first_request(harness: Harness, search: bool, progress: bool | dict) -> dict {
+  return with_llm_script(
+    harness.llm,
+    [{tool_calls: [{id: "lookup", name: "lookup", arguments: {}}]}, llm_text("Completed ##DONE##")],
+    { ->
+      agent_loop(
+        harness,
+        "Read the record",
+        "BASE",
+        {
+          provider: "mock",
+          model: "claude-sonnet-5-5",
+          tools: anchor_tools(),
+          tool_format: "native",
+          tool_search: search,
+          progress_tool: progress,
+          loop_until_done: true,
+          max_iterations: 3,
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      assert(len(calls) == 2, "actual initial provider request count=" + to_string(len(calls)))
+      return calls[0]
+    },
+  )
+}
+
+fn client_progress(harness: Harness, format: string) {
+  const sid = "progress-disclosure-" + harness.random.uuid()
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [
+          {id: "search", name: "__harn_tool_search", arguments: {query: "agent_progress"}},
+        ],
+      },
+      {
+        tool_calls: [
+          {id: "progress", name: "agent_progress", arguments: {message: "PROGRESS_REACHED"}},
+        ],
+      },
+      llm_text("Completed ##DONE##"),
+    ],
+    { ->
+      const captured = agent_capture_events(
+        harness.agent,
+        sid,
+        { ->
+          return agent_loop(
+            harness,
+            "Report progress",
+            "BASE",
+            {
+              provider: "mock",
+              model: "claude-sonnet-5-5",
+              tools: anchor_tools(),
+              tool_format: format,
+              tool_search: {mode: "client"},
+              progress_tool: true,
+              session_id: sid,
+              loop_until_done: true,
+              max_iterations: 4,
+            },
+          )
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      assert(len(calls) == 3, "search, promoted call and completion all reached")
+      assert(!calls[0].system.contains(NUDGE))
+      if format == "native" {
+        assert(progress_description(calls[0]) == "", "progress schema is initially hidden")
+        assert(
+          progress_description(calls[1]).contains(NUDGE),
+          "promoted descriptor includes guidance",
+        )
+        assert(!calls[1].system.contains(NUDGE), "no parallel global progress instruction")
+      } else {
+        assert(calls[1].system.contains(NUDGE))
+        assert(len(calls[1].system.split(NUDGE)) == 2, "text projection includes guidance once")
+      }
+      const events = captured.events.filter({ event -> event.type == "progress_reported" })
+      assert(
+        len(events) == 1 && events[0].message == "PROGRESS_REACHED",
+        "actual progress handler fired",
+      )
+    },
+  )
+}
+
+pipeline test(harness: Harness) {
+  const eager = first_request(harness, false, {})
+  assert(eager.system.contains(NUDGE))
+  assert(len(eager.system.split(NUDGE)) == 2, "search-off guidance is retained exactly once")
+  assert(
+    !progress_description(eager).contains(NUDGE),
+    "search-off descriptor retains original description",
+  )
+  const native = first_request(harness, true, {})
+  assert(
+    !native.system.contains(NUDGE),
+    "native discovery starts without progress invocation prose",
+  )
+  assert(native.tools[0].type == "tool_search_tool_bm25_20251119")
+  assert(
+    progress_description(native).contains(NUDGE),
+    "native search descriptor carries the same guidance",
+  )
+  const enabled = first_request(harness, false, true)
+  assert(len(enabled.system.split(NUDGE)) == 2, "boolean opt-in reaches the same guidance owner")
+  const custom = first_request(
+    harness,
+    false,
+    {name: "report_progress", system_prompt_nudge: "CUSTOM_PROGRESS_GUIDANCE "},
+  )
+  assert(
+    len(custom.system.split("CUSTOM_PROGRESS_GUIDANCE")) == 2,
+    "custom nudge retains one owner",
+  )
+  assert(
+    custom.system.contains("CUSTOM_PROGRESS_GUIDANCE report_progress"),
+    "custom name still resolves",
+  )
+  const disabled = first_request(harness, false, false)
+  assert(!disabled.system.contains(NUDGE) && progress_description(disabled) == "")
+  client_progress(harness, "native")
+  client_progress(harness, "json")
+  client_progress(harness, "text")
+  harness.stdio.log("progress tool guidance tests passed")
+}
