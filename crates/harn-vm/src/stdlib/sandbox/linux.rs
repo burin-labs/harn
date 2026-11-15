@@ -47,6 +47,7 @@ use filesystem::filesystem_profile;
 pub(crate) use filesystem::installed_write_grants;
 use landlock_support::{AccessFs, FsAccess, LandlockSupport, ABI};
 use nesting::nested_seccomp_filter_rule;
+pub(crate) use shared_memory::host_fallback_root as shared_memory_fallback_root;
 
 impl SandboxBackend for Backend {
     fn name() -> &'static str {
