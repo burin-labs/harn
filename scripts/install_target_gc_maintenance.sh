@@ -1,15 +1,29 @@
 #!/usr/bin/env bash
 # Install one daily host job for the current target-cache collector.
 #
-# HARN_TARGET_GC_SCHEDULE=none installs only the wrapper and removes any
-# schedule this installer published, for a host whose own maintenance job
-# already calls the wrapper. Two schedules would run the same sweep twice.
+# Usage: install_target_gc_maintenance.sh [--schedule daily|none]
+#
+# `--schedule none` installs only the wrapper and removes any schedule this
+# installer published, for a host whose own maintenance job already calls the
+# wrapper. Two schedules would run the same sweep twice. The schedule is an
+# argument, not an environment variable, so a caller never places an extra
+# HARN_* name in an environment that a harn process could inherit.
 set -euo pipefail
 
-schedule="${HARN_TARGET_GC_SCHEDULE:-daily}"
+schedule=daily
+while (($#)); do
+  case "$1" in
+    --schedule)
+      [ "$#" -ge 2 ] || { echo "harn-target maintenance: --schedule needs a value" >&2; exit 2; }
+      schedule="$2"
+      shift 2
+      ;;
+    *) echo "harn-target maintenance: unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
 case "$schedule" in
   daily|none) ;;
-  *) echo "harn-target maintenance: HARN_TARGET_GC_SCHEDULE must be daily or none: $schedule" >&2; exit 2 ;;
+  *) echo "harn-target maintenance: --schedule must be daily or none: $schedule" >&2; exit 2 ;;
 esac
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
