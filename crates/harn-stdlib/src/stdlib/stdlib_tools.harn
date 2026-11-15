@@ -133,6 +133,7 @@ pub type ToolPolicy = {
     | "process_exec" \
     | "network" \
     | "desktop_control",
+  source?: "declared" | "legacy_annotations",
 }
 
 /** MCP task execution contract retained by the shared tool catalog. */

@@ -50,6 +50,7 @@ pub fn learned_dispatcher(options: LearnedDispatcherOptions) -> LearnedDispatche
         && preflight.inputSchema == capability.tool.inputSchema
         && preflight.annotations?.readOnlyHint == true
         && preflight.policy?.side_effect_level == "read_only"
+        && preflight.policy?.source != "legacy_annotations"
         && preflight.annotations?.destructiveHint != true,
         "std/agent/learned: preflight requires a distinct read-only tool with the same input schema"
     }

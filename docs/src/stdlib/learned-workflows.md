@@ -23,9 +23,12 @@ and `minimum_probability`. Empty required identities throw.
 An optional `preflight_tool` checks bound arguments and current project state
 before the mutating tool is selected. It must have a distinct name, the same
 input schema, `annotations.readOnlyHint: true`, and
-`policy.side_effect_level: "read_only"`. Harn enforces the declared effect
+`policy.side_effect_level: "read_only"` with declared policy provenance. Author
+this with `execution_policy: {kind: "read", side_effect_level: "read_only"}`.
+Harn enforces the declared effect
 ceiling for local and served MCP handlers. A presentation hint alone supplies
-no execution policy. The preflight returns canonical tool-result data matching
+no execution policy. Legacy `annotations.kind` and `annotations.side_effect_level`
+remain scheduling classifications and cannot qualify a preflight. The preflight returns canonical tool-result data matching
 `LearnedPreflight`: `{kind: "ready"}` or
 `{kind: "declined", reason: string}`. Missing or invalid results cause fallback.
 The mutating handler must recheck mutable preconditions before writing.

@@ -643,7 +643,7 @@ fn policy_spec(
                 )));
             }
         };
-        let allowed = BTreeSet::from(["kind", "side_effect_level"]);
+        let allowed = BTreeSet::from(["kind", "side_effect_level", "source"]);
         for key in fields.keys() {
             if !allowed.contains(key.as_str()) {
                 return Err(VmError::Runtime(format!(
@@ -674,6 +674,12 @@ fn policy_spec(
         return Ok(Some(ToolPolicy {
             kind,
             side_effect_level,
+            source: match fields.get("source") {
+                None => ToolPolicySource::Declared,
+                Some(VmValue::String(value)) if value.as_str() == "declared" => ToolPolicySource::Declared,
+                Some(VmValue::String(value)) if value.as_str() == "legacy_annotations" => ToolPolicySource::LegacyAnnotations,
+                _ => return Err(VmError::Runtime(format!("tool {name:?} field 'execution_policy.source' must be declared or legacy_annotations"))),
+            },
         }));
     }
 
@@ -694,6 +700,7 @@ fn policy_spec(
         .map(|(kind, side_effect_level)| ToolPolicy {
             kind,
             side_effect_level,
+            source: ToolPolicySource::LegacyAnnotations,
         }))
 }
 
@@ -1374,6 +1381,7 @@ mod tests {
             Some(ToolPolicy {
                 kind: ToolKind::Fetch,
                 side_effect_level: SideEffectLevel::Network,
+                source: ToolPolicySource::Declared,
             })
         );
         assert!(catalog.tools[0].annotations.is_none());
@@ -1407,6 +1415,7 @@ mod tests {
             Some(ToolPolicy {
                 kind: ToolKind::Execute,
                 side_effect_level: SideEffectLevel::ProcessExec,
+                source: ToolPolicySource::LegacyAnnotations,
             })
         );
         assert_eq!(

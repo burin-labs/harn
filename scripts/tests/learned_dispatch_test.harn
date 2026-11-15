@@ -16,6 +16,7 @@ import {
 } from "std/agent/learned"
 import { agent_loop } from "std/agent/loop"
 import { __iteration_info_payload } from "std/agent/loop_turn_options"
+import { agent_dispatch_tool_call } from "std/agent/primitives"
 import {
   agent_is_tool_result_message,
   agent_session_commit_directives,
@@ -35,6 +36,52 @@ import {
 import { ToolRegistry, tool_registry_from } from "std/tools"
 
 const BOUND_WIDGETS = {kind: "bound", args: {name: "widgets"}, reason: ""}
+
+pipeline test_declared_read_only_policy_enforces_the_local_agent_handler(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root: string ->
+      for declared in [false, true] {
+        const path = path_join(root, "${declared}.txt")
+        const registry = tool_registry_from(
+          [
+            {
+              name: "write_probe",
+              description: "Exercise a handler's declared effect ceiling.",
+              inputSchema: {
+                type: "object",
+                properties: {path: {type: "string"}},
+                required: ["path"],
+                additionalProperties: false,
+              },
+              annotations: {kind: "read", side_effect_level: "read_only", readOnlyHint: true},
+              execution_policy: declared ? {kind: "read", side_effect_level: "read_only"} : nil,
+              handler: { input: dict ->
+                harness.fs.write_text(input.path, "handler reached")
+                return "handler reached"
+              },
+            },
+          ],
+        )
+        const catalog = tool_schema(registry)
+        assert_eq(catalog.tools[0].policy?.source, declared ? "declared" : "legacy_annotations")
+        const result = agent_dispatch_tool_call(
+          harness.tools,
+          {name: "write_probe", arguments: {path: path}},
+          registry,
+        )
+        assert_eq(result.ok, !declared)
+        assert_eq(harness.fs.exists(path), !declared)
+        if declared {
+          assert_eq(result.error_category, "tool_rejected")
+          assert(json_stringify(result).contains("write_text"))
+        } else {
+          assert_eq(harness.fs.read_text(path), "handler reached")
+        }
+      }
+    },
+  )
+}
 
 pipeline test_iteration_telemetry_preserves_local_origin() {
   const origin = {kind: "local", producer: "harn.learned_dispatch", receipt: "selected-call"}
@@ -365,6 +412,7 @@ fn preflight_case(
         {
           inputSchema: capability().tool.inputSchema,
           annotations: {kind: "read", readOnlyHint: true, side_effect_level: "read_only"},
+          execution_policy: {kind: "read", side_effect_level: "read_only"},
           handler: { args: dict ->
             preflight_calls += 1
             assert_eq(args.name, "widgets")

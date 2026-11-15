@@ -41,6 +41,7 @@ async fn declared_read_only_policy_blocks_mcp_handler_writes_but_hints_do_not() 
         tool.catalog.policy = effect.map(|side_effect_level| crate::tool_registry::ToolPolicy {
             kind: ToolKind::Read,
             side_effect_level,
+            source: crate::tool_registry::ToolPolicySource::Declared,
         });
         let registry = script_registry(tool_set(vec![tool]));
         let response = registry

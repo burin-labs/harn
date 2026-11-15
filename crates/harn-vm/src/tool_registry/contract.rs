@@ -236,12 +236,23 @@ pub struct ToolExecution {
     pub task_support: ToolTaskSupport,
 }
 
+/// Whether a classification was declared or projected from legacy annotations.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolPolicySource {
+    #[default]
+    Declared,
+    LegacyAnnotations,
+}
+
 /// Harn-owned execution classification, separate from advisory MCP hints.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
 pub struct ToolPolicy {
     pub kind: ToolKind,
     pub side_effect_level: SideEffectLevel,
+    #[serde(default)]
+    pub source: ToolPolicySource,
 }
 
 /// Reusable named JSON Schemas carried by a catalog.
@@ -1267,6 +1278,7 @@ pub(crate) fn append_tool_catalog_typescript(output: &mut String, config: &Confi
     declaration!(ToolPresentationAnnotations);
     declaration!(ToolIcon);
     declaration!(ToolExecution);
+    declaration!(ToolPolicySource);
     declaration!(ToolPolicy);
     declaration!(ToolCatalogComponents);
     declaration!(ToolCatalogEntry);

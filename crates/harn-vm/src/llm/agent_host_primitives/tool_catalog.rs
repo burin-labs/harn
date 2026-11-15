@@ -107,8 +107,9 @@ mod tests {
     #[test]
     fn mcp_execution_policy_round_trips_through_the_owned_contract() {
         for policy in [
-            serde_json::json!({"kind": "read", "side_effect_level": "read_only"}),
-            serde_json::json!({"kind": "edit", "side_effect_level": "workspace_write"}),
+            serde_json::json!({"kind": "read", "side_effect_level": "read_only", "source": "declared"}),
+            serde_json::json!({"kind": "read", "side_effect_level": "read_only", "source": "legacy_annotations"}),
+            serde_json::json!({"kind": "edit", "side_effect_level": "workspace_write", "source": "declared"}),
         ] {
             let mut catalog: crate::tool_registry::ToolCatalog =
                 serde_json::from_value(serde_json::json!({

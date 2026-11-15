@@ -19,7 +19,8 @@ pub(crate) async fn scope_tool_handler<T>(
     if entry
         .and_then(|entry| entry.policy.as_ref())
         .is_some_and(|policy| {
-            policy.side_effect_level == crate::tool_annotations::SideEffectLevel::ReadOnly
+            policy.source == super::ToolPolicySource::Declared
+                && policy.side_effect_level == crate::tool_annotations::SideEffectLevel::ReadOnly
         })
     {
         crate::orchestration::scope_read_only_effects(handler).await
