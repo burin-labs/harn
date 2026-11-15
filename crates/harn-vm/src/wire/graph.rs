@@ -93,12 +93,11 @@ impl PreparedWireGraph {
                         return Err(failure(ty, WireFailureCode::InvalidContract));
                     }
                 }
-                WireShape::Union { members } => {
+                WireShape::Union { members }
                     if members.len() < 2
-                        || members.iter().collect::<BTreeSet<_>>().len() != members.len()
-                    {
-                        return Err(failure(ty, WireFailureCode::InvalidContract));
-                    }
+                        || members.iter().collect::<BTreeSet<_>>().len() != members.len() =>
+                {
+                    return Err(failure(ty, WireFailureCode::InvalidContract));
                 }
                 _ => {}
             }

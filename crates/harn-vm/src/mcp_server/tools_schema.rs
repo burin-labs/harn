@@ -75,14 +75,7 @@ pub fn tool_registry_to_mcp_tools(registry: &VmValue) -> Result<McpToolSet, VmEr
     let definitions = crate::tool_registry::executable_tools_for_audience(
         registry,
         crate::tool_registry::ToolAudience::Mcp,
-    )?
-    .into_iter()
-    .map(|tool| McpToolDef {
-        catalog: tool.catalog,
-        handler: tool.handler,
-        invocation_requirement: tool.invocation_requirement,
-    })
-    .collect::<Vec<_>>();
+    )?;
     if definitions.len() != prepared.catalog().tools.len() {
         return Err(VmError::Runtime(
             "executable MCP handlers do not match the prepared tool catalog".into(),

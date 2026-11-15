@@ -156,7 +156,7 @@ impl CodegenIr {
             sources.push(&ty.source);
             match &ty.shape {
                 crate::wire::WireShape::Record { fields, .. } => {
-                    sources.extend(fields.iter().map(|field| &field.source))
+                    sources.extend(fields.iter().map(|field| &field.source));
                 }
                 crate::wire::WireShape::Enum { variants, .. } => {
                     for variant in variants {

@@ -238,7 +238,7 @@ impl McpScriptRegistry {
                     }),
                     crate::tool_registry::call_tool_handler(
                         vm,
-                        &tool,
+                        tool,
                         crate::tool_registry::ToolAudience::Mcp,
                         args_vm,
                     ),

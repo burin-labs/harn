@@ -52,7 +52,7 @@ fn names_catalog() -> ToolCatalog {
         // The CLI owns explicit spellings for property names whose default
         // kebab-case forms collide. Backends still receive the original names.
         let arguments = Map::from_iter(fields.keys().enumerate().map(|(field_index, field)|
-            (field.to_string(), json!({"long":format!("field-{field_index}")}))));
+            (field.clone(), json!({"long":format!("field-{field_index}")}))));
         let shape = json!({
             "type":"object", "properties":fields, "required":required,
             "additionalProperties":false,
