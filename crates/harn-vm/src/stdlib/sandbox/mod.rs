@@ -90,10 +90,9 @@ pub(crate) mod paths;
 mod process_config;
 mod process_output;
 use path_scope::declared_path_roots_active;
-#[cfg(test)]
-use path_scope::with_declared_path_roots;
 pub use path_scope::{
     check_fs_path_scope, check_git_metadata_path_scope, command_output_with_declared_roots,
+    with_declared_path_roots,
 };
 mod read_roots;
 mod refusal;
@@ -129,7 +128,6 @@ mod policy_projection;
 pub(crate) mod replay;
 #[cfg(target_os = "linux")]
 pub(crate) use policy_projection::process_sandbox_unix_socket_roots;
-pub use policy_projection::unix_socket_enforcement;
 #[cfg(any(
     target_os = "linux",
     target_os = "macos",
@@ -139,6 +137,7 @@ pub use policy_projection::unix_socket_enforcement;
 pub(crate) use policy_projection::{
     process_sandbox_policy_read_roots, process_sandbox_policy_write_roots,
 };
+pub use policy_projection::{process_sandbox_writable_roots, unix_socket_enforcement};
 mod replace;
 
 // Each backend uses one of these: platform helpers call `unavailable`; Linux confines in `pre_exec`.

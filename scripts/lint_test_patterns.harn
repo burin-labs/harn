@@ -255,6 +255,8 @@ const EXACT_PATTERN_BASELINE = LITERAL_TIMEOUT_BASELINE
 // are the intended surface. `crates/harn-cli/tests/harn_cli_fast/orchestrator_http/`
 // is a prefix match; other files require an explicit entry.
 const E2E_SUBPROCESS_PATHS: list<string> = [
+  // Rich tool validation must cross actual MCP stdio and generated CLI publication boundaries.
+  "crates/harn-cli/tests/harn_cli_e2e/portable_wire_codegen.rs",
   // Quickstart's file permissions, Git index, and ignore rules require the actual CLI and Git boundary.
   "crates/harn-cli/tests/harn_cli_e2e/quickstart_env.rs",
   // Signal handling and terminal ordering require the real CLI and its started children.
@@ -270,6 +272,8 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/harn_cli_e2e/process_smoke_cli.rs",
   // Relative PATH lookup must survive the real child process changing directories.
   "crates/harn-cli/tests/harn_cli_e2e/relative_path_resolution_cli.rs",
+  // Transcript inspection resolves relative run paths from the CLI's cwd and loads captured sidecars.
+  "crates/harn-cli/tests/harn_cli_e2e/runs_view_cli.rs",
   // Shared checkpoint mutations must retain keys and one initial value across real CLI processes.
   "crates/harn-cli/tests/harn_cli_e2e/checkpoint_concurrency.rs",
   // Init exit status and Git visibility of real runtime stores require the project CLI process.

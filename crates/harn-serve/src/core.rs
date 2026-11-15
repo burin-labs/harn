@@ -556,7 +556,11 @@ impl DispatchCore {
                                 &format!("serve export `{}`", request.function),
                             )
                             .map_err(classify_vm_error)?;
-                            let user_args = build_vm_args(&request.arguments, function)?;
+                            let user_args = build_vm_args(
+                                &request.arguments,
+                                function,
+                                self.prepared_tool_catalog(),
+                            )?;
                             args.extend(user_args);
                             let result = vm.call_closure_pub(closure, &args).await;
 
@@ -642,7 +646,8 @@ impl DispatchCore {
                                 &format!("serve pipeline `{}`", function.name),
                             )
                             .map_err(classify_vm_error)?;
-                            let user_args = build_vm_args(&arguments, &function)?;
+                            let user_args =
+                                build_vm_args(&arguments, &function, self.prepared_tool_catalog())?;
                             args.extend(user_args);
                             let result = vm.call_closure_pub(&closure, &args).await;
 

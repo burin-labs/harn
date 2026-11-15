@@ -786,7 +786,7 @@ fn registry_handler_result_envelope_has_cli_and_mcp_parity() {
     );
     // Validating the envelope itself would report missing `id`/`name`;
     // validating `data` reports the wrongly typed field.
-    assert!(stderr.contains("failed type"), "{stderr}");
+    assert!(stderr.contains("WrongRuntimeType at /*"), "{stderr}");
     assert!(
         !stderr.contains("required"),
         "envelope was validated: {stderr}"

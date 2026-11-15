@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use jsonschema::{error::ValidationErrorKind, Validator};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
 use super::{
@@ -13,6 +13,7 @@ use super::{
 
 mod cli;
 mod cli_schema;
+mod wire;
 
 pub use cli::{PreparedCliArgument, PreparedCliCommand, PreparedCliTree};
 
@@ -64,6 +65,8 @@ pub struct ToolContractViolation {
     pub tool: String,
     pub phase: ToolContractPhase,
     pub violations: Vec<ToolContractViolationDetail>,
+    /// Typed preparation/codec provenance, without rejected application data.
+    pub wire_failure: Option<Box<crate::wire::WireFailure>>,
 }
 
 /// Owned, value-free JSON Schema failure detail safe for adapter diagnostics.
@@ -97,6 +100,14 @@ impl std::fmt::Display for ToolContractViolationDetail {
 
 impl std::fmt::Display for ToolContractViolation {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(failure) = &self.wire_failure {
+            return write!(
+                formatter,
+                "tool {:?} {} violates its declared schema: {failure}",
+                self.tool,
+                self.phase.label()
+            );
+        }
         write!(
             formatter,
             "tool {:?} {} violates its declared schema: {}",
@@ -114,7 +125,8 @@ impl std::fmt::Display for ToolContractViolation {
 impl std::error::Error for ToolContractViolation {}
 
 /// Validated application failure data independent of any execution transport.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ToolApplicationError {
     pub tool: String,
     pub data: JsonValue,
@@ -124,7 +136,7 @@ pub struct ToolApplicationError {
 }
 
 /// Failure disposition explicitly declared by a typed handler result.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ToolApplicationOutcome {
     Error,
@@ -159,6 +171,7 @@ struct PreparedToolEntry {
     input: Validator,
     output: Option<Validator>,
     error: Option<Validator>,
+    wire: wire::PreparedWireEntry,
 }
 
 /// A validated catalog with every instance validator and adapter projection
@@ -170,12 +183,27 @@ pub struct PreparedToolCatalog {
     names: BTreeMap<String, usize>,
     mcp_tools: Vec<JsonValue>,
     cli_tree: PreparedCliTree,
+    resources: RuntimeSchemaResources,
 }
 
 impl PreparedToolCatalog {
     /// Validate and compile an immutable execution view of `catalog`.
-    pub fn prepare(catalog: ToolCatalog) -> Result<Self, PreparedToolCatalogError> {
+    pub fn prepare(mut catalog: ToolCatalog) -> Result<Self, PreparedToolCatalogError> {
         catalog.validate().map_err(PreparedToolCatalogError::new)?;
+        if let Some(components) = catalog.components.as_mut() {
+            for schema in components.schemas.values_mut() {
+                super::schema::canonicalize_required_names(schema);
+            }
+        }
+        for tool in &mut catalog.tools {
+            super::schema::canonicalize_required_names(&mut tool.input_schema);
+            for schema in [&mut tool.output_schema, &mut tool.error_schema]
+                .into_iter()
+                .flatten()
+            {
+                super::schema::canonicalize_required_names(schema);
+            }
+        }
         let components = catalog
             .components
             .as_ref()
@@ -226,6 +254,7 @@ impl PreparedToolCatalog {
                 input,
                 output,
                 error,
+                wire: wire::PreparedWireEntry::prepare(tool, &runtime_schemas)?,
             });
             if tool.governance.allows(ToolAudience::Mcp) {
                 mcp_tools.push(
@@ -241,11 +270,16 @@ impl PreparedToolCatalog {
             names,
             mcp_tools,
             cli_tree,
+            resources: runtime_schemas,
         })
     }
 
     pub fn catalog(&self) -> &ToolCatalog {
         &self.catalog
+    }
+
+    pub(crate) fn schema_resources(&self) -> &RuntimeSchemaResources {
+        &self.resources
     }
 
     pub fn entry(&self, name: &str) -> Option<&ToolCatalogEntry> {
@@ -363,6 +397,7 @@ impl PreparedToolCatalog {
                 tool: name.to_string(),
                 phase,
                 violations,
+                wire_failure: None,
             })
         }
     }
@@ -375,6 +410,7 @@ impl PreparedToolCatalog {
         ToolContractViolation {
             tool: name.to_string(),
             phase,
+            wire_failure: None,
             violations: vec![ToolContractViolationDetail {
                 structural_path: String::new(),
                 schema_path: String::new(),
@@ -433,9 +469,10 @@ fn compile_validator(
         })
 }
 
-struct RuntimeSchemaResources {
+#[derive(Clone, Debug)]
+pub(crate) struct RuntimeSchemaResources {
     component_uris: BTreeMap<String, String>,
-    registry: jsonschema::Registry<'static>,
+    pub(crate) registry: jsonschema::Registry<'static>,
 }
 
 impl RuntimeSchemaResources {
@@ -445,11 +482,16 @@ impl RuntimeSchemaResources {
         let component_uris = components
             .into_iter()
             .flat_map(|components| components.keys())
-            .enumerate()
-            .map(|(index, name)| {
+            .map(|name| {
                 (
                     name.clone(),
-                    format!("https://harn.invalid/prepared-tool-components/{index}"),
+                    format!(
+                        "https://harn.invalid/prepared-tool-components/{}",
+                        percent_encoding::utf8_percent_encode(
+                            name,
+                            percent_encoding::NON_ALPHANUMERIC
+                        )
+                    ),
                 )
             })
             .collect::<BTreeMap<_, _>>();
@@ -479,7 +521,10 @@ impl RuntimeSchemaResources {
         })
     }
 
-    fn rewrite(&self, schema: &JsonValue) -> Result<JsonValue, PreparedToolCatalogError> {
+    pub(crate) fn rewrite(
+        &self,
+        schema: &JsonValue,
+    ) -> Result<JsonValue, PreparedToolCatalogError> {
         rewrite_component_refs(schema.clone(), &self.component_uris)
     }
 }

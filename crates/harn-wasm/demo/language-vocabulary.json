@@ -913,6 +913,7 @@
     "tool_prompt",
     "tool_ref",
     "tool_registry",
+    "tool_registry_bind",
     "tool_registry_validate",
     "tool_remove",
     "tool_rule",

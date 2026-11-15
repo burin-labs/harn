@@ -15,6 +15,7 @@ mod bench;
 mod canon;
 mod chat;
 mod check;
+mod codegen;
 mod codemod;
 mod completion;
 mod config_cmd;
@@ -94,6 +95,7 @@ pub(crate) use bench::{BenchArgs, BenchCommand, BenchPortableArgs, BenchReplayAr
 pub(crate) use canon::{CanonArgs, CanonCheckArgs, CanonCommand};
 pub(crate) use chat::ChatArgs;
 pub(crate) use check::{CheckArgs, CheckOutputFormat};
+pub(crate) use codegen::{CodegenArgs, CodegenCommand, CodegenGenerateArgs, CodegenIrArgs};
 pub(crate) use codemod::CodemodArgs;
 pub(crate) use completion::{CompletionArgs, CompletionShell};
 pub(crate) use config_cmd::{ConfigArgs, ConfigCommand, ConfigInspectArgs, ConfigValidateArgs};
@@ -600,6 +602,8 @@ SCRIPTING
     /// Apply a codemod rule's `fix` across a fileset. Dry-run by default
     /// (unified diffs); `--apply` writes, safety- and capability-gated.
     Codemod(CodemodArgs),
+    /// Compile portable adapter contracts and run isolated code-generation backends.
+    Codegen(CodegenArgs),
     /// Author and test structural rules (`harn rule test` runs a rule's
     /// inline-annotation fixtures).
     Rule(RuleArgs),

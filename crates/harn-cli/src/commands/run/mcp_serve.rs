@@ -22,6 +22,7 @@ pub(crate) struct LoadedToolRegistry {
     pub(crate) vm: harn_vm::Vm,
     pub(crate) registry: harn_vm::VmValue,
     pub(crate) diagnostics: String,
+    pub(crate) source_context: Option<harn_vm::context_manifest::ContextManifest>,
     pub(crate) resources: Vec<harn_vm::McpResourceDef>,
     pub(crate) resource_templates: Vec<harn_vm::McpResourceTemplateDef>,
     pub(crate) prompts: Vec<harn_vm::McpPromptDef>,
@@ -52,11 +53,27 @@ pub(crate) async fn load_file_tool_registry(
         .await
 }
 
+/// Code generation also needs files behind deferred handlers in its source census.
+pub(crate) async fn load_file_tool_registry_with_sources(
+    path: &str,
+) -> Result<LoadedToolRegistry, ToolRegistryLoadError> {
+    tokio::task::LocalSet::new()
+        .run_until(load_file_tool_registry_local_with_sources(path, true))
+        .await
+}
+
 /// Local-task variant used by a live stdio server when a watched source tree
 /// changes. Keeping compilation and execution in this one loader preserves the
 /// exact same validation and connector setup as initial startup and CLI calls.
 pub(crate) async fn load_file_tool_registry_local(
     path: &str,
+) -> Result<LoadedToolRegistry, ToolRegistryLoadError> {
+    load_file_tool_registry_local_with_sources(path, false).await
+}
+
+async fn load_file_tool_registry_local_with_sources(
+    path: &str,
+    require_sources: bool,
 ) -> Result<LoadedToolRegistry, ToolRegistryLoadError> {
     use std::path::Path;
 
@@ -73,12 +90,37 @@ pub(crate) async fn load_file_tool_registry_local(
         source,
         chunk,
         link_table,
+        mut source_context,
     } = compile_or_load_chunk_for_run(path, &mut diagnostics).map_err(|_| {
         ToolRegistryLoadError {
             message: diagnostics.clone(),
             exit_code: 1,
         }
     })?;
+
+    if require_sources {
+        if source_context
+            .as_ref()
+            .and_then(|context| context.source_documents())
+            .is_none()
+        {
+            // Shipped-interface cache entries can omit the full graph. Reuse
+            // the ordinary cold context capture with the source already read
+            // by compilation; persistence remains optional.
+            source_context =
+                harn_vm::bytecode_cache::prepare_entry_store(Path::new(path), &source).manifest;
+        }
+        if source_context
+            .as_ref()
+            .and_then(|context| context.source_documents())
+            .is_none()
+        {
+            return Err(ToolRegistryLoadError {
+                message: "tool registry has no complete compilation source context".into(),
+                exit_code: 1,
+            });
+        }
+    }
 
     let mut vm = harn_vm::new_vm();
     vm.set_graph_link_table(link_table);
@@ -178,6 +220,7 @@ pub(crate) async fn load_file_tool_registry_local(
     Ok(LoadedToolRegistry {
         vm,
         registry,
+        source_context,
         diagnostics,
         resources: harn_vm::take_mcp_serve_resources(),
         resource_templates: harn_vm::take_mcp_serve_resource_templates(),
@@ -324,6 +367,7 @@ fn project_mcp_runtime(
         vm,
         registry,
         diagnostics,
+        source_context: _,
         resources,
         resource_templates,
         prompts,

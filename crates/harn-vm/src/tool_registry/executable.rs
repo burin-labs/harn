@@ -5,6 +5,33 @@ use super::{
 };
 use crate::value::{VmClosure, VmError, VmValue};
 
+/// Invoke one already-projected direct handler with the adapter's explicit
+/// audience. The same private invocation frame crosses child interpreters;
+/// adapters cannot borrow an enclosing prepared call's authority.
+pub async fn call_tool_handler(
+    vm: &mut crate::Vm,
+    tool: &ExecutableTool,
+    audience: ToolAudience,
+    input: VmValue,
+) -> Result<VmValue, VmError> {
+    if !tool.catalog.governance.allows(audience) {
+        return Err(VmError::CategorizedError {
+            message: "tool is not exposed to this adapter".into(),
+            category: crate::value::ErrorCategory::ToolRejected,
+        });
+    }
+    tool.invocation_requirement
+        .require_direct(&tool.catalog.name)?;
+    super::preparation_scope::audience(
+        audience,
+        super::preparation_scope::scope(
+            None,
+            crate::tool_handler_scope::scope(vm.call_closure_pub(&tool.handler, &[input])),
+        ),
+    )
+    .await
+}
+
 /// Normalized catalog entry paired with its one executable Harn handler.
 pub struct ExecutableTool {
     pub catalog: ToolCatalogEntry,

@@ -268,7 +268,7 @@ impl PreparedModuleManifest {
             ManifestCheck::Stale => false,
             ManifestCheck::Valid => true,
             ManifestCheck::ValidAfterRecheck { refreshed } => {
-                *manifest = refreshed;
+                *manifest = *refreshed;
                 true
             }
         }

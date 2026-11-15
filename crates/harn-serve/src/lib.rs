@@ -7,11 +7,16 @@ mod adapter;
 pub mod adapters;
 mod auth;
 mod auth_context;
+mod codegen;
 mod core;
 mod dispatch_environment;
 pub mod embed;
 mod error;
 mod exports;
+pub use codegen::{
+    codegen_source_refs, codegen_source_refs_for_documents, compile_codegen_ir,
+    compile_codegen_ir_with_sources,
+};
 
 /// Package-backed outbound credential discovery shared with the Harn CLI.
 /// Keep the returned value alive through grant selection and initialization

@@ -25,6 +25,13 @@ pub(crate) enum StreamProtocol {
     GeminiInteractionsSse,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum StreamUsagePolicy {
+    ContentTerminal,
+    TrailingReceipt,
+    ObserveReceipt,
+}
+
 /// The complete wire contract for one resolved route.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct DialectContract {
@@ -34,10 +41,14 @@ pub(crate) struct DialectContract {
 }
 
 impl DialectContract {
-    fn provider_reports_stream_usage(provider: &str) -> bool {
+    fn provider_stream_usage(provider: &str) -> Option<bool> {
         crate::llm::helpers::ResolvedProvider::resolve(provider)
             .pdef
-            .is_some_and(|definition| definition.stream_usage_accounting == Some(true))
+            .and_then(|definition| definition.stream_usage_accounting)
+    }
+
+    fn provider_reports_stream_usage(provider: &str) -> bool {
+        Self::provider_stream_usage(provider) == Some(true)
     }
 
     /// Resolve the contract from the same capability row that admitted the
@@ -444,12 +455,20 @@ impl DialectContract {
         }
     }
 
-    /// Whether a finish-reason frame is only content-terminal and the parser
-    /// must continue through the provider's trailing accounting frame.
-    pub(crate) fn awaits_stream_usage(self, provider: &str) -> bool {
-        self.is_ollama_openai_compat()
-            || (self.stream_protocol() == StreamProtocol::OpenAiSse
-                && Self::provider_reports_stream_usage(provider))
+    /// Unknown accounting must observe a receipt or protocol closure rather
+    /// than discarding fields that a conditional upstream actually reports.
+    pub(crate) fn stream_usage_policy(self, provider: &str) -> StreamUsagePolicy {
+        if self.is_ollama_openai_compat() {
+            return StreamUsagePolicy::TrailingReceipt;
+        }
+        if self.stream_protocol() != StreamProtocol::OpenAiSse {
+            return StreamUsagePolicy::ContentTerminal;
+        }
+        match Self::provider_stream_usage(provider) {
+            Some(true) => StreamUsagePolicy::TrailingReceipt,
+            Some(false) => StreamUsagePolicy::ContentTerminal,
+            None => StreamUsagePolicy::ObserveReceipt,
+        }
     }
 }
 
@@ -693,6 +712,9 @@ mod tests {
     fn nvidia_requests_and_awaits_its_trailing_usage_frame() {
         let contract = DialectContract::new(WireDialect::OpenAiCompat, None);
         assert!(contract.requests_stream_usage("nvidia"));
-        assert!(contract.awaits_stream_usage("nvidia"));
+        assert_eq!(
+            contract.stream_usage_policy("nvidia"),
+            StreamUsagePolicy::TrailingReceipt
+        );
     }
 }

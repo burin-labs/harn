@@ -101,7 +101,7 @@ impl InterfaceSlot {
             // Settle racily clean entries so the next process decides by stats.
             ManifestCheck::ValidAfterRecheck { refreshed } => {
                 let _ = self.write(&payload.context, &refreshed);
-                Some((payload.context, refreshed))
+                Some((payload.context, *refreshed))
             }
             ManifestCheck::Stale => None,
         }

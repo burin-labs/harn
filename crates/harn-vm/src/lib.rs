@@ -61,6 +61,7 @@ pub use harn_vm_core::canonical_json;
 pub mod channel_guardrails;
 pub mod channels;
 pub mod checkpoint;
+pub mod codegen;
 use harn_vm_core::chunk;
 use harn_vm_core::compiler;
 pub mod composition;
@@ -323,6 +324,7 @@ pub mod visible_text;
 use harn_vm_core::vm;
 pub use harn_vm_core::vm::subtask::spawn_lifecycle_cleanup;
 pub mod waitpoints;
+pub mod wire;
 pub use harn_vm_core::windows_path;
 pub mod workspace_anchor;
 pub use harn_vm_core::workspace_path;
@@ -595,6 +597,7 @@ pub mod bench_internals;
 pub struct TypeSchemaResolver {
     compiler: compiler::Compiler,
     nominal_types: std::collections::BTreeMap<String, SchemaNominalType>,
+    wire_scope: wire::scope::DeclarationScope,
 }
 
 #[derive(Clone)]
@@ -615,6 +618,7 @@ impl TypeSchemaResolver {
         Self {
             compiler: compiler::Compiler::new(),
             nominal_types: std::collections::BTreeMap::new(),
+            wire_scope: wire::scope::DeclarationScope::default(),
         }
     }
 
@@ -660,6 +664,7 @@ impl TypeSchemaResolver {
         Self {
             compiler,
             nominal_types,
+            wire_scope: wire::scope::DeclarationScope::from_program(program),
         }
     }
 
@@ -669,7 +674,25 @@ impl TypeSchemaResolver {
         &self,
         type_expr: &harn_parser::TypeExpr,
     ) -> Option<serde_json::Value> {
-        self.json_schema_for_type_expr_inner(type_expr, &mut Vec::new())
+        self.prepare_wire_type(type_expr, self.wire_scope.source.clone())
+            .ok()
+            .map(|wire| wire.json_schema())
+            .or_else(|| self.json_schema_for_type_expr_inner(type_expr, &mut Vec::new()))
+    }
+
+    /// Public tool output omits the explicit handler-result envelope while
+    /// preserving the payload's canonical wire schema and referenced types.
+    pub fn json_schema_for_tool_output_type_expr(
+        &self,
+        type_expr: &harn_parser::TypeExpr,
+    ) -> Option<serde_json::Value> {
+        if let Ok(wire) = self.prepare_wire_type(type_expr, self.wire_scope.source.clone()) {
+            return Some(tool_registry::handler_result::wire_handler_output_schema(
+                &wire,
+            ));
+        }
+        self.json_schema_for_type_expr(type_expr)
+            .map(tool_registry::tool_handler_output_schema)
     }
 
     /// Input projection keeps the established structural contract: inline
@@ -680,6 +703,9 @@ impl TypeSchemaResolver {
         &self,
         type_expr: &harn_parser::TypeExpr,
     ) -> Option<serde_json::Value> {
+        if let Ok(wire) = self.prepare_wire_type(type_expr, self.wire_scope.source.clone()) {
+            return Some(wire.json_schema());
+        }
         let expanded = self.compiler.expand_alias(type_expr);
         let schema = compiler::Compiler::type_expr_to_schema_value(&expanded)?;
         let json_schema = schema::schema_to_json_schema_value(&schema).ok()?;
@@ -867,15 +893,49 @@ impl TypeSchemaResolver {
         &self,
         params: &[harn_parser::TypedParam],
     ) -> serde_json::Value {
+        let fields = params
+            .iter()
+            .map(|param| {
+                let ty = param
+                    .type_expr
+                    .clone()
+                    .unwrap_or_else(|| harn_parser::TypeExpr::Named("unknown".into()));
+                harn_parser::ShapeField {
+                    name: param.name.clone(),
+                    type_expr: if param.rest {
+                        harn_parser::TypeExpr::List(Box::new(ty))
+                    } else {
+                        ty
+                    },
+                    optional: param.default_value.is_some() || param.rest,
+                    span: param.span,
+                }
+            })
+            .collect();
+        if let Ok(wire) = self.prepare_wire_type(
+            &harn_parser::TypeExpr::Shape(fields),
+            self.wire_scope.source.clone(),
+        ) {
+            return wire.json_schema();
+        }
         let mut properties = serde_json::Map::new();
+        let mut definitions = serde_json::Map::new();
         let mut required = Vec::new();
 
         for param in params {
-            let item_schema = param
+            let mut item_schema = param
                 .type_expr
                 .as_ref()
                 .and_then(|type_expr| self.json_schema_for_input_type_expr(type_expr))
                 .unwrap_or_else(|| serde_json::json!({}));
+            if let Some(object) = item_schema.as_object_mut() {
+                object.remove("$schema");
+                if let Some(serde_json::Value::Object(nested)) = object.remove("$defs") {
+                    for (name, schema) in nested {
+                        definitions.entry(name).or_insert(schema);
+                    }
+                }
+            }
             let param_schema = if param.rest {
                 serde_json::json!({"type": "array", "items": item_schema})
             } else {
@@ -896,6 +956,9 @@ impl TypeSchemaResolver {
             "properties".to_string(),
             serde_json::Value::Object(properties),
         );
+        if !definitions.is_empty() {
+            schema.insert("$defs".into(), serde_json::Value::Object(definitions));
+        }
         if !required.is_empty() {
             schema.insert("required".to_string(), serde_json::Value::Array(required));
         }
@@ -985,6 +1048,7 @@ pub fn json_schema_for_typed_params(params: &[harn_parser::TypedParam]) -> serde
 #[cfg(test)]
 mod schema_alias_resolver_tests {
     use super::*;
+    use serde_json::json;
 
     fn fn_params_schema(src: &str) -> serde_json::Value {
         let program = harn_parser::parse_source(src).expect("parse test source");
@@ -998,43 +1062,92 @@ mod schema_alias_resolver_tests {
         panic!("no fn decl in test source");
     }
 
+    fn assert_validation(
+        schema: &serde_json::Value,
+        valid: &[serde_json::Value],
+        invalid: &[serde_json::Value],
+    ) {
+        let validator = jsonschema::validator_for(schema).expect("valid parameter schema");
+        for instance in valid {
+            assert!(
+                validator.is_valid(instance),
+                "rejected valid instance: {instance}"
+            );
+        }
+        for instance in invalid {
+            assert!(
+                !validator.is_valid(instance),
+                "accepted malformed instance: {instance}"
+            );
+        }
+    }
+
     #[test]
     fn named_shape_alias_projects_like_inline_shape() {
         let inline = fn_params_schema("pub fn f(p: {kind: string, path: string}) {}");
         let aliased =
             fn_params_schema("type Src = {kind: string, path: string}\npub fn f(p: Src) {}");
-        assert_eq!(
-            aliased, inline,
-            "a named shape alias must project the same inputSchema as its inline shape",
-        );
-        assert_ne!(
-            aliased["properties"]["p"],
-            serde_json::json!({}),
-            "the alias parameter must not erase to an empty schema",
-        );
+        let valid = [json!({"p": {"kind": "local", "path": "/fixture"}})];
+        let invalid = [
+            json!({}),
+            json!({"p": null}),
+            json!({"p": {}}),
+            json!({"p": {"kind": 7, "path": "/fixture"}}),
+            json!({"p": {"kind": "local"}}),
+            json!({"p": {"kind": "local", "path": "/fixture", "extra": true}}),
+        ];
+        assert_validation(&inline, &valid, &invalid);
+        assert_validation(&aliased, &valid, &invalid);
     }
 
     #[test]
     fn rest_parameters_project_as_optional_arrays_of_the_declared_item_type() {
         let schema = fn_params_schema("pub fn collect(prefix: string, ...values: int) {}");
-        assert_eq!(schema["properties"]["values"]["type"], "array");
-        assert_eq!(schema["properties"]["values"]["items"]["type"], "integer");
-        assert_eq!(schema["required"], serde_json::json!(["prefix"]));
+        assert_eq!(schema["required"], json!(["prefix"]));
+        assert_validation(
+            &schema,
+            &[
+                json!({"prefix": "items"}),
+                json!({"prefix": "items", "values": []}),
+                json!({"prefix": "items", "values": [1, 2]}),
+            ],
+            &[
+                json!({}),
+                json!({"prefix": null}),
+                json!({"prefix": "items", "values": 1}),
+                json!({"prefix": "items", "values": ["wrong"]}),
+            ],
+        );
     }
 
     #[test]
     fn literal_union_alias_projects_json_enum() {
         let schema = fn_params_schema("type Kind = \"local\" | \"ssh\"\npub fn f(p: Kind) {}");
-        let p = &schema["properties"]["p"];
-        assert_eq!(p["type"], "string");
-        assert_eq!(p["enum"], serde_json::json!(["local", "ssh"]));
+        assert_validation(
+            &schema,
+            &[json!({"p": "local"}), json!({"p": "ssh"})],
+            &[
+                json!({}),
+                json!({"p": "other"}),
+                json!({"p": 1}),
+                json!({"p": null}),
+            ],
+        );
     }
 
     #[test]
     fn unknown_named_type_still_erases_to_empty() {
-        // No alias declared: unchanged behavior — an unknown named type lowers to {}.
         let schema = fn_params_schema("pub fn f(p: Unknown) {}");
-        assert_eq!(schema["properties"]["p"], serde_json::json!({}));
+        assert_validation(
+            &schema,
+            &[
+                json!({"p": null}),
+                json!({"p": true}),
+                json!({"p": {"arbitrary": "value"}}),
+                json!({"p": [1, 2]}),
+            ],
+            &[json!({}), json!([])],
+        );
     }
 }
 

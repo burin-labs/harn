@@ -78,6 +78,7 @@ pub(crate) struct RawResponseReader<R> {
     inner: R,
     partial_line: Vec<u8>,
     responses: RawResponseLog,
+    failed: bool,
 }
 
 impl<R> RawResponseReader<R> {
@@ -86,21 +87,37 @@ impl<R> RawResponseReader<R> {
             inner,
             partial_line: Vec::new(),
             responses,
+            failed: false,
         }
     }
 
-    fn record_bytes(&mut self, bytes: &[u8]) {
-        self.partial_line.extend_from_slice(bytes);
-        while let Some(end) = self.partial_line.iter().position(|byte| *byte == b'\n') {
-            let mut line = self.partial_line.drain(..=end).collect::<Vec<_>>();
-            line.pop();
-            if line.last() == Some(&b'\r') {
-                line.pop();
+    fn record_bytes(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        for segment in bytes.split_inclusive(|byte| *byte == b'\n') {
+            // The lossless observer must obey the same bound as the ordinary
+            // SDK reader, including while the SDK is discarding a long line.
+            if self.partial_line.len().saturating_add(segment.len())
+                > super::MCP_MAX_STDIO_LINE_BYTES
+            {
+                self.partial_line.clear();
+                self.failed = true;
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "MCP message exceeds the SDK frame limit",
+                ));
             }
-            if let Ok(response) = super::protocol::parse_jsonrpc_message(&line) {
-                self.responses.record(response);
+            self.partial_line.extend_from_slice(segment);
+            if segment.last() == Some(&b'\n') {
+                self.partial_line.pop();
+                if self.partial_line.last() == Some(&b'\r') {
+                    self.partial_line.pop();
+                }
+                if let Ok(response) = super::protocol::parse_jsonrpc_message(&self.partial_line) {
+                    self.responses.record(response);
+                }
+                self.partial_line.clear();
             }
         }
+        Ok(())
     }
 }
 
@@ -111,11 +128,21 @@ impl<R: AsyncRead + Unpin> AsyncRead for RawResponseReader<R> {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         let this = self.get_mut();
+        if this.failed {
+            return Poll::Ready(Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "MCP message exceeds the SDK frame limit",
+            )));
+        }
         let before = buf.filled().len();
         let result = Pin::new(&mut this.inner).poll_read(cx, buf);
         if matches!(&result, Poll::Ready(Ok(()))) {
             let bytes = buf.filled()[before..].to_vec();
-            this.record_bytes(&bytes);
+            if let Err(error) = this.record_bytes(&bytes) {
+                // An AsyncRead error must not also report newly filled bytes.
+                buf.set_filled(before);
+                return Poll::Ready(Err(error));
+            }
         }
         result
     }
@@ -172,5 +199,74 @@ mod tests {
             responses.result_after(marker),
             Err(RawResponseError::ResponseCount(RETAINED_RESPONSES))
         );
+    }
+
+    #[tokio::test]
+    async fn an_unterminated_oversized_frame_cannot_grow_the_lossless_observer() {
+        let limit = super::super::MCP_MAX_STDIO_LINE_BYTES;
+        let mut reader = RawResponseReader::new(
+            std::io::Cursor::new(vec![b'x'; limit + 1]),
+            RawResponseLog::default(),
+        );
+        let mut sink = Vec::new();
+        assert_eq!(
+            reader.read_to_end(&mut sink).await.unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        assert!(reader.failed && reader.partial_line.is_empty());
+        assert!(sink.len() <= limit);
+        assert_eq!(
+            reader.read_to_end(&mut sink).await.unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
+    }
+
+    #[tokio::test]
+    async fn newline_and_crlf_frame_boundaries_match_the_pinned_sdk_transport() {
+        use rmcp::service::RoleClient;
+        use rmcp::transport::{async_rw::AsyncRwTransport, Transport};
+
+        let limit = super::super::MCP_MAX_STDIO_LINE_BYTES;
+        const { assert!(super::super::MCP_STDIO_LINE_LIMIT_INCLUDES_TERMINATOR) };
+        for (ending, line_length, accepted) in [
+            (b"\n".as_slice(), limit, true),
+            (b"\n".as_slice(), limit + 1, false),
+            (b"\r\n".as_slice(), limit, true),
+            (b"\r\n".as_slice(), limit + 1, false),
+        ] {
+            let content_length = line_length - ending.len();
+            let prefix = br#"{"jsonrpc":"2.0","id":7,"result":{"resultType":"complete","tools":[],"ttlMs":null,"_meta":{"padding":""#;
+            let suffix = br#""}}}"#;
+            let mut line = Vec::with_capacity(line_length);
+            line.extend_from_slice(prefix);
+            line.resize(content_length - suffix.len(), b'x');
+            line.extend_from_slice(suffix);
+            line.extend_from_slice(ending);
+            let mut sdk = AsyncRwTransport::<RoleClient, _, _>::new(
+                std::io::Cursor::new(line.clone()),
+                tokio::io::sink(),
+            );
+            assert_eq!(
+                sdk.receive().await.is_some(),
+                accepted,
+                "known SDK transport boundary for full line {line_length}"
+            );
+            let responses = RawResponseLog::default();
+            let mut reader = RawResponseReader::new(std::io::empty(), responses.clone());
+            assert_eq!(
+                reader.record_bytes(&line).is_ok(),
+                accepted,
+                "observer disagrees with pinned SDK for full line {line_length}, ending {ending:?}"
+            );
+            if accepted {
+                assert!(responses.result_after(0).unwrap()["_meta"]["padding"]
+                    .as_str()
+                    .is_some());
+                let mut fragmented =
+                    RawResponseReader::new(std::io::empty(), RawResponseLog::default());
+                fragmented.record_bytes(&line[..line.len() - 1]).unwrap();
+                fragmented.record_bytes(&line[line.len() - 1..]).unwrap();
+            }
+        }
     }
 }

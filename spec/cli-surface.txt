@@ -89,6 +89,23 @@ harn check --strict-types
 harn check --trusted-host-dispatch
 harn check --workspace
 harn check <positional 1>
+harn codegen
+harn codegen generate
+harn codegen generate --check
+harn codegen generate --file
+harn codegen generate --ir
+harn codegen generate --out
+harn codegen generate --plugin
+harn codegen generate --plugin-read-root
+harn codegen generate --role
+harn codegen generate --select
+harn codegen generate --surface
+harn codegen ir
+harn codegen ir --file
+harn codegen ir --select
+harn codegen ir --surface
+harn codegen validate-ir
+harn codegen validate-ir --input
 harn codemod
 harn codemod --allow-unsafe
 harn codemod --apply

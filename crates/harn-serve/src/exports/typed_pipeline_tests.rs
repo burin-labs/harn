@@ -28,9 +28,9 @@ pub pipeline deploy(config: {region: string, replicas: int}) -> bool {
         ]))
     );
     assert_eq!(deploy.input_schema["type"], "object");
-    assert_eq!(
-        deploy.input_schema["properties"]["config"]["properties"]["replicas"]["type"],
-        "integer"
-    );
+    let schema = jsonschema::validator_for(&deploy.input_schema).unwrap();
+    assert!(schema.is_valid(&serde_json::json!({"config":{"region":"west", "replicas":2}})));
+    assert!(!schema.is_valid(&serde_json::json!({"config":{"region":"west", "replicas":"two"}})));
+    assert!(!schema.is_valid(&serde_json::json!({"config":{"replicas":2}})));
     assert_eq!(deploy.output_schema.as_ref().unwrap()["type"], "boolean");
 }

@@ -1249,7 +1249,9 @@ jobs:
           scripts/ci/run_rust_test_lane.sh
           bash scripts/ci/run_workspace_tests.sh "$HARN_EXT_TEST_PARTITION"
       - name: Verify foreground-only Rust embedding
-        if: matrix.partition == 'rest:1/4'
+        if: matrix.partition == 'tooling'
+        env:
+          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: make test-hostlib-embedding
       - name: Preserve workspace test inventory
         if: always() && steps.release-audit-rust-test.outcome != 'skipped' && steps.release-audit-rust-test.outcome != ''

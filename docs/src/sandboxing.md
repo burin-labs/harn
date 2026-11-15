@@ -97,6 +97,15 @@ fallback refuse the grant unless the policy already permits general networking.
 Other backends refuse it. The socket must
 exist and have an absolute path; an unset `SSH_AUTH_SOCK` is a CLI error.
 
+Native embedders can call
+`harn_vm::process_sandbox::ssh_agent_grant_available(&policy)` before starting a
+session with a proposed `ssh_agent_socket`. It returns `Result<(), VmError>`
+using the same validator and `ToolRejected` reason as process validation, so a
+host can decline the grant and explain why without copying platform checks.
+The check does not connect to the agent or change the policy. An absent grant
+succeeds; success checks only the proposed grant, not the rest of the session's
+policy. A later spawn still validates the grant against the current host state.
+
 When a confined child fails, the refusal record names the boundary that
 refused it: `mechanism` is one of `egress`, `local_socket`, `home_read`,
 `write`, or `unknown`, and `reason` spells out what was and was not granted.

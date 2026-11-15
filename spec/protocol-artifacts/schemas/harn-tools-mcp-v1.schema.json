@@ -1,0 +1,97 @@
+{
+  "$defs": {
+    "CodegenCancellation": {
+      "enum": [
+        "mcp_request"
+      ],
+      "type": "string"
+    },
+    "CodegenIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_digest": {
+          "type": "string"
+        },
+        "catalog_digest": {
+          "type": "string"
+        },
+        "ir_digest": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "catalog_digest",
+        "binding_digest",
+        "ir_digest"
+      ],
+      "type": "object"
+    },
+    "NativeMcpBindingVersion": {
+      "enum": [
+        "harn-tools-mcp/1.0"
+      ],
+      "type": "string"
+    },
+    "NativeMcpOperationBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "operation_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "operation_id",
+        "name"
+      ],
+      "type": "object"
+    },
+    "ToolCatalogSchemaVersion": {
+      "description": "Closed version discriminator for the portable catalog.",
+      "enum": [
+        "harn-tools/2.0"
+      ],
+      "type": "string"
+    }
+  },
+  "$id": "https://harnlang.com/schemas/harn-tools-mcp-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "cancellation": {
+      "$ref": "#/$defs/CodegenCancellation"
+    },
+    "catalog_schema_version": {
+      "$ref": "#/$defs/ToolCatalogSchemaVersion"
+    },
+    "identity": {
+      "$ref": "#/$defs/CodegenIdentity"
+    },
+    "max_concurrency": {
+      "format": "uint32",
+      "minimum": 1,
+      "type": "integer"
+    },
+    "operations": {
+      "items": {
+        "$ref": "#/$defs/NativeMcpOperationBinding"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "$ref": "#/$defs/NativeMcpBindingVersion"
+    }
+  },
+  "required": [
+    "schema_version",
+    "catalog_schema_version",
+    "identity",
+    "operations",
+    "max_concurrency",
+    "cancellation"
+  ],
+  "title": "Harn Native MCP Binding",
+  "type": "object"
+}

@@ -578,6 +578,27 @@ capability_method!(
     "Connect to an MCP server over stdio."
 );
 capability_method!(
+    tools_mcp_native_connect,
+    "harness.tools.mcp_native_connect",
+    ["mcp.mutate@dynamic", "process.write@dynamic"],
+    "__cap_tools_mcp_native_connect(spec: NativeMcpProcessSpec, ir: dict, max_concurrency: int) -> mcp_client",
+    "Launch a contained native worker and verify its independently compiled Harn contract."
+);
+capability_method!(
+    tools_mcp_native_catalog,
+    "harness.tools.mcp_native_catalog",
+    ["mcp.read@arg0"],
+    "__cap_tools_mcp_native_catalog(client: mcp_client) -> ToolCatalog",
+    "Read the original catalog of a verified native Harn binding."
+);
+capability_method!(
+    tools_mcp_native_call,
+    "harness.tools.mcp_native_call",
+    ["mcp.mutate@arg0", "tool.mutate@dynamic"],
+    "__cap_tools_mcp_native_call(client: mcp_client, name: string, input: unknown) -> NativeMcpCallReply",
+    "Invoke one verified native Harn handler with the current adapter audience."
+);
+capability_method!(
     tools_mcp_bootstrap,
     "harness.tools.mcp_bootstrap",
     [

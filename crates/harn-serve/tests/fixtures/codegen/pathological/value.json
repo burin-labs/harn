@@ -1,0 +1,19 @@
+{
+  "tag": "payload",
+  "sequence": 9223372036854775807,
+  "floating": 1.0,
+  "raw": {"$bytes_b64": "AAH/"},
+  "amount": "1.2300",
+  "names": ["second", "first"],
+  "scalars": [true, 1],
+  "pair": ["pair", 9007199254740993],
+  "properties": {"with-dash": "retained"},
+  "tree": {"value": 9007199254740993, "next": null},
+  "choice": {"enum": "Choice", "variant": "Present", "fields": [{"value": 7, "next": null}]},
+  "left": {"detail": {"token": "left"}},
+  "right": {"detail": {"token": 11}},
+  "context": {"id": 3},
+  "branch": {"kind": "right", "right": true},
+  "nullable": null,
+  "optional_nullable": null
+}

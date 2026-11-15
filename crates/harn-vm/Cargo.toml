@@ -151,6 +151,7 @@ rustls-platform-verifier.workspace = true
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
 jsonwebtoken = { version = "11", default-features = false, features = ["use_pem", "aws_lc_rs"] }
 jsonschema.workspace = true
+referencing.workspace = true
 rcgen.workspace = true
 libc = "0.2"
 tokio-stream = "0.1"

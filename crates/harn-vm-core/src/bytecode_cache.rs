@@ -118,7 +118,9 @@ pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
 /// so a reinstalled package generation invalidates them; module interfaces are
 /// persisted beside their manifest (kind 3).
 /// v16: artifacts bind the complete builtin signature and authority contracts.
-pub const SCHEMA_VERSION: u32 = 16;
+/// v17: manifests carry host-private logical source-document authority for
+/// portable code generation without repeating import resolution.
+pub const SCHEMA_VERSION: u32 = 17;
 
 /// Compile-time Harn release. Cache files written by a different release
 /// are rejected on load.
@@ -648,7 +650,7 @@ pub fn load(source_path: &Path, source: &str) -> LookupOutcome {
                     key,
                     chunk: Some(candidate.chunk),
                     link_table: Some(link_table_for(&refreshed)),
-                    manifest: Some(refreshed),
+                    manifest: Some(*refreshed),
                 };
             }
             Some(ManifestCheck::Stale) | None => {}
@@ -1396,6 +1398,13 @@ fn walk_import_graph_fingerprinted(
     let mut module_graph = None;
     if manifest.is_some() && outputs != GraphOutputs::InterfaceProof {
         let graph = harn_modules::build_with_source(source_path, source);
+        manifest
+            .as_mut()
+            .expect("manifest presence checked")
+            .source_documents = graph
+            .source_documents(source_path)
+            .ok()
+            .map(|documents| documents.records());
         manifest
             .as_mut()
             .expect("manifest presence checked")
