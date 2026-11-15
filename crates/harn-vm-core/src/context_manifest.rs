@@ -189,7 +189,7 @@ pub enum ManifestCheck {
     /// re-check's capture time; persisting it settles those entries onto the
     /// stats-only path, the way git rewrites a racily-clean index entry rather
     /// than re-reading it on every command.
-    ValidAfterRecheck { refreshed: ContextManifest },
+    ValidAfterRecheck { refreshed: Box<ContextManifest> },
 }
 
 impl ContextManifest {
@@ -279,10 +279,10 @@ impl ContextManifest {
         }
         if rechecked {
             ManifestCheck::ValidAfterRecheck {
-                refreshed: Self {
+                refreshed: Box::new(Self {
                     captured_ns,
                     ..self.clone()
-                },
+                }),
             }
         } else {
             ManifestCheck::Valid
@@ -484,6 +484,12 @@ mod tests {
         let name = documents.document_for(&deep).unwrap();
         assert_eq!(documents.resolve(name), Some(deep.as_path()));
         assert!(manifest.still_valid(&entry.canonicalize().unwrap()));
+        let binary: ContextManifest =
+            postcard::from_bytes(&postcard::to_allocvec(&manifest).unwrap()).unwrap();
+        assert_eq!(
+            binary.source_documents().unwrap().resolve(name),
+            Some(deep.as_path())
+        );
         let bytes = serde_json::to_vec(&manifest).unwrap();
         let warm: ContextManifest = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(
@@ -718,7 +724,7 @@ mod tests {
         // than sleeping through it.
         let later = ContextManifest {
             captured_ns: refreshed.captured_ns + module_source::TIMESTAMP_GRANULARITY_NS,
-            ..refreshed
+            ..*refreshed
         };
         assert!(
             matches!(later.check(&anchor()), ManifestCheck::Valid),

@@ -305,7 +305,7 @@ fn private_records_roundtrip_and_refuse_empty_duplicate_or_malformed_censuses() 
             "{document}"
         );
     }
-    let mut relative = records.clone();
+    let mut relative = records;
     relative[0].path = PathBuf::from("relative.harn");
     assert!(SourceDocuments::from_records(relative).is_err());
     assert!(serde_json::from_value::<SourceDocumentRecord>(

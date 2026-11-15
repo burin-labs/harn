@@ -650,7 +650,7 @@ pub fn load(source_path: &Path, source: &str) -> LookupOutcome {
                     key,
                     chunk: Some(candidate.chunk),
                     link_table: Some(link_table_for(&refreshed)),
-                    manifest: Some(refreshed),
+                    manifest: Some(*refreshed),
                 };
             }
             Some(ManifestCheck::Stale) | None => {}
