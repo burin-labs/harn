@@ -1,0 +1,54 @@
+{
+  "components": {
+    "schemas": {}
+  },
+  "adapters": [
+    {
+      "name": "get_multiple",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "output_schema": {
+        "$defs": {
+          "response_media_1": {
+            "$defs": {
+              "media_source": {
+                "type": "string"
+              }
+            },
+            "allOf": [
+              {
+                "$ref": "#/$defs/response_media_1/$defs/media_source"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "$bytes_b64": {
+                "contentEncoding": "base64",
+                "type": "string"
+              }
+            },
+            "required": [
+              "$bytes_b64"
+            ],
+            "type": "object",
+            "x-harn-type": "bytes"
+          },
+          {
+            "$ref": "#/$defs/response_media_1"
+          }
+        ]
+      }
+    }
+  ]
+}

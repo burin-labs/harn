@@ -1,7 +1,7 @@
 use super::*;
 use crate::wire::metadata::{FieldOrigin, VariantOrigin};
 
-impl SchemaWireBuilder {
+impl SchemaWireBuilder<'_> {
     pub(super) fn field_origin(
         &self,
         schema: &Value,

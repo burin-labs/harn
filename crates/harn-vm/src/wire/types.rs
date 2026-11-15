@@ -89,6 +89,11 @@ pub struct WireEnumVariant {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WireShape {
+    /// Runtime-only JSON island; never part of a portable contract.
+    #[serde(skip)]
+    #[schemars(skip)]
+    #[ts(skip)]
+    RuntimeJson,
     Null,
     Boolean,
     Integer {
