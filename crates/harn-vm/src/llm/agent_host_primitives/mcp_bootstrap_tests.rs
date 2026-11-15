@@ -1,5 +1,4 @@
 use super::tag_mcp_tool;
-use crate::NativeVmExt;
 
 #[test]
 fn connected_runtime_metadata_survives_the_catalog_and_typed_harn_projection() {

@@ -26,7 +26,7 @@ pub(crate) mod structured;
 pub(crate) mod transport;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use crate::NativeBuiltinCtxExt;
 use std::sync::atomic::Ordering;
