@@ -1,0 +1,17 @@
+import {
+  assert_retained_mutation_barrier,
+  retained_proposal_trial,
+} from "../../conformance/testlib/tool_batch_proposals"
+
+@test
+pipeline test_retained_verification_cannot_confirm_past_failed_mutation(harness: Harness) {
+  assert_retained_mutation_barrier(harness)
+}
+
+@test(cases: [{name: "resume", args: ["resume"]}, {name: "discard", args: ["discard"]}, {name: "revise", args: ["revise"]}, {name: "replay", args: ["replay"]}, {name: "denied", args: ["denied"]}, {name: "compacted", args: ["compacted"]}, {name: "new_direction", args: ["new_direction"]}, {name: "reread", args: ["reread"]}])
+pipeline test_retained_proposals_require_current_explicit_confirmation(
+  harness: Harness,
+  variant: string,
+) {
+  retained_proposal_trial(harness, variant)
+}

@@ -300,6 +300,7 @@ export const HARN_AGENT_EVENT_KINDS = [
   "subagent_join",
   "subagent_stop",
   "tool_batch_disposition",
+  "tool_batch_proposal_resolution",
   "tool_call_audit",
   "tool_format_override",
   "turn_phase_changed",
@@ -3083,6 +3084,21 @@ export interface HarnAgentEventToolBatchDisposition {
   receipt: ACPValue
 }
 
+export interface HarnAgentEventToolBatchProposalResolutionEventResolution {
+  proposal_id: string
+  source_batch_id: string
+  source_tool_call_id: string
+  tool_name: string
+  resolution: string
+  reason: string
+  confirmation_call_id: string | null
+  pending_count: number
+}
+
+export interface HarnAgentEventToolBatchProposalResolutionEvent {
+  resolution: HarnAgentEventToolBatchProposalResolutionEventResolution
+}
+
 export interface HarnAgentEventToolCallAudit {
   toolCallId: string
   toolName: string
@@ -3167,6 +3183,7 @@ export type HarnAgentEvent =
   | ({ sessionId: string; kind: "subagent_join" } & HarnAgentEventSubagentJoin)
   | ({ sessionId: string; kind: "subagent_stop" } & HarnAgentEventSubagentStop)
   | ({ sessionId: string; kind: "tool_batch_disposition" } & HarnAgentEventToolBatchDisposition)
+  | ({ sessionId: string; kind: "tool_batch_proposal_resolution" } & HarnAgentEventToolBatchProposalResolutionEvent)
   | ({ sessionId: string; kind: "tool_call_audit" } & HarnAgentEventToolCallAudit)
   | ({ sessionId: string; kind: "tool_format_override" } & HarnAgentEventToolFormatOverride)
   | ({ sessionId: string; kind: "turn_phase_changed" } & HarnAgentEventTurnPhaseChanged)

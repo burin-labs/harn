@@ -85,6 +85,7 @@ impl AgentEvent {
             | Self::ToolFormatOverride { session_id, .. }
             | Self::ToolCallAudit { session_id, .. }
             | Self::ToolBatchDisposition { session_id, .. }
+            | Self::ToolBatchProposalResolution { session_id, .. }
             | Self::CacheHit { session_id, .. }
             | Self::CacheMiss { session_id, .. }
             | Self::LlmCallLog { session_id, .. }

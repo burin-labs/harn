@@ -13,8 +13,8 @@ fn grounded_review_provider_fires_on_verified_tool_failure() {
         "iteration": 2,
     });
     let reminder = GroundedReviewProvider
-        .evaluate(&ctx(HookEvent::PostToolUse, payload, JsonValue::Null))
-        .expect("verified compiler output should fire");
+        .evaluate(&ctx(HookEvent::PostToolUse, payload, text_review_options()))
+        .expect("opted-in compiler output should fire");
 
     assert_eq!(reminder.tags[0], GROUNDED_REVIEW_ID);
     assert_eq!(reminder.ttl_turns, Some(2));
@@ -25,7 +25,7 @@ fn grounded_review_provider_fires_on_verified_tool_failure() {
         .dedupe_key
         .as_deref()
         .is_some_and(|key| key.starts_with("grounded_review:PostToolUse:")));
-    assert!(reminder.body.contains("verified:typecheck"));
+    assert!(reminder.body.contains("reported:typecheck"));
     assert!(reminder.body.contains("cannot find value `missing`"));
     assert!(reminder.body.contains("command=cargo check -p demo"));
     assert!(reminder.body.contains("task scope"));
@@ -49,7 +49,7 @@ fn grounded_review_text_cap_emits_typed_truncation_boundary() {
             "tool": {"name": "exec_command", "args": {"cmd": "cargo check"}},
             "result": {"text": oversized},
         }),
-        JsonValue::Null,
+        text_review_options(),
     );
 
     GroundedReviewProvider
@@ -147,7 +147,63 @@ fn grounded_review_provider_surfaces_verifier_and_undefined_name_signals() {
 
     assert!(reminder.body.contains("verified:verifier:lint"));
     assert!(reminder.body.contains("forbidden pattern matched"));
-    assert!(reminder.body.contains("verified:undefined_names"));
-    assert!(reminder.body.contains("line=7"));
+    assert!(!reminder.body.contains("undefined_names"));
     assert!(!reminder.body.contains("typecheck verifier returned accept"));
+}
+
+#[test]
+fn grounded_review_does_not_promote_advisory_diagnostics_or_repeat_raw_text_by_default() {
+    for payload in [
+        json!({"result": {"diagnostics": [{
+            "message": "possibly undefined name 'ReadonlyArray' (best-effort resolver)",
+            "severity_label": "ADVISORY",
+            "source": "tree-sitter",
+            "line": 11,
+        }]}}),
+        json!({"result": {"diagnostics": [
+            "L11 ADVISORY: possibly undefined name 'ReadonlyArray' (best-effort resolver)"
+        ]}}),
+        json!({
+            "tool_name": "exec_command",
+            "tool": {"name": "exec_command", "args": {"cmd": "cargo check"}},
+            "result": {"text": "error[E0425]: cannot find value `missing` in this scope"},
+        }),
+        json!({"result": {"message": "successfully completed", "ok": true}}),
+    ] {
+        assert!(GroundedReviewProvider
+            .evaluate(&ctx(HookEvent::PostToolUse, payload, JsonValue::Null))
+            .is_none());
+    }
+}
+
+#[test]
+fn grounded_review_opted_in_advisory_keeps_its_confidence_and_provenance() {
+    let reminder = GroundedReviewProvider
+        .evaluate(&ctx(
+            HookEvent::PostToolUse,
+            json!({"result": {"diagnostics": [{
+                "message": "possibly undefined name 'infer' (best-effort resolver)",
+                "severity_label": "ADVISORY",
+                "source": "tree-sitter",
+                "line": 7,
+            }]}}),
+            json!({"reminders": {"config": {"grounded_review": {"include_warnings": true}}}}),
+        ))
+        .expect("advisory inclusion must actually reach the provider");
+    assert!(reminder.body.contains("advisory:undefined_names"));
+    assert!(reminder.body.contains("line=7"));
+    assert!(!reminder.body.contains("verified:"));
+}
+
+#[test]
+fn grounded_review_keeps_explicit_runtime_failure_verified() {
+    let reminder = GroundedReviewProvider
+        .evaluate(&ctx(
+            HookEvent::PostToolUse,
+            json!({"result": {"ok": false, "message": "workspace write failed"}}),
+            JsonValue::Null,
+        ))
+        .expect("the typed runtime failure must remain visible by default");
+    assert!(reminder.body.contains("verified:runtime_error"));
+    assert!(reminder.body.contains("workspace write failed"));
 }

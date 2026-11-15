@@ -123,15 +123,15 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "reader": "__tool_batch_call_classification"
-      },
-      {
-        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
         "reader": "__intra_turn_resource_keys"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
         "reader": "__intra_turn_resource_guard"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "reader": "__tool_batch_plan"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_support.harn",

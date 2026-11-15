@@ -43,6 +43,8 @@ use crate::workspace_anchor::{
 };
 
 mod changed_paths;
+mod compaction;
+pub(crate) use compaction::apply_compacted_session_messages;
 mod continuation;
 pub(crate) use continuation::{
     cached_transcript, has_continuation_checkpoint, remember_flushed_transcript,

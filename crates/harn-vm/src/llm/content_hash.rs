@@ -8,6 +8,26 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+#[crate::stdlib::macros::harn_builtin(
+    exposure = "pure",
+    sig = "llm_context_content_hash(content: string) -> string",
+    category = "llm.context",
+    doc = "Hash context with the same active redaction and digest policy as served-context receipts."
+)]
+fn llm_context_content_hash_impl(
+    args: &[crate::value::VmValue],
+    _out: &mut String,
+) -> Result<crate::value::VmValue, crate::value::VmError> {
+    let Some(crate::value::VmValue::String(content)) = args.first() else {
+        return Err(crate::value::VmError::Runtime(
+            "llm_context_content_hash: expected content string".into(),
+        ));
+    };
+    Ok(crate::value::VmValue::string(stable_redacted_string_hash(
+        content,
+    )))
+}
+
 pub(crate) fn stable_redacted_string_hash(value: &str) -> String {
     let policy = crate::redact::current_policy();
     let redacted = match policy.redact_json(&serde_json::Value::String(value.to_string())) {

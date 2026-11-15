@@ -13,8 +13,9 @@ pub(super) fn scan_command_risk_scan_json(
 ) -> JsonValue {
     let command_text = command_text(ctx);
     let lower = command_text.to_ascii_lowercase();
-    let (command_analysis, execution_semantics, shell_dialect) =
+    let (command_analysis, mut execution_semantics, shell_dialect) =
         security_command_analysis_with_metadata(ctx);
+    execution_semantics["exit_evidence"] = process_exit_evidence(ctx);
     let filesystem_local = ctx
         .get("executor_filesystem_local")
         .and_then(JsonValue::as_bool)

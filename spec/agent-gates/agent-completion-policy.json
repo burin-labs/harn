@@ -226,7 +226,11 @@
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "reader": "__tool_batch_call_classification"
+        "reader": "__tool_batch_plan"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "reader": "__tool_batch_dispatch"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",

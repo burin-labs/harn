@@ -32,6 +32,7 @@ pub enum ToolBatchDisposition {
     Executed,
     Deferred,
     SkippedAfterBlockingResult,
+    Resolved,
 }
 
 /// Whether this call is new or is a model re-proposal of a deferred call.
@@ -40,6 +41,7 @@ pub enum ToolBatchDisposition {
 pub enum ToolBatchProposalStatus {
     New,
     ReProposed,
+    Confirmed,
 }
 
 /// How completely the final-wrap-up parser recovered a tool call that could
@@ -87,6 +89,10 @@ pub struct ToolBatchDispositionReceipt {
     pub selected_phase: ToolBatchPhase,
     pub disposition: ToolBatchDisposition,
     pub proposal_status: ToolBatchProposalStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retained_proposal_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_tool_call_id: Option<String>,
     pub reason: String,
     pub planned_at_ms: f64,
     pub started_at_ms: Option<f64>,
@@ -95,6 +101,28 @@ pub struct ToolBatchDispositionReceipt {
     pub blocking_tool_call_id: Option<String>,
     pub blocking_tool_name: Option<String>,
     pub blocking_mutation_status: Option<ToolMutationStatus>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ToolBatchProposalResolution {
+    pub proposal_id: String,
+    pub source_batch_id: String,
+    pub source_tool_call_id: String,
+    pub tool_name: String,
+    pub resolution: ToolBatchProposalResolutionKind,
+    pub reason: String,
+    pub confirmation_call_id: Option<String>,
+    pub pending_count: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolBatchProposalResolutionKind {
+    Confirmed,
+    Discarded,
+    Invalidated,
+    Superseded,
 }
 
 /// Events emitted by the agent loop. Some variants map 1:1 to ACP
@@ -1074,6 +1102,12 @@ pub enum AgentEvent {
     ToolBatchDisposition {
         session_id: String,
         receipt: ToolBatchDispositionReceipt,
+    },
+    /// A retained proposal was confirmed, withdrawn, or invalidated. This is
+    /// an orchestration decision, not another tool execution or result.
+    ToolBatchProposalResolution {
+        session_id: String,
+        resolution: ToolBatchProposalResolution,
     },
     /// A plain-language heading for a run of tool calls — "Searching for
     /// GitHub issues", "Clearing caches". Presentation metadata only: it

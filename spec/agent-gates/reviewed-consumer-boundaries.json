@@ -30,7 +30,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-    "expression": "{dispatch: nil, turn_opts: turn_opts, audit_flushes: []}",
+    "expression": "{dispatch: nil, turn_opts: turn_opts, audit_flushes: [], calls: []}",
     "owner": "__dispatch_tool_calls",
     "evidence": "Dispatch returns its updated turn_opts beside dispatch and audit results; the receiving runner uses an independently declared options origin."
   },
@@ -121,7 +121,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "{\n            budget: budget,\n            bridge_step_delivered: bridge_step_delivered,\n            completed_no_information_gain: completed_observation.no_information_gain,\n            stall_checkpoint: if stall_enabled_seen {\n              stall_checkpoint\n            } else {\n              nil\n            },\n            consecutive_failure_count: consecutive_failure_count,\n            dispatch: dispatch,\n            dispatched_turn_opts: dispatched.turn_opts,\n            fallback_accepted: fallback_outcome.accepted,\n            fallback_triggered: fallback_outcome.triggered,\n            had_parse_errors: had_parse_errors,\n            iteration: iteration,\n            iteration_index: iteration_index,\n            llm_result: llm_result,\n            loop_start_ms: loop_start_ms,\n            normalized: normalized,\n            parsed_done_marker: parsed?.done_marker ?? \"\",\n            raw_text: raw_text,\n            rejected_tools_seen: rejected_tools_seen,\n            successful_tools_seen: successful_tools_seen,\n            tool_calls: tool_calls,\n            totals: totals,\n            turn_llm_opts: turn_llm_opts,\n            turn_opts: turn_opts,\n            visible_text: visible_text,\n          }",
+    "expression": "{\n            budget: budget,\n            bridge_step_delivered: bridge_step_delivered,\n            completed_no_information_gain: completed_observation.no_information_gain,\n            stall_checkpoint: if stall_enabled_seen {\n              stall_checkpoint\n            } else {\n              nil\n            },\n            consecutive_failure_count: consecutive_failure_count,\n            dispatch: dispatch,\n            dispatched_turn_opts: dispatched.turn_opts,\n            fallback_accepted: fallback_outcome.accepted,\n            fallback_triggered: fallback_outcome.triggered,\n            had_parse_errors: had_parse_errors,\n            iteration: iteration,\n            iteration_index: iteration_index,\n            llm_result: llm_result,\n            loop_start_ms: loop_start_ms,\n            normalized: normalized,\n            parsed_done_marker: parsed?.done_marker ?? \"\",\n            raw_text: raw_text,\n            rejected_tools_seen: rejected_tools_seen,\n            successful_tools_seen: successful_tools_seen,\n            tool_calls: dispatched.calls,\n            totals: totals,\n            turn_llm_opts: turn_llm_opts,\n            turn_opts: turn_opts,\n            visible_text: visible_text,\n          }",
     "owner": "__agent_loop_run",
     "evidence": "Runner transition packets carry options beside mutable loop state. Consumers declare nested options origins; the exact packet construction is reviewed here and source changes invalidate this classification."
   },
@@ -129,13 +129,6 @@
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
     "expression": "{\n            budget_decisions: budget_decisions,\n            consecutive_text_only: consecutive_text_only,\n            current_max: current_max,\n            turn_end_judge_invocations: turn_end_judge_invocations,\n            turn_end_judge_vetoes: turn_end_judge_vetoes,\n            extensions_used: extensions_used,\n            feedback_history: feedback_history,\n            final_status: final_status,\n            last_tool_count: last_tool_count,\n            made_source_write: made_source_write,\n            opts: opts,\n            stall_state: stall_state,\n            stop_reason: stop_reason,\n            terminal_assessment: terminal_assessment,\n            terminal_write_unverified: terminal_write_unverified,\n            turns_since_loop_progress: turns_since_loop_progress,\n            turns_since_progress: turns_since_progress,\n            verify_attempts: verify_attempts,\n            verify_completion_judge_invocations: verify_completion_judge_invocations,\n            verify_completion_judge_vetoes: verify_completion_judge_vetoes,\n          }",
-    "owner": "__agent_loop_run",
-    "evidence": "Runner transition packets carry options beside mutable loop state. Consumers declare nested options origins; the exact packet construction is reviewed here and source changes invalidate this classification."
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "{\n            harness: harness,\n            session_id: session.session_id,\n            tool_calls: tool_calls,\n            dispatch: dispatch,\n            iteration: iteration_index + 1,\n            stall_config: stall_observation.config,\n            stall_state: stall_state,\n            turn_opts: turn_opts,\n          }",
     "owner": "__agent_loop_run",
     "evidence": "Runner transition packets carry options beside mutable loop state. Consumers declare nested options origins; the exact packet construction is reviewed here and source changes invalidate this classification."
   },

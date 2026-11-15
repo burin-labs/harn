@@ -1,0 +1,223 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script } from "std/testing"
+
+const EAGER_GUIDANCE = "EAGER_GUIDANCE_MARKER: ground every lookup in its result."
+
+const DEFERRED_GUIDANCE =
+  "DEFERRED_GUIDANCE_MARKER: deploy_service requires an explicit environment."
+
+fn registry(runtime: HarnessRuntime) -> dict {
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "lookup",
+    "Read a deployment record",
+    {guidance: EAGER_GUIDANCE, parameters: {}, handler: { _ -> "record" }},
+  )
+  tools = tool_define(
+    tools,
+    "deploy_service",
+    "Deploy the production service.\n\nFULL_DESCRIPTOR_MARKER: select an environment before dispatch.",
+    {
+      defer_loading: true,
+      compact: true,
+      guidance: DEFERRED_GUIDANCE,
+      parameters: {environment: {type: "string", required: true}},
+      handler: { args ->
+        runtime.store_set("tool-search-guidance-fired", args.environment)
+        return "deployed " + args.environment
+      },
+    },
+  )
+  return tool_define(
+    tools,
+    "query_metrics",
+    "Read metrics.\n\nNO_GUIDANCE_FULL_DESCRIPTOR_MARKER: counters are reported as integers.",
+    {defer_loading: true, compact: true, parameters: {}, handler: { _ -> "metrics" }},
+  )
+}
+
+fn wire_tool(call: dict, name: string) -> dict? {
+  for tool in call?.tools ?? [] {
+    if (tool?.name ?? tool?.function?.name) == name {
+      return tool
+    }
+  }
+  return nil
+}
+
+fn description(tool: dict?) -> string {
+  return tool?.description ?? tool?.function?.description ?? ""
+}
+
+fn native_guidance(harness: Harness) {
+  const tools = registry(harness.runtime)
+  harness.runtime.store_set("tool-search-guidance-fired", nil)
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        blocks: [
+          {
+            type: "server_tool_use",
+            id: "native-search",
+            name: "tool_search_tool_bm25",
+            input: {query: "deploy_service"},
+          },
+          {
+            type: "tool_search_tool_result",
+            tool_use_id: "native-search",
+            content: [{type: "tool_reference", tool_name: "deploy_service"}],
+          },
+        ],
+        tool_calls: [
+          {id: "native-deploy", name: "deploy_service", arguments: {environment: "test"}},
+        ],
+      },
+      llm_text("Completed ##DONE##"),
+    ],
+    { ->
+      agent_loop(
+        harness,
+        "Use the deployment capability",
+        "BASE_GUIDANCE",
+        {
+          provider: "mock",
+          model: "claude-sonnet-5-5",
+          tool_format: "native",
+          tools: tools,
+          tool_search: {mode: "native"},
+          loop_until_done: true,
+          max_iterations: 3,
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      assert(len(calls) == 2, "native lifecycle reached both provider requests")
+      assert(calls[0].tools[0].type == "tool_search_tool_bm25_20251119")
+      assert(calls[0].system.contains(EAGER_GUIDANCE))
+      assert(
+        !calls[0].system.contains(DEFERRED_GUIDANCE),
+        "undisclosed guidance stays out of system",
+      )
+      const deferred = wire_tool(calls[0], "deploy_service")
+      assert(deferred?.defer_loading == true)
+      assert(
+        description(deferred).contains(DEFERRED_GUIDANCE),
+        "search descriptor carries instructions",
+      )
+      assert(
+        description(deferred).contains("FULL_DESCRIPTOR_MARKER"),
+        "discovery reveals the full descriptor",
+      )
+      assert(
+        description(wire_tool(calls[0], "query_metrics")).contains(
+          "NO_GUIDANCE_FULL_DESCRIPTOR_MARKER",
+        ),
+        "a descriptor without guidance is fully disclosed too",
+      )
+      assert(!calls[0].system.contains("NO_GUIDANCE_FULL_DESCRIPTOR_MARKER"))
+      assert(calls[0].system == calls[1].system, "native search preserves system prefix")
+      assert(calls[0].tools == calls[1].tools, "native search preserves tool prefix")
+      assert(
+        harness.runtime.store_get("tool-search-guidance-fired") == "test",
+        "handler actually ran",
+      )
+    },
+  )
+}
+
+fn client_guidance(harness: Harness, format: string) {
+  const tools = registry(harness.runtime)
+  harness.runtime.store_set("tool-search-guidance-fired", nil)
+  with_llm_script(
+    harness.llm,
+    [
+      {
+        tool_calls: [
+          {id: "search", name: "__harn_tool_search", arguments: {query: "deploy_service"}},
+        ],
+      },
+      {tool_calls: [{id: "deploy", name: "deploy_service", arguments: {environment: "test"}}]},
+      llm_text("Completed ##DONE##"),
+    ],
+    { ->
+      agent_loop(
+        harness,
+        "Use the deployment capability",
+        "BASE_GUIDANCE",
+        {
+          provider: "mock",
+          model: "claude-sonnet-5-5",
+          tool_format: format,
+          tools: tools,
+          tool_search: {mode: "client"},
+          loop_until_done: true,
+          max_iterations: 4,
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      assert(len(calls) == 3, "client search, promotion and handler all reached")
+      assert(wire_tool(calls[0], "deploy_service") == nil)
+      assert(!calls[0].system.contains(DEFERRED_GUIDANCE))
+      assert(calls[0].system.contains(EAGER_GUIDANCE))
+      if format == "native" {
+        assert(description(wire_tool(calls[1], "deploy_service")).contains(DEFERRED_GUIDANCE))
+        assert(
+          description(wire_tool(calls[1], "deploy_service")).contains("FULL_DESCRIPTOR_MARKER"),
+        )
+        assert(
+          !calls[1].system.contains(DEFERRED_GUIDANCE),
+          "promoted guidance belongs to descriptor",
+        )
+        assert(
+          calls[0].system == calls[1].system,
+          "schema promotion does not also grow global guidance",
+        )
+      } else {
+        assert(calls[1].system.contains(DEFERRED_GUIDANCE), "text descriptor carries its guidance")
+        assert(calls[1].system.contains("FULL_DESCRIPTOR_MARKER"))
+        assert(calls[1].system.contains("Parameters:") && calls[1].system.contains("environment"))
+        assert(
+          len(calls[1].system.split(DEFERRED_GUIDANCE)) == 2,
+          "guidance is served exactly once",
+        )
+      }
+      assert(
+        harness.runtime.store_get("tool-search-guidance-fired") == "test",
+        "promoted handler ran",
+      )
+    },
+  )
+}
+
+pipeline test(harness: Harness) {
+  native_guidance(harness)
+  client_guidance(harness, "native")
+  client_guidance(harness, "json")
+  client_guidance(harness, "text")
+  with_llm_script(
+    harness.llm,
+    [llm_text("ack")],
+    { ->
+      harness.llm.call(
+        "no progressive disclosure",
+        "BASE_GUIDANCE",
+        {
+          provider: "mock",
+          model: "claude-sonnet-5-5",
+          tool_format: "native",
+          tools: registry(harness.runtime),
+          tool_search: false,
+        },
+      )
+      const call = harness.llm.mock_calls()[0]
+      assert(call.system.contains(EAGER_GUIDANCE) && call.system.contains(DEFERRED_GUIDANCE))
+      assert(!description(wire_tool(call, "deploy_service")).contains(DEFERRED_GUIDANCE))
+      assert(
+        !description(wire_tool(call, "deploy_service")).contains("FULL_DESCRIPTOR_MARKER"),
+        "search-off retains compact summaries",
+      )
+    },
+  )
+  harness.stdio.log("tool search guidance tests passed")
+}

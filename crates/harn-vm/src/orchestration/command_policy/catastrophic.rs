@@ -84,7 +84,7 @@ pub(super) fn shell_source_groups(command: &str) -> Vec<Vec<ShellCommandStage>> 
                 .into_iter()
                 .filter_map(|text| {
                     let tokens = shell_words(&text);
-                    let index = unwrapped_shell_command_index(&tokens, 0, tokens.len());
+                    let index = unwrapped_shell_command(&tokens, 0, tokens.len()).command_index;
                     (!tokens.is_empty()).then(|| ShellCommandStage {
                         text: text.trim().to_string(),
                         argv: tokens[index..].to_vec(),
@@ -111,7 +111,7 @@ fn command_segments_inner(command: &str, depth: usize) -> Vec<String> {
             let end = next_pipeline_boundary(&tokens, start);
             if start < end {
                 push_unique(&mut segments, &tokens[start..end].join(" "));
-                let command_index = unwrapped_shell_command_index(&tokens, start, end);
+                let command_index = unwrapped_shell_command(&tokens, start, end).command_index;
                 if command_index < end {
                     let command = command_basename(&tokens[command_index]);
                     if matches!(command, "bash" | "sh" | "zsh") {

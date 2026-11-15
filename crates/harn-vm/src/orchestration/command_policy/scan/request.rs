@@ -1,5 +1,44 @@
 use super::*;
 
+/// Project exit proof from the same request resolver that owns execution mode
+/// and shell identity. Display text is never reparsed as an argv request.
+pub(super) fn process_exit_evidence(ctx: &JsonValue) -> JsonValue {
+    let unmeasured = || serde_json::json!({"scope": "unmeasured", "reason": "syntax"});
+    match request_mode(ctx) {
+        Some("argv") => {
+            let Ok(Some(argv)) = request_argv(ctx) else {
+                return unmeasured();
+            };
+            // The canonical wrapper and shell-input decoders distinguish a
+            // literal file program from inline code or unresolved input.
+            let source = argv
+                .iter()
+                .map(|word| shell_words::quote(word))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let shape = super::super::catastrophic::shell_command_shape(
+                crate::shells::ShellDialect::Posix,
+                &source,
+            );
+            serde_json::json!({"scope": shape.exit_evidence.scope, "reason": shape.exit_evidence.reason})
+        }
+        Some("shell" | "auto") => {
+            let resolution = request_shell_dialect(ctx);
+            let (Some(dialect), Some(shell)) = (resolution.dialect, resolution.shell_id) else {
+                return unmeasured();
+            };
+            let source = ctx
+                .pointer("/request/command")
+                .and_then(JsonValue::as_str)
+                .unwrap_or_default();
+            let shape = super::super::catastrophic::shell_command_shape(dialect, source)
+                .with_shell(&shell, source);
+            serde_json::json!({"scope": shape.exit_evidence.scope, "reason": shape.exit_evidence.reason})
+        }
+        _ => unmeasured(),
+    }
+}
+
 pub(super) fn request_mode(ctx: &JsonValue) -> Option<&str> {
     if let Some(mode) = ctx.pointer("/request/mode").and_then(JsonValue::as_str) {
         return Some(mode);
