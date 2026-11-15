@@ -163,6 +163,15 @@ fn checkpoint(agent: HarnessAgent, call: LlmCallerRequest, phase: string, detail
   }
 }
 
+fn current_identity(setup: LearnedAgentSetup) -> bool {
+  return match try {
+    setup.refresh_identity()
+  } {
+    Ok(identity) -> { identity == setup.dispatcher.identity }
+    Err(_error) -> { false }
+  }
+}
+
 fn prepare_action(
   harness: Harness,
   setup: LearnedAgentSetup,
@@ -177,7 +186,7 @@ fn prepare_action(
     || (call.opts?.output != nil && call.opts?.output != "text") {
     return {kind: "fallback", reason: "unsupported_response_contract"}
   }
-  if setup.refresh_identity() != setup.dispatcher.identity {
+  if !current_identity(setup) {
     return {kind: "fallback", reason: "stale_execution_contract"}
   }
   const assessment = if trial == nil {
@@ -329,7 +338,7 @@ fn build_agent_options(
     const selected = phase == "executing" && identity.call_id == pending_id
       && identity.tool_name == pending_name
     if selected
-      && (setup.refresh_identity() != setup.dispatcher.identity
+      && (!current_identity(setup)
         || !fresh_request(harness.agent, identity.turn.session_id, setup.request)) {
       phase = "fallback"
       return {

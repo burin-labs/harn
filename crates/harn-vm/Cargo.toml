@@ -161,6 +161,8 @@ data-encoding = "2"
 ed25519-dalek = { version = "3", features = ["pem", "pkcs8", "rand_core"] }
 x25519-dalek = { version = "3", features = ["static_secrets"] }
 hex = "0.4"
+# The containing executable or shared library's linker-owned identity.
+buildid = "=1.1.0"
 percent-encoding = "2.3"
 hmac = "0.13"
 sha1 = "0.11"

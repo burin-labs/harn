@@ -5,6 +5,7 @@
  * Harn projection and rejects malformed values before consumers inspect them.
  */
 import { get_typed_value } from "std/schema"
+import { ToolCatalogEntry } from "std/tools"
 
 pub type RuntimeBuildFeatures = {
   default: bool,
@@ -34,6 +35,7 @@ pub type RuntimeCompatibilityFingerprint = {
 pub type RuntimeContentFingerprint = {
   schema: "harn.runtime_content_fingerprint.v1",
   content_sha256: string,
+  artifact_id: string?,
   harn_version: string,
   embedded_stdlib_sha256: string,
   compatibility: RuntimeCompatibilityFingerprint,
@@ -51,9 +53,21 @@ pub fn runtime_content_fingerprint_value(value: unknown) -> RuntimeContentFinger
 }
 
 /**
+ * Read the connected Harn MCP server's measured runtime, without starting a
+ * second process. Servers without this receipt fail validation.
+ * @effects: []
+ * @errors: [validation]
+ */
+pub fn mcp_runtime_content_fingerprint(tool: ToolCatalogEntry) -> RuntimeContentFingerprint {
+  const metadata = tool._meta ?? {}
+  return runtime_content_fingerprint_value(metadata["dev.harn/runtime-content"])
+}
+
+/**
  * Read the identity of the runtime linked into this process, before inference.
  * The native owner computes this receipt from the embedded stdlib, compiler
- * contract, runtime version, and enabled features.
+ * contract, runtime version, enabled features, and containing executable or
+ * shared library's linker identity. A missing artifact_id is unmeasured.
  * @effects: []
  * @errors: [validation]
  */

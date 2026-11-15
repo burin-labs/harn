@@ -530,7 +530,7 @@ pipeline test_continuing_conversation_falls_back_without_decision_or_mutation(ha
 }
 
 pipeline test_changed_identity_and_policy_denial_prevent_the_selected_mutation(harness: Harness) {
-  for boundary in ["identity", "policy"] {
+  for boundary in ["identity", "unavailable", "policy"] {
     with_temp_dir(
       harness.fs,
       { root: string ->
@@ -546,6 +546,9 @@ pipeline test_changed_identity_and_policy_denial_prevent_the_selected_mutation(h
             qualification: qualified(app),
             refresh_identity: { ->
               identity_reads += 1
+              if boundary == "unavailable" && identity_reads > 1 {
+                throw "reviewed source became unavailable"
+              }
               return boundary == "identity" && identity_reads > 1 ? app.identity
                 + {capabilities_digest: "changed-after-selection"} : app.identity
             },

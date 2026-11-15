@@ -12,6 +12,7 @@ use sha2::{Digest as _, Sha256};
 
 const FINGERPRINT_SCHEMA: &str = "harn.runtime_content_fingerprint.v1";
 const CONTENT_DIGEST_DOMAIN: &[u8] = b"harn.runtime-content.v1\0";
+pub(crate) const MCP_RUNTIME_CONTENT_META_KEY: &str = "dev.harn/runtime-content";
 
 /// Compatibility identities that decide whether linked Harn artifacts can be
 /// interpreted by this VM.
@@ -92,6 +93,9 @@ define_runtime_build_features! {
 pub struct RuntimeContentFingerprint {
     pub schema: String,
     pub content_sha256: String,
+    /// Linker-owned identity of the containing executable or shared library.
+    /// Absence means native implementation identity was not measured.
+    pub artifact_id: Option<String>,
     pub harn_version: String,
     pub embedded_stdlib_sha256: String,
     pub compatibility: RuntimeCompatibilityFingerprint,
@@ -132,8 +136,32 @@ fn fingerprint_from_parts(
     compatibility: RuntimeCompatibilityFingerprint,
     source_revision: Option<String>,
 ) -> RuntimeContentFingerprint {
+    let artifact_id = buildid::build_id()
+        .filter(|id| !id.is_empty())
+        .map(hex::encode);
+    fingerprint_from_artifact(
+        harn_version,
+        embedded_stdlib_digest,
+        compatibility,
+        artifact_id,
+        source_revision,
+    )
+}
+
+fn fingerprint_from_artifact(
+    harn_version: &str,
+    embedded_stdlib_digest: &[u8; 32],
+    compatibility: RuntimeCompatibilityFingerprint,
+    artifact_id: Option<String>,
+    source_revision: Option<String>,
+) -> RuntimeContentFingerprint {
     let mut hasher = Sha256::new();
     hasher.update(CONTENT_DIGEST_DOMAIN);
+    update_field(
+        &mut hasher,
+        "linked-artifact-id",
+        artifact_id.as_deref().unwrap_or("").as_bytes(),
+    );
     update_field(&mut hasher, "harn-version", harn_version.as_bytes());
     update_field(
         &mut hasher,
@@ -164,6 +192,7 @@ fn fingerprint_from_parts(
     RuntimeContentFingerprint {
         schema: FINGERPRINT_SCHEMA.to_string(),
         content_sha256: hex::encode(hasher.finalize()),
+        artifact_id,
         harn_version: harn_version.to_string(),
         embedded_stdlib_sha256: hex::encode(embedded_stdlib_digest),
         compatibility,
@@ -224,6 +253,32 @@ mod tests {
         );
         assert_eq!(first.content_sha256, second.content_sha256);
         assert_ne!(first.source_revision, second.source_revision);
+    }
+
+    #[test]
+    fn native_artifact_change_invalidates_otherwise_identical_runtime_content() {
+        let stdlib = embedded_stdlib_digest_from_sources([("agent", "source")]);
+        let first = fingerprint_from_artifact(
+            "0.10.123-dev",
+            &stdlib,
+            compatibility(),
+            Some("artifact-a".into()),
+            None,
+        );
+        let changed = fingerprint_from_artifact(
+            "0.10.123-dev",
+            &stdlib,
+            compatibility(),
+            Some("artifact-b".into()),
+            None,
+        );
+        let unmeasured =
+            fingerprint_from_artifact("0.10.123-dev", &stdlib, compatibility(), None, None);
+        assert_eq!(first.compatibility, changed.compatibility);
+        assert_eq!(first.embedded_stdlib_sha256, changed.embedded_stdlib_sha256);
+        assert_ne!(first.content_sha256, changed.content_sha256);
+        assert_ne!(first.content_sha256, unmeasured.content_sha256);
+        assert!(unmeasured.artifact_id.is_none());
     }
 
     #[test]
@@ -317,6 +372,16 @@ mod tests {
             RuntimeBuildFeatures::linked()
         );
         assert_eq!(actual.content_sha256.len(), 64);
+        assert_eq!(
+            actual.artifact_id,
+            buildid::build_id()
+                .filter(|id| !id.is_empty())
+                .map(hex::encode)
+        );
+        assert!(
+            actual.artifact_id.as_ref().is_some_and(|id| !id.is_empty()),
+            "this native test must measure the running artifact"
+        );
         assert_eq!(actual.source_revision, None);
     }
 }

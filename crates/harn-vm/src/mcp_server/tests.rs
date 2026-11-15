@@ -80,6 +80,35 @@ fn tool_set(definitions: Vec<McpToolDef>) -> McpToolSet {
 }
 
 #[test]
+fn mcp_surface_identifies_the_serving_runtime_and_overrides_authored_claims() {
+    let key = crate::runtime_content::MCP_RUNTIME_CONTENT_META_KEY;
+    let mut meta = serde_json::Map::new();
+    meta.insert(
+        key.into(),
+        serde_json::json!({"content_sha256": "authored-spoof"}),
+    );
+    meta.insert(
+        "vendor.example/detail".into(),
+        serde_json::json!("preserved"),
+    );
+    let registry = script_registry(tool_set(vec![tool_def(
+        "identify",
+        "Identify",
+        Some(meta),
+        crate::mcp_tasks::McpTaskSupport::Forbidden,
+    )]));
+    let surface = registry.surface();
+    assert_eq!(
+        surface.tools[0]["_meta"][key],
+        serde_json::to_value(crate::runtime_content_fingerprint()).unwrap()
+    );
+    assert_eq!(
+        surface.tools[0]["_meta"]["vendor.example/detail"],
+        "preserved"
+    );
+}
+
+#[test]
 fn mcp_tool_set_preparation_reports_invalid_contracts() {
     let mut invalid = tool_def(
         "invalid",

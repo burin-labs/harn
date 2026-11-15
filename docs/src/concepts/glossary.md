@@ -16,6 +16,10 @@ see [Coming from elsewhere](./sota-comparison.md).
 probability thresholds, with separate unmatched and uncertain outcomes. Owned
 by [`std/decision`](../stdlib/decision.md).
 
+**Learned workflow.** A reviewed executable selected for a familiar request
+under qualification from fresh graded executions. Owned by
+[`std/agent/learned`](../stdlib/learned-workflows.md).
+
 **Token reference.** One token ID paired with its exact tokenizer vocabulary.
 Harn's `TokenRef` prevents a bare integer from crossing into a model that gives
 that integer another meaning. See [Exact token references](../llm/tokenizer.md).

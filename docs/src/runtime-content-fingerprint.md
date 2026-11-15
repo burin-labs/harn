@@ -14,6 +14,7 @@ The function returns `&'static RuntimeContentFingerprint` with these fields:
 | --- | --- |
 | `schema` | Receipt schema, currently `harn.runtime_content_fingerprint.v1` |
 | `content_sha256` | Composite identity of the linked runtime content |
+| `artifact_id` | Linker-owned identity of the containing executable or shared library, or `null` when unmeasured |
 | `harn_version` | Version of the linked `harn-vm` crate |
 | `embedded_stdlib_sha256` | Stable digest over every embedded module name and source byte |
 | `compatibility.codegen_fingerprint` | Digest of compiler inputs and typed builtin signature and authority contracts |
@@ -23,7 +24,7 @@ The function returns `&'static RuntimeContentFingerprint` with these fields:
 | `compatibility.build_features` | Closed boolean record of every Cargo feature compiled into `harn-vm` |
 | `source_revision` | Full source object ID when measured, otherwise `null` |
 
-`content_sha256` includes `harn_version`, `embedded_stdlib_sha256`, and every
+`content_sha256` includes `artifact_id`, `harn_version`, `embedded_stdlib_sha256`, and every
 compatibility field. It excludes the receipt schema, its own digest, and
 `source_revision`. A build stamp alone therefore cannot claim different linked
 content. The optional revision remains useful provenance, but consumers must
@@ -63,5 +64,17 @@ fn main(harness: Harness) {
 
 `harness.runtime.introspection()` and the `current_harn_version` tool include
 this value as `runtime_content_fingerprint`. These in-process projections leave
-`source_revision` null. The receipt covers the listed Harn content and contracts;
-it does not identify an embedding host's implementation or project files.
+`source_revision` null. The linker identity changes when native component objects
+change, including an embedding host when Harn is linked into its executable.
+For a shared library, it identifies that library. It is an artifact identity,
+not a signature or protection against edits made after linking. Project files
+need their own content measurements. Qualification must refuse a missing
+`artifact_id`.
+
+Harn MCP servers attach the receipt to each advertised tool's
+`_meta["dev.harn/runtime-content"]`. The server supplies this reserved value;
+authored tool metadata cannot override it. Agent catalog normalization preserves
+it, and `mcp_runtime_content_fingerprint(tool)` from
+`std/runtime/content_fingerprint` validates the connected server's receipt.
+This identifies the process serving the tool even if its launcher is replaced
+on disk. Servers that do not publish the receipt fail validation.

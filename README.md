@@ -69,6 +69,9 @@ Your application supplies its own behavior and interface. Harn manages the model
 calls, tool requests, and execution state underneath it. You choose which tools
 the agent can use and what those tools may access.
 
+[Learned workflows](docs/src/learned-workflows.md) let an agent reuse reviewed
+tools for familiar requests, with execution qualification and ordinary approvals.
+
 ## An agent in Harn
 
 This agent reads a project's README and summarizes it. Its only tool reads files;

@@ -1,5 +1,40 @@
 use crate::value::VmValue;
 
+/// Normalize a connected MCP descriptor into the agent dispatch catalog.
+pub(super) fn tag_mcp_tool(
+    mut tool: serde_json::Value,
+    server_name: &str,
+    eager_schemas: bool,
+) -> serde_json::Value {
+    if let Some(obj) = tool.as_object_mut() {
+        if let Some(metadata) = obj.get("_meta").cloned() {
+            obj.insert("meta".into(), metadata);
+        }
+        let original_name = obj
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string();
+        obj.insert(
+            "name".into(),
+            serde_json::json!(format!("{server_name}__{original_name}")),
+        );
+        for (key, value) in [
+            ("executor", "mcp_server"),
+            ("mcp_server", server_name),
+            ("_mcp_server", server_name),
+            ("_mcp_tool_name", original_name.as_str()),
+        ] {
+            obj.insert(key.into(), serde_json::json!(value));
+        }
+        // Keep a server's explicit disclosure setting; defer by default.
+        if !eager_schemas && !obj.contains_key("defer_loading") {
+            obj.insert("defer_loading".into(), serde_json::Value::Bool(true));
+        }
+    }
+    tool
+}
+
 pub(crate) fn entry_for<'a>(
     tools_val: Option<&'a VmValue>,
     tool_name: &str,

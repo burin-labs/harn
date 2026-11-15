@@ -4,6 +4,8 @@
 
 # Concepts
 
+- [Why qualify learned workflows?](./learned-workflows.md)
+
 - [Start here](./concepts/index.md)
 - [Mental model](./concepts/mental-model.md)
 - [Glossary](./concepts/glossary.md)
@@ -163,6 +165,7 @@
 - [External actions](./stdlib/external-action.md)
 - [Execution decisions](./stdlib/execution.md)
 - [Semantic dispatch](./stdlib/decision.md)
+- [Learned workflows](./stdlib/learned-workflows.md)
 - [Command sequence plans](./stdlib/command-sequence-plan.md)
 - [Daemon stdlib](./stdlib/daemon.md)
 - [Current session builtin](./stdlib/agent_session_current_id.md)

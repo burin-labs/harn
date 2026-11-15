@@ -4,6 +4,7 @@ pipeline test_linked_content_identity_is_available_before_inference(harness: Har
   const receipt = runtime_content_fingerprint(harness.runtime)
   assert_eq(receipt.schema, "harn.runtime_content_fingerprint.v1")
   assert_eq(len(receipt.content_sha256), 64)
+  assert(receipt.artifact_id != nil && receipt.artifact_id != "")
   assert_eq(len(receipt.embedded_stdlib_sha256), 64)
   assert(receipt.compatibility.codegen_fingerprint != "")
   assert_eq(receipt.source_revision, nil)
