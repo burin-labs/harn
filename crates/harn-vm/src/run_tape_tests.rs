@@ -20,6 +20,9 @@ mod host_effects;
 #[path = "run_tape_store_tests.rs"]
 mod store_changes;
 
+#[path = "run_tape_privacy_tests.rs"]
+mod privacy;
+
 /// Every test that touches the process tape or branch holds this lock: both
 /// are process-global by design.
 use super::TEST_PROCESS_LOCK as PROCESS_LOCK;
@@ -161,22 +164,30 @@ fn branch_location(workspace: &Path) -> ReplayWorkspaceLocation {
 }
 
 fn branch(dir: &Path, k: u64, workspace: &Path) -> TestBranch {
+    branch_from_tape(
+        EventTape::load(&dir.join(TAPE_FILE_NAME)).unwrap(),
+        k,
+        workspace,
+    )
+    .unwrap()
+}
+
+fn branch_from_tape(tape: EventTape, k: u64, workspace: &Path) -> Result<TestBranch, String> {
     let state = tempfile::tempdir().unwrap();
     let guard = start_branch(BranchPlan {
-        tape: EventTape::load(&dir.join(TAPE_FILE_NAME)).unwrap(),
+        tape,
         live_after_calls: k,
         workspace: branch_location(workspace),
         state_root: state.path().join("branch"),
         host_state_roots: Vec::new(),
         prompt_edits: Vec::new(),
-    })
-    .unwrap();
+    })?;
     let _scope = guard.scope().enter();
-    TestBranch {
+    Ok(TestBranch {
         guard,
         _scope,
         _state: state,
-    }
+    })
 }
 
 /// A new state root for each branch, as `start_branch` requires.
@@ -361,7 +372,7 @@ fn full_run_tape_redacts_prompt_llm_tool_transcript_and_cache_secrets() {
     assert!(tape
         .records
         .iter()
-        .any(|record| matches!(record.kind, TapeRecordKind::PayloadRedaction)));
+        .any(|record| matches!(record.kind, TapeRecordKind::PayloadRedaction { .. })));
     assert!(
         tape.records.iter().any(|record| match &record.kind {
             TapeRecordKind::ToolCall {

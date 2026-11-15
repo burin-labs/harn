@@ -74,6 +74,16 @@ pub fn has_rate(tokens: int | float | nil, ms: int | float | nil) -> bool {
   return (to_float(tokens) ?? 0.0) > 0.0 && (to_float(ms) ?? 0.0) > 0.0
 }
 
+fn __measured_rate(tokens: int | float | nil, ms: int | float | nil) -> string? {
+  if tokens == nil || ms == nil {
+    return nil
+  }
+  if !has_rate(tokens, ms) {
+    return nil
+  }
+  return format_rate(tokens, ms)
+}
+
 /**
  * The decode rate, preferring the server's own generation timing, then the
  * rate the inference meter measured over the streamed span, then the caller's
@@ -86,18 +96,15 @@ pub fn has_rate(tokens: int | float | nil, ms: int | float | nil) -> bool {
 pub fn decode_rate(usage: LlmSpeedUsage, wall_ms: int | float) -> string? {
   const telemetry = usage["provider_telemetry"] ?? {}
   const server_tokens = telemetry["server_output_tokens"] ?? usage["output_tokens"]
-  if has_rate(server_tokens, telemetry["server_generation_ms"]) {
-    return format_rate(server_tokens, telemetry["server_generation_ms"])
+  const server_rate = __measured_rate(server_tokens, telemetry["server_generation_ms"])
+  if server_rate != nil {
+    return server_rate
   }
   const measured = (telemetry["inference_speed"] ?? {})["output_tokens_per_second"]
   if measured != nil {
     return "${round(measured * 100.0) / 100.0} tok/s"
   }
-  const output_tokens = usage["output_tokens"] ?? 0
-  if has_rate(output_tokens, wall_ms) {
-    return format_rate(output_tokens, wall_ms)
-  }
-  return nil
+  return __measured_rate(usage["output_tokens"], wall_ms)
 }
 
 /**
@@ -157,13 +164,9 @@ pub fn format_speed_report(
     lines.push(
       __stat_line("prompt eval duration:", format_duration(telemetry["server_prompt_eval_ms"])),
     )
-    if has_rate(prompt_tokens, telemetry["server_prompt_eval_ms"]) {
-      lines.push(
-        __stat_line(
-          "prompt eval rate:",
-          format_rate(prompt_tokens, telemetry["server_prompt_eval_ms"]),
-        ),
-      )
+    const prompt_rate = __measured_rate(prompt_tokens, telemetry["server_prompt_eval_ms"])
+    if prompt_rate != nil {
+      lines.push(__stat_line("prompt eval rate:", prompt_rate))
     }
   }
   const eval_tokens = telemetry["server_output_tokens"] ?? usage["output_tokens"]

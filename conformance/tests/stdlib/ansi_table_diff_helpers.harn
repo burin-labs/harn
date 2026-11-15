@@ -1,6 +1,6 @@
 import { ansi_bg, ansi_strip, ansi_style, ansi_visible_len } from "std/ansi"
 import { diff_summary, unified_diff } from "std/diff"
-import { render_markdown_table, render_table } from "std/table"
+import { render_kv_table, render_markdown_table, render_table } from "std/table"
 
 pipeline test(harness: Harness, task: unknown) {
   const styled = ansi_style("hi", {fg: "red", bold: true}, {mode: "always"})
@@ -33,4 +33,8 @@ pipeline test(harness: Harness, task: unknown) {
   harness.stdio.println(summary.insertions)
   harness.stdio.println(summary.deletions)
   harness.stdio.println(unified_diff(before, after, {path: "demo.txt"}))
+  assert_eq(
+    render_kv_table({name: "harn"}, {key_header: "Setting", value_header: "Meaning"}),
+    "Setting | Meaning\n--------+--------\nname    | harn   ",
+  )
 }

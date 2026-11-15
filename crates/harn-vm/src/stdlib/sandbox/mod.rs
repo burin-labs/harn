@@ -84,6 +84,8 @@ mod macos;
 #[cfg(target_os = "openbsd")]
 mod openbsd;
 mod path_scope;
+#[cfg(unix)]
+pub(crate) mod unix_descriptors;
 pub(crate) use path_scope::enforce_fs_entry_path;
 pub use path_scope::enforce_fs_path;
 pub(crate) mod paths;

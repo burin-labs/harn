@@ -41,6 +41,10 @@ fn version_json_dispatch_renders_canonical_envelope() {
 
 #[test]
 fn version_json_ignores_runtime_revision_environment() {
+    let baseline = run_version_subprocess(true, &[]);
+    assert_eq!(baseline.exit_code, 0, "stderr={}", baseline.stderr);
+    let baseline: serde_json::Value =
+        serde_json::from_str(&baseline.stdout).expect("baseline version JSON");
     let harn = run_version_subprocess(
         true,
         &[
@@ -58,21 +62,35 @@ fn version_json_ignores_runtime_revision_environment() {
     let value: serde_json::Value = serde_json::from_str(&harn.stdout).expect("version JSON");
     assert_source_revision(&value);
     assert_runtime_content_fingerprint(&value);
+    assert_eq!(
+        value["data"]["runtime_content_fingerprint"],
+        baseline["data"]["runtime_content_fingerprint"],
+        "environment overrides must not change the launched artifact's identity"
+    );
 }
 
 fn assert_runtime_content_fingerprint(value: &serde_json::Value) {
-    let mut expected = serde_json::to_value(harn_vm::runtime_content_fingerprint())
-        .expect("runtime content fingerprint serializes");
-    // The executable owns its build stamp. The linked VM owns content identity.
-    expected["source_revision"] = value["data"]["source_revision"].clone();
-    let actual = &value["data"]["runtime_content_fingerprint"];
-    assert_eq!(actual, &expected);
-    assert_eq!(actual["schema"], "harn.runtime_content_fingerprint.v1");
-    assert_eq!(actual["content_sha256"].as_str().map(str::len), Some(64));
-    assert_eq!(
-        actual["embedded_stdlib_sha256"].as_str().map(str::len),
-        Some(64)
+    let actual: harn_vm::RuntimeContentFingerprint =
+        serde_json::from_value(value["data"]["runtime_content_fingerprint"].clone())
+            .expect("typed runtime content fingerprint");
+    let mut expected = harn_vm::runtime_content_fingerprint().clone();
+    assert!(
+        actual.artifact_id.as_ref().is_some_and(|id| !id.is_empty()),
+        "the CLI must measure its native artifact"
     );
+    assert_eq!(actual.content_sha256.len(), 64);
+    assert!(actual
+        .content_sha256
+        .bytes()
+        .all(|byte| byte.is_ascii_hexdigit()));
+    // The CLI and this test executable share VM inputs but have different native images.
+    assert_ne!(actual.artifact_id, expected.artifact_id);
+    assert_ne!(actual.content_sha256, expected.content_sha256);
+    expected.artifact_id = actual.artifact_id.clone();
+    expected.content_sha256 = actual.content_sha256.clone();
+    expected.source_revision = serde_json::from_value(value["data"]["source_revision"].clone())
+        .expect("typed source revision");
+    assert_eq!(actual, expected);
 }
 
 #[test]

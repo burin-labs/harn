@@ -789,8 +789,8 @@ pub fn prepare_repo(harness: Harness, repo: RepoPlan, work_dir: string) -> dict 
   }
   run_cmd(harness, ["git", "checkout", "-q", repo.commit], root, 60000)
   const setup_files = repo.setup_files ?? {}
-  for path in setup_files.keys().sorted() {
-    harness.fs.write_text(path_join(root, path), setup_files[path])
+  for (path, content) in setup_files.iter() {
+    harness.fs.write_text(path_join(root, path), content)
   }
   for argv in repo.setup {
     const res = run_cmd(harness, argv, root, 1800000)

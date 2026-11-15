@@ -77,10 +77,19 @@ the recorded initial state before applying effects, then installs the resulting
 state. Later revocation requests retain their `already_revoked` or
 `already_delivered` status. A missing
 or changed initial state makes the dispatch diverge before file or transcript
-effects. Exact branching requires a full tape recorded in format 9, which also
+effects. Branching requires a full tape recorded in format 10, which also
 establishes that session permission grants were checked and command requests
 were measured for every dispatch. Older recordings stay
 inspectable but need to be recorded again for branching.
+
+Model requests and tool arguments match after the runtime's credential
+redaction policy. Served results retain stable placeholders, and replayed store
+writes put those placeholders in branch-owned state. Matching does not establish
+equality of the original secret bytes or restore credentials. Non-secret fields
+still participate in the digest. Lossy binary redaction, invalid typed metadata
+and redactions without measured eligibility refuse admission. A dispatch with a
+secret-bearing file effect remains unservable.
+A policy change that alters the stored projection requires a new recording.
 
 Workspace-location reads (`fs.cwd` and `fs.source_dir`) are recorded during the
 prefix. Each branch has one workspace identity: the logical root is the original
@@ -147,8 +156,10 @@ attributed model call that used any edited literal and its `live_after_calls`
 prefix. Its `first_consumers` list records the first use of every edit in input
 order. Pass that prefix and the same edits to `BranchPlan`. The planner refuses
 unused or unattributed edits, ambiguous overlapping source attribution, and
-malformed source identities. Like replay admission, planning refuses tapes with
-redacted payloads: stored render bytes may no longer match source span offsets.
+malformed source identities. Planning verifies the stored render identity before
+using source spans. A render changed by redaction or corruption cannot establish
+literal source bytes or offsets; unrelated redaction does not invalidate intact
+prompt provenance.
 A short render without request attribution is
 unavailable for automatic planning, even if the tape recorded its source.
 Recorded renders remain candidates for attribution throughout the run, so a

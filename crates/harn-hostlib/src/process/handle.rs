@@ -181,6 +181,19 @@ pub enum OutputCapture {
     Inherit,
     /// Capture stdout/stderr through pipes owned by the parent process.
     Pipe,
+    /// Normal output pipes plus already-open handles dedicated to the final
+    /// command stage. These handles grant no filesystem path authority.
+    #[cfg(unix)]
+    PipeWithStage {
+        /// Already-open write handle for the final stage's stdout.
+        stdout: Arc<std::fs::File>,
+        /// Already-open write handle for the final stage's stderr.
+        stderr: Arc<std::fs::File>,
+        /// Private entry witness written immediately before that stage.
+        entered: Arc<std::fs::File>,
+        /// Canonical source-range plan, rendered after the guardian owns shell slots.
+        plan: harn_vm::shells::FinalOutputStage,
+    },
     /// Capture stdout/stderr through pre-created private files.
     File {
         /// Path attached to the child's stdout handle.
@@ -211,6 +224,12 @@ pub trait ProcessHandle: Send {
     /// Guardian evidence after wait; absent when unavailable or no guardian was used.
     fn cleanup_report(&self) -> Option<ProcessCleanupReport> {
         None
+    }
+
+    /// Whether the guardian independently confirmed every final-stage output
+    /// relay and aggregate drain after a normal wait. Absence is not completion.
+    fn stage_output_complete(&self) -> bool {
+        false
     }
 
     /// Available only after a normal wait validates this child's prepared runner.

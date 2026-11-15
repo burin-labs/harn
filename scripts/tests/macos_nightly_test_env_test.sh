@@ -2,19 +2,19 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-workflow="$ROOT_DIR/.github/workflows/macos-nightly.yml"
+workflow="${1:-$ROOT_DIR/.github/workflows/macos-nightly.yml}"
 # The typed restricted-runner registry and routing checker own main-only
 # qualification admission. Keep this pre-warm check independent of Harn while
 # refusing the old unscoped host label, which can reach a developer machine.
-# Keep enough time for a cold compile and the complete workspace suite.
-dispatch_timeout="timeout-minutes: 90"
+# Keep the cold workspace floor while allowing time for restore and embedding.
+dispatch_timeout=$(sed -n 's/^    timeout-minutes: //p' "$workflow")
 
 if grep -Fq "macos-arm64" "$workflow"; then
   echo "macOS workspace tests must not use a bare macos-arm64 host label" >&2
   exit 1
 fi
 
-if ! grep -Fq "$dispatch_timeout" "$workflow"; then
+if [[ ! "$dispatch_timeout" =~ ^[1-9][0-9]*$ ]] || ((dispatch_timeout < 90)); then
   echo "macOS workspace tests must keep the cold hosted build budget" >&2
   exit 1
 fi

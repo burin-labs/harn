@@ -7,6 +7,8 @@ use tree_sitter::Node;
 
 mod sequence;
 pub use sequence::plan_posix_sequence;
+mod output_stage;
+pub use output_stage::{plan_invocation_output_stage, FinalOutputStage, OutputStageInvocation};
 
 /// The first statically named executable and the environment prefixes that
 /// affect its lookup. `argv` is available only for a plain external command.
@@ -32,6 +34,18 @@ pub fn shell_startup_entry_may_change_lookup(name: &str, value: &str) -> bool {
         || value.trim_start().starts_with("()")
 }
 
+fn bounded_posix_shell_invocation(program: &str, args: &[String]) -> bool {
+    if args.first().map(String::as_str) != Some("-c") {
+        return false;
+    }
+    let name = program
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(program)
+        .to_ascii_lowercase();
+    name.strip_suffix(".exe").unwrap_or(&name) != "zsh"
+}
+
 /// Resolve the first program of an invocation, including a POSIX shell or
 /// env wrapper. Other shell dialects retain their native execution behavior.
 pub fn plan_invocation(program: &str, args: &[String]) -> Option<CommandPlan> {
@@ -39,12 +53,7 @@ pub fn plan_invocation(program: &str, args: &[String]) -> Option<CommandPlan> {
         Some(super::ShellDialect::Posix) => {
             // Login and interactive startup files can define functions or
             // change PATH, so pre-spawn filesystem evidence is insufficient.
-            if args.first().map(String::as_str) != Some("-c") {
-                return None;
-            }
-            // zsh reads startup files even for a noninteractive `-c` invocation.
-            let name = program.rsplit(['/', '\\']).next()?.to_ascii_lowercase();
-            if name.strip_suffix(".exe").unwrap_or(&name) == "zsh" {
+            if !bounded_posix_shell_invocation(program, args) {
                 return None;
             }
             let mut plan = plan_posix_command(args.get(1)?)?;
@@ -80,6 +89,10 @@ pub fn plan_invocation(program: &str, args: &[String]) -> Option<CommandPlan> {
 
 /// Analyze a POSIX command without evaluating expansions or executing it.
 pub fn plan_posix_command(source: &str) -> Option<CommandPlan> {
+    plan_posix_command_inner(source, false)
+}
+
+fn plan_posix_command_inner(source: &str, allow_builtin: bool) -> Option<CommandPlan> {
     let mut parser = tree_sitter::Parser::new();
     parser.set_language(&harn_grammars::bash()).ok()?;
     let tree = parser.parse(source, None)?;
@@ -159,7 +172,7 @@ pub fn plan_posix_command(source: &str) -> Option<CommandPlan> {
         }
     }
     let program = argv.get(index)?.clone();
-    if program.starts_with('-') || (index == 0 && shell_builtin(&program)) {
+    if program.starts_with('-') || (!allow_builtin && index == 0 && shell_builtin(&program)) {
         return None;
     }
     Some(CommandPlan {

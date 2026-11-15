@@ -1,0 +1,32 @@
+type Step = {run: string, ...dict}
+
+type Job = {name: string, steps?: list<Step>, ...dict}
+
+type Workflow = {jobs?: dict<string, Job>, ...dict}
+
+fn job_name(job: Job?) -> string? {
+  return (job ?? {}).name
+}
+
+fn commands(workflow: Workflow?) -> list<string> {
+  let result: list<string> = []
+  for job in (workflow?.jobs ?? {}).values() {
+    for step in job.steps ?? [] {
+      result.push(step.run)
+    }
+  }
+  return result
+}
+
+fn main(harness: Harness) {
+  assert(job_name(nil) == nil)
+  assert(job_name({name: "build"}) == "build")
+  const missing: dict<string, Job>? = nil
+  let jobs = missing ?? {}
+  assert(jobs["build"] == nil)
+  jobs["build"] = {name: "build"}
+  assert(jobs["build"]?.name == "build")
+  assert(commands(nil) == [])
+  assert(commands({jobs: {build: {name: "build", steps: [{run: "echo build"}]}}}) == ["echo build"])
+  harness.stdio.println("typed-empty-fallbacks")
+}

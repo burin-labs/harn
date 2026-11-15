@@ -95,6 +95,47 @@ assert_single_root_modes() {
 
 assert_single_root_modes
 
+# A checkout under a dot-named parent (`.cache/src`) derives the dot-named
+# entry `.cache-src`. A bare `*` walk skipped such entries, so a root holding
+# only them reported `status=complete scanned=0` while they kept their space.
+assert_dot_named_entries_are_scanned() {
+  local dot="$tmp_root/dot" dot_repos="$tmp_root/dot-repos" out="$tmp_root/dot.txt"
+  mkdir -p "$dot/harn-target/.cache-src" "$dot/harn-target/.gone-src" "$dot_repos/.cache/src"
+  git -C "$dot_repos/.cache/src" init -b main -q
+  touch -t 202001010000 "$dot/harn-target/.cache-src" "$dot/harn-target/.gone-src"
+  HARN_DEV_SETUP_STORAGE_ROOT="$dot" HARN_TARGET_GC_ROOTS="$dot_repos" HARN_TARGET_GC_MIN_AGE_SECS=1 \
+    HARN_TARGET_GC_KEEP_RECENT=1 \
+    "$minimum_bash" "$repo_root/scripts/prune_stale_targets.sh" >"$out" 2>&1
+  if [ -d "$dot/harn-target/.gone-src" ] || [ ! -d "$dot/harn-target/.cache-src" ] ||
+    ! grep -Eq 'status=complete .*scanned=2 .*unscanned_roots=0 ' "$out"; then
+    echo "dot-named entries were not scanned, or the live one was not kept" >&2
+    cat "$out" >&2
+    exit 1
+  fi
+
+  # When the root's entries cannot be counted, its walk is unproven: the pass
+  # reports partial, never a complete scan of zero.
+  local fake_bin="$tmp_root/dot-fake-bin" real_find
+  real_find="$(command -v find)"
+  mkdir -p "$fake_bin" "$dot/harn-target/.again-src"
+  cat >"$fake_bin/find" <<EOF
+#!/usr/bin/env bash
+case " \$* " in *" -mindepth 1 -maxdepth 1 "*) exit 1 ;; esac
+exec "$real_find" "\$@"
+EOF
+  chmod +x "$fake_bin/find"
+  PATH="$fake_bin:$PATH" HARN_DEV_SETUP_STORAGE_ROOT="$dot" HARN_TARGET_GC_ROOTS="$dot_repos" \
+    HARN_TARGET_GC_MIN_AGE_SECS=1 \
+    "$minimum_bash" "$repo_root/scripts/prune_stale_targets.sh" >"$out" 2>&1
+  if ! grep -Eq 'status=partial .*unscanned_roots=1 ' "$out"; then
+    echo "an uncountable target root still read as a complete scan" >&2
+    cat "$out" >&2
+    exit 1
+  fi
+}
+
+assert_dot_named_entries_are_scanned
+
 output="$tmp_root/dry-run.txt"
 run_gc --dry-run > "$output" 2>&1
 

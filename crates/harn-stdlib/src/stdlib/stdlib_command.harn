@@ -11,6 +11,7 @@ pub import {
   CommandNetworkGrants,
   CommandResult,
   CommandSandboxReport,
+  CommandStageOutput,
   command_result_fail,
   command_result_ok,
 } from "std/command/results"

@@ -52,6 +52,7 @@ use crate::clock_mock;
 
 #[path = "tape_privacy.rs"]
 mod privacy;
+pub(crate) use privacy::replay_digest;
 
 /// Format version of the on-disk tape representation. Bump on any
 /// breaking change. Loaders refuse tapes with a higher version. Version 2
@@ -64,7 +65,19 @@ mod privacy;
 /// Version 7 records session reminder retirement state inside each dispatch.
 /// Version 8 requires session permission grant checks for served dispatches.
 /// Version 9 measures command requests inside every tool dispatch.
-pub const TAPE_FORMAT_VERSION: u32 = 9;
+/// Version 10 hashes redacted request surfaces and records redaction eligibility.
+pub const TAPE_FORMAT_VERSION: u32 = 10;
+
+/// Whether a privacy projection retains the evidence needed for branch replay.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RedactionReplay {
+    #[default]
+    Unmeasured,
+    StablePlaceholder,
+    LossyBinary,
+    InvalidMetadata,
+}
 
 /// Whether a dispatch reached the command capability, including a refused request.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -270,7 +283,7 @@ pub enum TapeRecordKind {
     /// `duration_ms`. The recorded virtual time is post-advance.
     ClockSleep { duration_ms: u64 },
     /// LLM call. `request_digest` hashes the whole request minus the
-    /// credential and session id; the fidelity oracle and branch
+    /// credential and session id, after privacy projection; the fidelity oracle and branch
     /// verification both compare it. `response` is the recorded mock:
     /// inline JSON for small payloads, a CAS reference for large ones.
     LlmCall {
@@ -292,8 +305,11 @@ pub enum TapeRecordKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         attribution: Option<CallAttribution>,
     },
-    /// Sanitized evidence remains inspectable but cannot reproduce an exact prefix.
-    PayloadRedaction,
+    /// Privacy projection and its measured replay eligibility.
+    PayloadRedaction {
+        #[serde(default)]
+        replay: RedactionReplay,
+    },
     /// One persistent LLM-cache lookup. The cache outlives runs, so a branch
     /// replays these instead of reading a cache that has since changed.
     CacheLookup {
@@ -429,7 +445,7 @@ impl TapeRecordKind {
             Self::ClockRead { .. } => "clock_read",
             Self::ClockSleep { .. } => "clock_sleep",
             Self::LlmCall { .. } => "llm_call",
-            Self::PayloadRedaction => "payload_redaction",
+            Self::PayloadRedaction { .. } => "payload_redaction",
             Self::ToolCall { .. } => "tool_call",
             Self::PromptRender { .. } => "prompt_render",
             Self::CacheLookup { .. } => "cache_lookup",
@@ -811,7 +827,7 @@ fn visit_payloads(kind: &mut TapeRecordKind, mut visit: impl FnMut(&mut TapePayl
         | TapeRecordKind::FileRead { .. }
         | TapeRecordKind::FileWrite { .. }
         | TapeRecordKind::FileDelete { .. }
-        | TapeRecordKind::PayloadRedaction
+        | TapeRecordKind::PayloadRedaction { .. }
         | TapeRecordKind::Unknown => {}
     }
 }
@@ -896,7 +912,7 @@ impl TapeRecorder {
     }
 
     /// Append a record built from `kind`. The recorder owns metadata privacy,
-    /// sequence numbers and timing. Sanitized evidence refuses exact replay.
+    /// sequence numbers, timing and redaction eligibility.
     pub fn record(&self, kind: TapeRecordKind) {
         let virtual_time_ms = clock_mock::now_ms();
         let monotonic_ms = clock_mock::instant_now()
@@ -907,19 +923,24 @@ impl TapeRecorder {
     }
 
     fn record_at(&self, kind: TapeRecordKind, virtual_time_ms: i64, monotonic_ms: i64) {
-        let (mut kind, sanitized) = if matches!(kind, TapeRecordKind::PayloadRedaction) {
+        let (mut kind, sanitized) = if matches!(kind, TapeRecordKind::PayloadRedaction { .. }) {
             (kind, false)
         } else {
-            privacy::metadata(kind).unwrap_or((TapeRecordKind::PayloadRedaction, true))
+            privacy::metadata(kind).unwrap_or((
+                TapeRecordKind::PayloadRedaction {
+                    replay: RedactionReplay::InvalidMetadata,
+                },
+                false,
+            ))
         };
         if sanitized {
-            if !matches!(kind, TapeRecordKind::PayloadRedaction) {
-                self.record_at(
-                    TapeRecordKind::PayloadRedaction,
-                    virtual_time_ms,
-                    monotonic_ms,
-                );
-            }
+            self.record_at(
+                TapeRecordKind::PayloadRedaction {
+                    replay: RedactionReplay::StablePlaceholder,
+                },
+                virtual_time_ms,
+                monotonic_ms,
+            );
             visit_payloads(&mut kind, |payload| {
                 if let TapePayload::Inline {
                     content_hash: hash,
@@ -979,7 +1000,7 @@ impl TapeRecorder {
             .expect("tape recorder mutex poisoned")
             .sink = Some(sink);
         if sanitized {
-            recorder.record(TapeRecordKind::PayloadRedaction);
+            recorder.note_redaction(RedactionReplay::StablePlaceholder);
         }
         Ok(recorder)
     }
@@ -1005,10 +1026,14 @@ impl TapeRecorder {
         self.payload(bytes, true)
     }
 
+    pub(crate) fn note_redaction(&self, replay: RedactionReplay) {
+        self.record(TapeRecordKind::PayloadRedaction { replay });
+    }
+
     fn payload(&self, bytes: Vec<u8>, force_cas: bool) -> TapePayload {
-        let (bytes, sanitized) = privacy::payload(bytes);
-        if sanitized {
-            self.record(TapeRecordKind::PayloadRedaction);
+        let (bytes, redaction) = privacy::payload(bytes);
+        if let Some(replay) = redaction {
+            self.note_redaction(replay);
         }
         let mut guard = self.inner.lock().expect("tape recorder mutex poisoned");
         let inner = &mut *guard;
@@ -1036,10 +1061,12 @@ impl TapeRecorder {
     /// mid-run for diagnostics — production callers usually move into
     /// `into_tape` instead.
     pub fn snapshot(&self, header: TapeHeader) -> EventTape {
-        let (header, sanitized) = privacy::metadata(header)
-            .unwrap_or_else(|_| (TapeHeader::current(None, None, Vec::new()), true));
+        let (header, sanitized) = privacy::metadata(header).unwrap_or_else(|_| {
+            self.note_redaction(RedactionReplay::InvalidMetadata);
+            (TapeHeader::current(None, None, Vec::new()), false)
+        });
         if sanitized {
-            self.record(TapeRecordKind::PayloadRedaction);
+            self.note_redaction(RedactionReplay::StablePlaceholder);
         }
         let inner = self.inner.lock().expect("tape recorder mutex poisoned");
         EventTape {

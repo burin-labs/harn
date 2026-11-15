@@ -6,9 +6,16 @@ use std::time::Duration;
 const MAX_RECEIPT_BYTES: u64 = 64 * 1024;
 const MAX_CHILDREN: usize = 128;
 
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct CompletionReceipt {
+    cleanup: harn_vm::op_interrupt::ProcessCleanupReport,
+    stage_output_complete: bool,
+}
+
 /// Only the guardian inherits the writer; the payload closes it on exec.
 pub(crate) fn prepare(command: &mut Command) -> io::Result<(ReceiptReader, i32)> {
-    let (reader, writer) = io::pipe()?;
+    let (reader, writer) = std::os::unix::net::UnixStream::pair()?;
     let receipt_fd = writer.as_raw_fd();
     unsafe {
         command.pre_exec(move || {
@@ -41,8 +48,8 @@ pub(crate) fn prepare(command: &mut Command) -> io::Result<(ReceiptReader, i32)>
 }
 
 struct ReceiptState {
-    receiver: mpsc::Receiver<io::Result<harn_vm::op_interrupt::ProcessCleanupReport>>,
-    report: Option<harn_vm::op_interrupt::ProcessCleanupReport>,
+    receiver: mpsc::Receiver<io::Result<CompletionReceipt>>,
+    report: Option<CompletionReceipt>,
 }
 
 #[derive(Clone)]
@@ -56,7 +63,15 @@ impl ReceiptReader {
                 state.report = Some(report);
             }
         }
-        state.report.clone()
+        state.report.as_ref().map(|receipt| receipt.cleanup.clone())
+    }
+
+    pub(crate) fn stage_output_complete(&self) -> bool {
+        let state = self.0.lock().unwrap_or_else(|poison| poison.into_inner());
+        state
+            .report
+            .as_ref()
+            .is_some_and(|receipt| receipt.stage_output_complete)
     }
 }
 
@@ -74,6 +89,7 @@ pub(super) fn inherited_writer(fd: Option<i32>) -> io::Result<std::fs::File> {
 pub(super) fn write(
     writer: &mut std::fs::File,
     report: &harn_vm::op_interrupt::ProcessCleanupReport,
+    stage_output_complete: bool,
 ) -> io::Result<()> {
     let mut report = report.clone();
     report.omitted_children += report.children.len().saturating_sub(MAX_CHILDREN);
@@ -83,7 +99,11 @@ pub(super) fn write(
             *name = name.chars().take(64).collect();
         }
     }
-    let bytes = serde_json::to_vec(&report).map_err(io::Error::other)?;
+    let bytes = serde_json::to_vec(&CompletionReceipt {
+        cleanup: report,
+        stage_output_complete,
+    })
+    .map_err(io::Error::other)?;
     if bytes.len() as u64 > MAX_RECEIPT_BYTES {
         return Err(io::Error::other("guardian cleanup receipt exceeded limit"));
     }
@@ -122,10 +142,16 @@ mod tests {
             root_pid: Some(42),
             ..Default::default()
         };
-        sender.send(Ok(expected.clone())).unwrap();
+        sender
+            .send(Ok(CompletionReceipt {
+                cleanup: expected.clone(),
+                stage_output_complete: true,
+            }))
+            .unwrap();
         let shared = reader.clone();
         assert_eq!(reader.finish(), Some(expected.clone()));
         assert_eq!(shared.finish(), Some(expected));
+        assert!(shared.stage_output_complete());
 
         let (sender, receiver) = mpsc::sync_channel(1);
         drop(sender);
@@ -134,6 +160,7 @@ mod tests {
             report: None,
         })));
         assert!(absent.finish().is_none());
+        assert!(!absent.stage_output_complete());
     }
 
     #[test]
@@ -145,6 +172,34 @@ mod tests {
         assert_ne!(flags & libc::FD_CLOEXEC, 0);
         drop(command);
         assert!(reader.finish().is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn guardian_receipt_socket_cannot_be_reopened_through_procfs() {
+        use std::os::unix::fs::FileTypeExt;
+        let (mut pipe_reader, pipe_writer) = io::pipe().unwrap();
+        let mut reopened = std::fs::OpenOptions::new()
+            .write(true)
+            .open(format!("/proc/self/fd/{}", pipe_writer.as_raw_fd()))
+            .unwrap();
+        reopened.write_all(b"control").unwrap();
+        let mut bytes = [0; 7];
+        pipe_reader.read_exact(&mut bytes).unwrap();
+        assert_eq!(&bytes, b"control");
+
+        let mut command = Command::new("unspawned");
+        let (reader, fd) = prepare(&mut command).unwrap();
+        let path = format!("/proc/self/fd/{fd}");
+        assert!(std::fs::metadata(&path).unwrap().file_type().is_socket());
+        let error = std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(libc::ENXIO));
+        drop(command);
+        assert!(reader.finish().is_none());
+        assert!(!reader.stage_output_complete());
     }
 
     #[test]
@@ -161,14 +216,14 @@ mod tests {
                 ));
         }
         let mut file = tempfile::tempfile().unwrap();
-        write(&mut file, &report).unwrap();
+        write(&mut file, &report, false).unwrap();
         assert!(file.metadata().unwrap().len() <= MAX_RECEIPT_BYTES);
         use std::io::Seek;
         file.rewind().unwrap();
-        let receipt: harn_vm::op_interrupt::ProcessCleanupReport =
-            serde_json::from_reader(file).unwrap();
-        assert_eq!(receipt.children.len(), MAX_CHILDREN);
-        assert_eq!(receipt.omitted_children, 1);
+        let receipt: CompletionReceipt = serde_json::from_reader(file).unwrap();
+        assert_eq!(receipt.cleanup.children.len(), MAX_CHILDREN);
+        assert_eq!(receipt.cleanup.omitted_children, 1);
+        assert!(!receipt.stage_output_complete);
     }
 
     #[cfg(target_os = "linux")]

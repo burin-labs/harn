@@ -7,6 +7,7 @@ import {
   UPSTREAM_CACHE_RESTORE_PREFIX,
   UPSTREAM_CACHE_SAVE_PREFIX,
   UPSTREAM_GENERIC_CACHE_PREFIX,
+  matrix_include_rows,
   step_continue_on_error,
   step_uses,
   workflow_events,
@@ -148,7 +149,7 @@ fn check_cache_families(job: CiJob?, step: CiStep?) -> list<string> {
   }
   const field = matrix_field[0].groups[0]
   let families: list<string> = []
-  for entry in job?.strategy?.matrix?.include ?? [] {
+  for entry in matrix_include_rows(job) {
     const value = trim(to_string(entry[field] ?? ""))
     if value != "" {
       families = families + [value]

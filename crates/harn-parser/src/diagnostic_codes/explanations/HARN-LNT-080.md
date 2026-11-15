@@ -15,10 +15,10 @@ const head = to_string(pr?.headRefOid ?? "")
 Every link hedges against a shape nobody declared. A misspelled field reads as
 `nil` and falls through to the default, so the code runs and reports nothing.
 
-The rule fires once per chain, on its second optional link. A chain over a
-typed record whose fields are declared optional is real nil handling and is
-not reported. The finding is advisory (`info`): existing code still carries
-thousands of these chains, so it does not fail `harn lint --strict`.
+The rule reports once per chain, including chains that become untyped after
+reading declared record or map fields. A chain over only declared, typed
+optional fields is normal nil handling and isn't reported. The finding is
+advisory (`info`) and doesn't fail `harn lint --strict`.
 
 ## How to fix
 

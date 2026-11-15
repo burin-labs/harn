@@ -52,14 +52,12 @@ pub(super) fn validated_sources(
     tape: &EventTape,
     edits: &[PromptSourceEdit],
 ) -> Result<Sources, String> {
-    // Stored render text may have different bytes and length from its spans.
-    // Apply the same eligibility rule as replay before reading source proofs.
-    super::require_unredacted_branch_payloads(tape)?;
     let mut sources = BTreeMap::new();
     let mut proofs = BTreeSet::new();
     for record in &tape.records {
         let TapeRecordKind::PromptRender {
             render_id,
+            template_uri,
             rendered,
             spans,
             ..
@@ -70,6 +68,13 @@ pub(super) fn validated_sources(
         let rendered = tape.resolve_payload(rendered)?;
         let spans: Vec<PromptSourceSpan> = serde_json::from_slice(&tape.resolve_payload(spans)?)
             .map_err(|error| format!("recorded prompt source spans: {error}"))?;
+        let rendered_text =
+            std::str::from_utf8(&rendered).map_err(|_| "recorded prompt render is not UTF-8")?;
+        if super::prompts::render_id(template_uri, rendered_text, &spans) != *render_id {
+            return Err(
+                "recorded prompt provenance changed through redaction or corruption".into(),
+            );
+        }
         let mut literals = Vec::new();
         for span in spans {
             if span.kind != PromptSpanKind::Text {

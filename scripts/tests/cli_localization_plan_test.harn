@@ -1,0 +1,45 @@
+import { measured_calls, message_plan } from "../cli_localization/model"
+
+pipeline test_message_plans_preserve_literals_unicode_and_argument_order() {
+  assert_eq(message_plan("literal {{0}} %@ {0}", 1), ["literal {0} %@ ", 0])
+  assert_eq(message_plan("🍒 {1} / {0} end", 2), ["🍒 ", 1, " / ", 0, " end"])
+  assert_eq(message_plan("{{escaped}}", 0), ["{escaped}"])
+  assert_eq(message_plan("{0}{1}", 2), [0, 1])
+}
+
+pipeline test_message_plans_refuse_missing_duplicate_unknown_and_unregistered_slots() {
+  for item in [
+    {text: "missing {0}", arity: 2},
+    {text: "duplicate {0} {0}", arity: 1},
+    {text: "unknown {1}", arity: 1},
+    {text: "implicit {}", arity: 1},
+    {text: "unclosed {0", arity: 1},
+    {text: "closing }", arity: 0},
+    {text: "", arity: 0},
+  ] {
+    const refused = try {
+      message_plan(item.text, item.arity)
+      false
+    } catch {
+      true
+    }
+    assert(refused, "invalid message plan must refuse: ${item.text}")
+  }
+}
+
+pipeline test_compiler_call_decoder_refuses_malformed_nodes_and_unmeasured_envelopes() {
+  for value in [
+    {schemaVersion: 1, ok: false, data: {kind: "Program", body: []}},
+    {schemaVersion: 2, ok: true, data: {kind: "Program", body: []}},
+    {schemaVersion: 1, ok: true, data: {kind: "Program", body: "not-a-node-list"}},
+    {schemaVersion: 1, ok: true, data: {kind: "Program", body: []}},
+  ] {
+    const refused = try {
+      measured_calls(json_stringify(value), "control.harn", "control", {})
+      false
+    } catch {
+      true
+    }
+    assert(refused, "a missing or malformed compiler observation cannot supply call counts")
+  }
+}

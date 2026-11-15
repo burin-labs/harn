@@ -58,7 +58,7 @@ optional — tapes that never spilled a payload have no sidecar.
 
 ## Record kinds
 
-The current schema (`version = 8`) emits the kinds below. Unknown
+The current schema (`version = 10`) emits the kinds below. Unknown
 record kinds in newer tapes deserialize as `unknown` so older
 fidelity checkers still produce a structured report.
 
@@ -71,7 +71,7 @@ fidelity checkers still produce a structured report.
 | `prompt_render` | `render_id`, `template_uri`, `rendered`, `spans` | Prompt rendering and source attribution |
 | `tool_call` | `call_id`, `tool`, `args_digest`, `after_calls`, `outcome`, `effects`, `transcript_changes`, optional `store_changes`, optional `unservable` | Recorded tool dispatch |
 | `decision_evaluation` | `request_digest`, `response` | Typed evaluation request and receipt |
-| `payload_redaction` | none | A full run payload required credential redaction |
+| `payload_redaction` | `replay` | A payload required credential redaction and records its replay eligibility |
 | `file_read` | `path`, `content_hash`, `len_bytes` | `harness.fs.read_text(...)` builtins |
 | `file_write` | `path`, `content_hash`, `len_bytes` | `harness.fs.write_text(...)`, `harness.fs.append(...)`, `harness.fs.append_locked(...)` |
 | `file_delete` | `path` | `remove_file(...)` |
@@ -116,10 +116,18 @@ Smaller payloads stay inline:
 ```
 
 Run tapes apply the runtime's credential redaction policy before persisting
-payloads. A tape with a `payload_redaction` record remains readable but cannot
-serve an exact branch prefix. Secret-bearing file effects are omitted rather
-than replayed with altered contents. Branch workspaces must be existing copies;
+payloads. Request and tool-argument digests use the same redacted values. A
+`payload_redaction` record with `replay: "stable_placeholder"` permits this
+comparison. A missing eligibility, `lossy_binary` or `invalid_metadata` refuses
+branch admission. Secret-bearing file effects are omitted and their dispatch
+is marked unservable. Branch workspaces must be existing copies;
 replayed writes and deletions use the sandbox's root-relative mutation path.
+
+Matching a placeholder establishes equality after redaction. It does not prove
+that the original secret bytes matched or restore credentials in served results.
+Non-secret request fields and tool arguments must still match their recorded
+digests. Prompt source edits additionally require unchanged render provenance;
+redaction that changes source bytes or offsets cannot supply a literal proof.
 
 `content_hash` is a hex BLAKE3 digest of the persisted bytes. The fidelity
 oracle compares hashes only; it never re-hashes payloads at compare
@@ -149,6 +157,22 @@ The header's `version` integer gates compatibility:
 Loading an older tape does not establish that it supports branching. Branch
 admission also requires the current recording metadata and complete evidence
 for the requested prefix; it refuses missing or incompatible evidence.
+
+### Changes from v9 to v10
+
+Model-request and tool-argument digests now cover their privacy projection,
+including stable secret placeholders. The recorder classifies each redaction as
+`stable_placeholder`, `lossy_binary` or `invalid_metadata`; absent classification
+loads as `unmeasured` and refuses branching. Older tapes remain readable, but
+branching requires a new full recording because earlier digests hashed the
+original secret-bearing values. Prompt edits verify the stored render identity
+before trusting its source spans.
+
+### Changes from v8 to v9
+
+Each dispatch records whether it requested a command, including a refused
+request. A moved branch uses this evidence to check platform confinement before
+live inference. Missing command evidence requires a new recording.
 
 ### Changes from v7 to v8
 

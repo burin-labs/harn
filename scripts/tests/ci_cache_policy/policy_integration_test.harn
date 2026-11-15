@@ -6,7 +6,37 @@ import {
   setup_harn_cache_action_errors,
   windows_native_admission_errors,
 } from "../../check_ci_cache_policy.harn"
+import { cache_families_for_step } from "../../ci_cache_policy/policy_core.harn"
 import "./fixtures.harn"
+
+@test
+pub pipeline test_cache_family_expansion_preserves_static_rows_and_refuses_expressions() {
+  const matrix_key = "$" + "{{ matrix.cache_key }}"
+  const step = {with: {"shared-key": matrix_key}}
+  assert_eq(
+    cache_families_for_step(
+      {strategy: {matrix: {include: [{cache_key: "first"}, {cache_key: "second"}]}}},
+      step,
+    ),
+    ["first", "second"],
+  )
+  const matrix_expression = {strategy: {matrix: "$" + "{{ fromJSON(inputs.matrix) }}"}}
+  assert_error_contains(
+    fn() { return cache_families_for_step(matrix_expression, step) },
+    "requires a static include matrix",
+  )
+  assert_error_contains(
+    fn() { return cache_families_for_step(
+      {strategy: {matrix: {include: "$" + "{{ inputs.rows }}"}}},
+      step,
+    ) },
+    "requires static include rows",
+  )
+  assert_eq(
+    cache_families_for_step(matrix_expression, {with: {"shared-key": "literal"}}),
+    ["literal"],
+  )
+}
 
 @test
 pub pipeline test_rust_cache_rejects_unbounded_primary_and_fallback_downloads(harness: Harness) {

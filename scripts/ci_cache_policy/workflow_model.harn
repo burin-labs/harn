@@ -127,11 +127,19 @@ pub fn job_continue_on_error(job: CiJob?) -> string | bool | nil {
 }
 
 pub fn strategy_fail_fast(job: CiJob?) -> string | bool | nil {
-  return schema_expect(job?.strategy?.["fail-fast"], schema_of(CiBooleanExpression))
+  const strategy = job?.strategy
+  if strategy == nil {
+    return nil
+  }
+  return schema_expect(strategy["fail-fast"], schema_of(CiBooleanExpression))
 }
 
 pub fn strategy_max_parallel(job: CiJob?) -> string | int | nil {
-  return schema_expect(job?.strategy?.["max-parallel"], schema_of(CiCountExpression))
+  const strategy = job?.strategy
+  if strategy == nil {
+    return nil
+  }
+  return schema_expect(strategy["max-parallel"], schema_of(CiCountExpression))
 }
 
 pub fn concurrency_cancel(concurrency: string | CiConcurrency | nil) -> string | bool | nil {
@@ -146,7 +154,11 @@ pub fn trigger_ignored_paths(trigger: CiTrigger?) -> list<string>? {
 }
 
 pub fn action_post_condition(action: CiAction?) -> string? {
-  return schema_expect(action?.runs?.["post-if"], schema_of(CiText))
+  const runs = action?.runs
+  if runs == nil {
+    return nil
+  }
+  return schema_expect(runs["post-if"], schema_of(CiText))
 }
 
 /** Policy checks that enumerate legs require a statically declared matrix. */

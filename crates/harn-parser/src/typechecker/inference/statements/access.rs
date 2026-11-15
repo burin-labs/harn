@@ -223,7 +223,7 @@ impl TypeChecker {
     /// non-identifier expression (a call chain, literal, etc.). Shared by
     /// property, subscript, and method-receiver checks so all three honour
     /// the same boundary.
-    pub(super) fn is_strict_access_source(
+    pub(in crate::typechecker) fn is_strict_access_source(
         &self,
         object: &SNode,
         raw: &TypeExpr,

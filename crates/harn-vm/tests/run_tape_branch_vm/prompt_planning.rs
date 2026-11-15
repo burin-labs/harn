@@ -319,7 +319,7 @@ pipeline main(harness: Harness, task: unknown) {{
         let redactions = tape
             .records
             .iter()
-            .filter(|record| matches!(record.kind, TapeRecordKind::PayloadRedaction))
+            .filter(|record| matches!(record.kind, TapeRecordKind::PayloadRedaction { .. }))
             .count();
         if redacted {
             assert!(redactions > 0, "the recording must exercise real redaction");
@@ -329,7 +329,7 @@ pipeline main(harness: Harness, task: unknown) {{
             );
             assert!(!String::from_utf8_lossy(&rendered).contains(prefix));
             let refusal = plan_prompt_branch(&tape, std::slice::from_ref(&edit)).unwrap_err();
-            assert!(refusal.contains("redacted payloads"), "{refusal}");
+            assert!(refusal.contains("provenance changed"), "{refusal}");
             // Previously these shifted bytes could be certified as the source
             // literal even though they include text from the padding expression.
             let forged = PromptSourceEdit {

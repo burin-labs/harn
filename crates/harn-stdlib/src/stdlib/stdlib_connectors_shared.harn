@@ -9,6 +9,53 @@ pub import {
 } from "std/connectors/http"
 import { JsonParseFailure, merge } from "std/json"
 
+type ConnectorRawMatch = {path?: unknown, ...dict}
+
+type GitForgeRawEnvelope = {
+  payload?: unknown,
+  event?: unknown,
+  provider_payload?: unknown,
+  raw?: unknown,
+  provider?: unknown,
+  ...dict,
+}
+
+type GitForgeRawRevision = {ref?: unknown, sha?: unknown, id?: unknown, ...dict}
+
+type GitForgeRawRepository = {
+  full_name?: unknown,
+  id?: unknown,
+  web_url?: unknown,
+  html_url?: unknown,
+  website?: unknown,
+  path_with_namespace?: unknown,
+  ...dict,
+}
+
+fn __connector_optional_record(value: unknown) -> dict? {
+  return type_of(value) == "dict" ? value : nil
+}
+
+fn __connector_raw_match(value: unknown) -> ConnectorRawMatch? {
+  const record = __connector_optional_record(value)
+  return record == nil ? nil : schema_expect(record, schema_of(ConnectorRawMatch))
+}
+
+fn __git_forge_envelope(value: unknown) -> GitForgeRawEnvelope? {
+  const record = __connector_optional_record(value)
+  return record == nil ? nil : schema_expect(record, schema_of(GitForgeRawEnvelope))
+}
+
+fn __git_forge_revision(value: unknown) -> GitForgeRawRevision? {
+  const record = __connector_optional_record(value)
+  return record == nil ? nil : schema_expect(record, schema_of(GitForgeRawRevision))
+}
+
+fn __git_forge_repository(value: unknown) -> GitForgeRawRepository? {
+  const record = __connector_optional_record(value)
+  return record == nil ? nil : schema_expect(record, schema_of(GitForgeRawRepository))
+}
+
 /**
  * Bind connector lifecycle state to one provider and its owned reset keys.
  *
@@ -38,7 +85,8 @@ pub fn connector_lifecycle(
     for binding in bindings ?? [] {
       const binding_id = binding?.binding_id ?? binding?.id
         ?? "binding-" + to_string(len(by_id.keys()))
-      const path = binding?.path ?? binding?.match?.path
+      const matcher = __connector_raw_match(binding?.match)
+      const path = binding?.path ?? matcher?.path
       if path != nil && path != "" {
         if seen_paths.get(path) {
           return Err(
@@ -138,7 +186,7 @@ pub fn verify_hmac_signature(
   secret: string,
   algorithm: string? = "sha256",
   options: dict? = nil,
-) {
+) -> bool {
   const alg = lowercase(trim(algorithm ?? "sha256"))
   const provided = __strip_signature_prefix(signature)
   const opts = options ?? {}
@@ -383,12 +431,15 @@ fn __git_forge_bool(value: unknown) {
   return nil
 }
 
-fn __git_forge_payload(value: dict) {
-  if value?.payload?.event?.provider_payload != nil {
-    return value.payload.event.provider_payload
+fn __git_forge_payload(value: dict) -> unknown {
+  const payload = __git_forge_envelope(value?.payload)
+  const payload_event = __git_forge_envelope(payload?.event)
+  if payload_event?.provider_payload != nil {
+    return payload_event.provider_payload
   }
-  if value?.event?.provider_payload != nil {
-    return value.event.provider_payload
+  const event = __git_forge_envelope(value?.event)
+  if event?.provider_payload != nil {
+    return event.provider_payload
   }
   if value?.provider_payload != nil {
     return value.provider_payload
@@ -396,11 +447,10 @@ fn __git_forge_payload(value: dict) {
   return value
 }
 
-fn __git_forge_provider(provider: any, payload: dict, options: dict) {
+fn __git_forge_provider(provider: any, payload: GitForgeRawEnvelope, options: dict) -> string {
+  const raw = __git_forge_envelope(payload.raw)
   return lowercase(
-    trim(
-      to_string(provider ?? options?.provider ?? payload?.provider ?? payload?.raw?.provider ?? ""),
-    ),
+    trim(to_string(provider ?? options?.provider ?? payload.provider ?? raw?.provider ?? "")),
   )
 }
 
@@ -486,6 +536,9 @@ fn __git_forge_event(
     return nil
   }
   const kind = "pull_request." + lifecycle
+  const head = __git_forge_revision(pr?.head)
+  const base = __git_forge_revision(pr?.base)
+  const last_commit = __git_forge_revision(pr?.last_commit)
   const repository = __git_forge_repo_from_full_name(
     provider,
     repo?.full_name,
@@ -499,10 +552,10 @@ fn __git_forge_event(
       title: __git_forge_text(pr?.title),
       author: __git_forge_text(pr?.author ?? pr?.user ?? pr?.sender),
       web_url: __git_forge_text(pr?.web_url ?? pr?.html_url ?? pr?.url),
-      head_ref: __git_forge_text(pr?.head_ref ?? pr?.head?.ref ?? pr?.source_branch),
-      head_sha: __git_forge_text(pr?.head_sha ?? pr?.head?.sha ?? pr?.last_commit?.id),
-      base_ref: __git_forge_text(pr?.base_ref ?? pr?.base?.ref ?? pr?.target_branch),
-      base_sha: __git_forge_text(pr?.base_sha ?? pr?.base?.sha),
+      head_ref: __git_forge_text(pr?.head_ref ?? head?.ref ?? pr?.source_branch),
+      head_sha: __git_forge_text(pr?.head_sha ?? head?.sha ?? last_commit?.id),
+      base_ref: __git_forge_text(pr?.base_ref ?? base?.ref ?? pr?.target_branch),
+      base_sha: __git_forge_text(pr?.base_sha ?? base?.sha),
       state: __git_forge_text(pr?.state),
       draft: __git_forge_bool(pr?.draft),
       merged: __git_forge_bool(pr?.merged),
@@ -536,21 +589,26 @@ fn __git_forge_event(
   }
 }
 
-fn __git_forge_github_event(payload: dict, options: dict) {
-  const raw = payload?.raw ?? payload
+fn __git_forge_github_event(
+  payload: GitForgeRawEnvelope,
+  options: dict,
+) -> GitForgePullRequestEvent? {
+  const raw = payload.raw ?? payload
   const repo = payload?.repository ?? raw?.repository
   const pr = payload?.pull_request ?? raw?.pull_request
   if pr == nil {
     return nil
   }
+  const head = __git_forge_revision(pr?.head)
+  const base = __git_forge_revision(pr?.base)
   const normalized_pr = merge(
     pr,
     {
       author: __git_forge_author(pr?.user),
-      head_ref: pr?.head?.ref,
-      head_sha: pr?.head?.sha,
-      base_ref: pr?.base?.ref,
-      base_sha: pr?.base?.sha,
+      head_ref: head?.ref,
+      head_sha: head?.sha,
+      base_ref: base?.ref,
+      base_sha: base?.sha,
       web_url: pr?.html_url ?? pr?.url,
     },
   )
@@ -558,24 +616,25 @@ fn __git_forge_github_event(payload: dict, options: dict) {
   return __git_forge_event("github", lifecycle, repo, normalized_pr, payload, options)
 }
 
-fn __git_forge_gitlab_event(payload: dict, options: dict) {
-  const raw = payload?.raw ?? payload
+fn __git_forge_gitlab_event(
+  payload: GitForgeRawEnvelope,
+  options: dict,
+) -> GitForgePullRequestEvent? {
+  const raw = payload.raw ?? payload
   const attrs = raw?.object_attributes ?? raw?.merge_request
   if attrs == nil {
     return nil
   }
-  const repo = {
-    full_name: raw?.project?.path_with_namespace,
-    id: raw?.project?.id,
-    web_url: raw?.project?.web_url,
-  }
+  const project = __git_forge_repository(raw?.project)
+  const last_commit = __git_forge_revision(attrs?.last_commit)
+  const repo = {full_name: project?.path_with_namespace, id: project?.id, web_url: project?.web_url}
   const pr = merge(
     attrs,
     {
       number: attrs?.iid,
       author: __git_forge_author(raw?.user),
       head_ref: attrs?.source_branch,
-      head_sha: attrs?.last_commit?.id ?? attrs?.last_commit?.sha,
+      head_sha: last_commit?.id ?? last_commit?.sha,
       base_ref: attrs?.target_branch,
       web_url: attrs?.url,
     },
@@ -584,25 +643,31 @@ fn __git_forge_gitlab_event(payload: dict, options: dict) {
   return __git_forge_event("gitlab", lifecycle, repo, pr, payload, options)
 }
 
-fn __git_forge_gitea_event(payload: dict, options: dict) {
-  const raw = payload?.raw ?? payload
+fn __git_forge_gitea_event(
+  payload: GitForgeRawEnvelope,
+  options: dict,
+) -> GitForgePullRequestEvent? {
+  const raw = payload.raw ?? payload
   const pr = raw?.pull_request
   if pr == nil {
     return nil
   }
+  const repository = __git_forge_repository(raw?.repository)
+  const head = __git_forge_revision(pr?.head)
+  const base = __git_forge_revision(pr?.base)
   const repo = {
-    full_name: raw?.repository?.full_name,
-    id: raw?.repository?.id,
-    web_url: raw?.repository?.html_url ?? raw?.repository?.website,
+    full_name: repository?.full_name,
+    id: repository?.id,
+    web_url: repository?.html_url ?? repository?.website,
   }
   const normalized_pr = merge(
     pr,
     {
       author: __git_forge_author(pr?.user),
-      head_ref: pr?.head?.ref,
-      head_sha: pr?.head?.sha,
-      base_ref: pr?.base?.ref,
-      base_sha: pr?.base?.sha,
+      head_ref: head?.ref,
+      head_sha: head?.sha,
+      base_ref: base?.ref,
+      base_sha: base?.sha,
       web_url: pr?.html_url ?? pr?.url,
     },
   )
@@ -617,16 +682,19 @@ fn __git_forge_gitea_event(payload: dict, options: dict) {
  * @effects: []
  * @errors: []
  */
-pub fn git_forge_pull_request_topic() {
+pub fn git_forge_pull_request_topic() -> string {
   return GIT_FORGE_PULL_REQUEST_TOPIC
 }
 
 /**
  * git_forge_pull_request_event normalizes GitHub pull_request, GitLab
  * merge_request, and Gitea pull_request payloads into one forge event shape.
+ * The selected provider payload must be a record. Nested optional containers
+ * retain extension fields and existing scalar normalization; raw payloads remain
+ * available on the normalized event.
  *
  * @effects: []
- * @errors: []
+ * @errors: [runtime]
  * @example: git_forge_pull_request_event("github", payload)
  */
 pub fn git_forge_pull_request_event(
@@ -635,7 +703,7 @@ pub fn git_forge_pull_request_event(
   options: dict? = nil,
 ) -> GitForgePullRequestEvent? {
   const opts = options ?? {}
-  const value = __git_forge_payload(payload)
+  const value = schema_expect(__git_forge_payload(payload), schema_of(GitForgeRawEnvelope))
   const resolved_provider = __git_forge_provider(provider, value, opts)
   if resolved_provider == "github" {
     return __git_forge_github_event(value, opts)

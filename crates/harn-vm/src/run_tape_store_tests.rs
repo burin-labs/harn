@@ -47,19 +47,30 @@ fn sensitive_store_keys_retain_redaction_context_in_recorded_payloads() {
     assert!(tape
         .records
         .iter()
-        .any(|record| matches!(record.kind, TapeRecordKind::PayloadRedaction)));
-    let result = start_branch(BranchPlan {
-        tape,
-        live_after_calls: 1,
-        workspace: branch_location(dir.path()),
-        state_root: dir.path().join("branch-state"),
-        host_state_roots: Vec::new(),
-        prompt_edits: Vec::new(),
-    });
-    let Err(error) = result else {
-        panic!("redacted values cannot establish an exact branch")
-    };
-    assert!(error.contains("redact"), "{error}");
+        .any(|record| matches!(record.kind, TapeRecordKind::PayloadRedaction { .. })));
+    let workspace = dir._pool.path().join("replay/arm/workspace");
+    let branch =
+        branch_from_tape(tape, 1, &workspace).expect("stable store placeholders remain replayable");
+    serve_llm_call(&request("first")).unwrap().unwrap();
+    assert!(matches!(
+        serve_tool_call("t1", "write", &serde_json::json!({})),
+        ToolServe::Served(_, _, _, _)
+    ));
+    let original_store = dir
+        .path()
+        .join(".harn")
+        .join(crate::runtime_paths::STORE_FILE);
+    let replay_store = durable_path(&original_store, "runtime store").unwrap();
+    assert_ne!(replay_store, original_store);
+    let contents: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(replay_store).unwrap()).unwrap();
+    assert_eq!(contents["api_key"], crate::redact::REDACTED_PLACEHOLDER);
+    let original: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(original_store).unwrap()).unwrap();
+    assert_eq!(original["api_key"], marker);
+    let report = branch.finish();
+    assert_eq!((report.served_calls, report.served_tool_calls), (1, 1));
+    assert_eq!(report.divergence, None);
 }
 
 #[test]

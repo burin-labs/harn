@@ -149,3 +149,140 @@ fn read(items: list<Location>) -> string {{
         );
     }
 }
+
+#[test]
+fn empty_dict_fallback_keeps_typed_map_and_iteration_contracts() {
+    let source = r#"
+type Job = {name?: string, ...dict}
+type Workflow = {jobs?: dict<string, Job>, ...dict}
+fn read(workflow: Workflow?) -> list<string?> {
+  let jobs = workflow?.jobs ?? {}
+  jobs["build"] = {name: "build"}
+  let names: list<string?> = []
+  for job in jobs.values() { names.push(job?.name) }
+  return names
+}
+fn callback(workflow: Workflow?) -> list<string?> {
+  return (workflow?.jobs ?? {}).values().map({ job -> job?.name }).to_list()
+}
+fn lookup(workflow: Workflow?) -> string? {
+  const jobs = workflow?.jobs ?? {}
+  const job = jobs.build ?? {}
+  return job.name
+}
+"#;
+    let checked = errors(source);
+    assert!(checked.is_empty(), "{checked:?}");
+    let wrong_source = source.replace("{name: \"build\"}", "{name: 7}");
+    assert_ne!(wrong_source, source);
+    let wrong = errors(&wrong_source);
+    assert_eq!(wrong.len(), 1, "{wrong:?}");
+    assert!(
+        wrong[0].contains("expected {name?: string, ...dict}, found {name: int}"),
+        "{wrong:?}"
+    );
+}
+
+#[test]
+fn empty_dict_fallback_does_not_erase_callback_or_nested_field_types() {
+    let source = r"
+type Job = {name?: string, ...dict}
+type Workflow = {jobs?: dict<string, Job>, ...dict}
+fn needs_int(value: int) -> int { return value }
+fn callback(workflow: Workflow?) -> list<int> {
+  return (workflow?.jobs ?? {}).values().map({ job -> needs_int(job?.name) }).to_list()
+}
+fn nested(workflow: Workflow?) -> int {
+  const jobs = workflow?.jobs ?? {}
+  const job = jobs.build ?? {}
+  return needs_int(job.name)
+}
+";
+    let checked = errors(source);
+    assert_eq!(checked.len(), 2, "{checked:?}");
+    assert!(
+        checked
+            .iter()
+            .all(|error| error.contains("expected int, found string?")),
+        "{checked:?}"
+    );
+}
+
+#[test]
+fn empty_dict_fallback_preserves_record_field_nilability_and_writes() {
+    let correct = r#"
+type Job = {name: string, ...dict}
+fn optional(job: Job?) -> string? { return (job ?? {}).name }
+fn present(job: Job) -> string { return (job ?? {}).name }
+fn write(job: Job?) -> string? {
+  let result = job ?? {}
+  result["name"] = nil
+  result["name"] = "build"
+  return result.name
+}
+"#;
+    let checked = errors(correct);
+    assert!(checked.is_empty(), "{checked:?}");
+    let missing = errors(&correct.replace(
+        "optional(job: Job?) -> string?",
+        "optional(job: Job?) -> string",
+    ));
+    assert_eq!(missing.len(), 1, "{missing:?}");
+    assert!(
+        missing[0].contains("expected string, found string?"),
+        "{missing:?}"
+    );
+    let wrong_source = correct.replace("= \"build\"", "= 7");
+    assert_ne!(wrong_source, correct);
+    let wrong = errors(&wrong_source);
+    assert_eq!(wrong.len(), 1, "{wrong:?}");
+    assert!(wrong[0].contains("expected string"), "{wrong:?}");
+    let nil_write = errors(
+        r#"type Job = {name: string, ...dict}
+fn write(job: Job) {
+  let result = job ?? {}
+  result["name"] = nil
+}"#,
+    );
+    assert_eq!(nil_write.len(), 1, "{nil_write:?}");
+    assert!(
+        nil_write[0].contains("expected string, found nil"),
+        "{nil_write:?}"
+    );
+}
+
+#[test]
+fn empty_dict_fallback_keeps_map_lookup_nilable() {
+    let checked = errors(
+        "type Job = {name: string}\n\
+         fn read(jobs: dict<string, Job>?) -> string {\n\
+           return (jobs ?? {})[\"missing\"].name\n\
+         }",
+    );
+    assert_eq!(checked.len(), 1, "{checked:?}");
+    assert!(checked[0].contains("nilable type"), "{checked:?}");
+}
+
+#[test]
+fn empty_dict_fallback_does_not_launder_unknown_or_nonempty_fallbacks() {
+    let source = r#"
+fn unknown_left(payload: dict) -> int {
+  const value = payload?.field ?? {}
+  if type_of(value) == "int" { return value }
+  return 0
+}
+fn unknown_field(payload: dict) -> any {
+  return (payload?.field ?? {}).extension
+}
+fn raw_dict(payload: dict) -> any {
+  return (payload ?? {}).extension
+}
+fn nonempty(job: {name: string}?) -> string | int {
+  return (job ?? {name: 7}).name
+}
+"#;
+    let checked = errors(source);
+    assert!(checked.is_empty(), "{checked:?}");
+    let wrong = errors(&source.replace("-> string | int", "-> string"));
+    assert_eq!(wrong.len(), 1, "{wrong:?}");
+}

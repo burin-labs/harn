@@ -4,6 +4,7 @@
   "title": "tools.run_command response",
   "type": "object",
   "properties": {
+    "stage_output": { "$ref": "https://harnlang.com/schemas/hostlib/command-stage-output.json" },
     "verifier_receipt": {
       "type": "object", "additionalProperties": false,
       "required": ["verifier_id", "baseline_sha256", "executed_material"],

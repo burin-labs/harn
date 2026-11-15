@@ -420,9 +420,11 @@ test-cargo:
 	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test --workspace
 
 .PHONY: test-hostlib-embedding
+HOSTLIB_EMBEDDING_PLATFORM ?= $(shell uname -s)
+HOSTLIB_EMBEDDING_PACKAGES = --workspace $(if $(filter Darwin,$(HOSTLIB_EMBEDDING_PLATFORM)),--exclude harn-wasm)
 test-hostlib-embedding:
-	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) build --locked --profile test -p harn-hostlib --example foreground_command
-	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test --locked -p harn-hostlib --example foreground_command
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) build --locked --profile test $(HOSTLIB_EMBEDDING_PACKAGES) --example foreground_command
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test --locked $(HOSTLIB_EMBEDDING_PACKAGES) --example foreground_command
 
 # Compatibility alias for the smarter default `make test`.
 test-fast:
@@ -1180,10 +1182,11 @@ gen-cli-surface:
 
 .PHONY: gen-cli-localization check-cli-localization
 gen-cli-localization:
-	@$(HARN_BIN_ASSIGN); node scripts/generate_cli_localization.mjs --harn-bin "$$harn_bin"
+	@$(HARN_BIN_ASSIGN); "$$harn_bin" run scripts/generate_cli_localization.harn -- --harn-bin "$$harn_bin"
 
 check-cli-localization:
-	@$(HARN_BIN_ASSIGN); node scripts/generate_cli_localization.mjs --check --harn-bin "$$harn_bin"
+	@$(HARN_BIN_ASSIGN); "$$harn_bin" run scripts/generate_cli_localization.harn -- --check --harn-bin "$$harn_bin"
+	@$(HARN_BIN_ASSIGN); "$$harn_bin" test scripts/tests/cli_localization_plan_test.harn
 	@$(HARN_BIN_ASSIGN); HARN_BIN="$$harn_bin" node --test scripts/tests/cli_localization_generator_test.mjs
 
 check-cli-surface:
@@ -1805,6 +1808,7 @@ check-rust-test-lane-policy:
 	@bash scripts/tests/host_telemetry_test.sh
 	@bash scripts/tests/consumer_canary_test.sh
 	@bash scripts/tests/consumer_verdict_test.sh
+	@node --test scripts/tests/consumer_failure_identity_test.mjs
 
 check-cargo-lock-contract:
 	@echo "=== Checking CI cargo lock contract ==="
