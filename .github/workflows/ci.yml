@@ -2672,9 +2672,10 @@ jobs:
           baseline-sha: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
           github-token: ${{ github.token }}
       - name: Install actionlint
+        # This maintained fork validates GitHub's background/wait step syntax.
         env:
-          ACTIONLINT_VERSION: "1.7.12"
-          ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+          ACTIONLINT_VERSION: "1.16.1"
+          ACTIONLINT_SHA256: "d566eee8af147ee1fa24ee204e1a171fcf8b5ce40e267c39a7383c7f20e6236d"
         run: |
           set -euo pipefail
           archive="${RUNNER_TEMP}/actionlint.tar.gz"
@@ -2688,7 +2689,7 @@ jobs:
           curl -fsSL --retry 3 --retry-all-errors \
             --connect-timeout 15 --max-time 120 \
             -o "${archive}" \
-            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+            "https://github.com/kjanat/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
           echo "${ACTIONLINT_SHA256}  ${archive}" | sha256sum -c -
           tar -xzf "${archive}" -C "${RUNNER_TEMP}" actionlint
           mkdir -p "${HOME}/.local/bin"
