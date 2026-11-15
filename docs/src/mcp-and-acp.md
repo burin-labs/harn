@@ -696,7 +696,7 @@ The ACP server supports these JSON-RPC methods:
 | `session/pending_prompts` | List pending delivery prompts and reminders |
 | `session/revoke_reminder` | Revoke a pending bridge reminder before delivery |
 | `session/cancel` | Cancel the currently running prompt |
-| `session/cancel_tool_call` | Cancel one in-flight tool call without tearing down the session |
+| `session/cancel_tool_call` | Cancel a tool call or its background command without tearing down the session |
 | `session/truncate` | Truncate the session transcript to a requested prefix |
 | `session/rollback` | Roll back the last completed prompt turn, including tracked filesystem pre-images |
 | `session/redo` | Reapply the most recent rollback while the redo stack is still valid |
@@ -1584,6 +1584,11 @@ Reminder runtime behavior:
   tool_result so the model can distinguish "the host stopped me" from
   "the tool errored." Pairs with the in-VM `cancel_in_flight_tool_call`
   Harn builtin — both surfaces share the registry.
+  An optional `handleId` targets a background command after its originating
+  tool call returns. The session must own that command; another session or an
+  unknown handle returns `not_found` without cancelling an in-flight call.
+  The command's normal completion receipt records the cancellation. `reason`
+  and `injectReminder` apply to in-flight tool-call cancellation.
 - Worker lifecycle updates are emitted as structured `session/update` payloads with
   worker id/name, status, lineage metadata, artifact counts, transcript presence,
   snapshot path, execution metadata, child run ids/paths, lifecycle summaries,
