@@ -483,6 +483,7 @@
     "llm_complementary_reviewer",
     "llm_completion",
     "llm_config",
+    "llm_context_content_hash",
     "llm_cost",
     "llm_equivalent_models",
     "llm_escalation_target",
