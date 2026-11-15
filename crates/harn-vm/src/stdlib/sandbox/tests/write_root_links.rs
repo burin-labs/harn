@@ -87,6 +87,9 @@ fn fixture(test: &str, needs_backend: bool) -> Option<Fixture> {
         );
         return None;
     };
+    // Shown on success in CI: with no `not_measured` line after it, the test
+    // measured its boundary.
+    eprintln!("[{test}] measuring");
     Some(Fixture {
         ws: std::fs::canonicalize(workspace.path()).unwrap(),
         outside: std::fs::canonicalize(outside.path()).unwrap(),
@@ -311,6 +314,73 @@ fn a_write_root_flipped_during_resolution_never_resolves_outside() {
     stop.store(true, std::sync::atomic::Ordering::Relaxed);
     flipper.join().unwrap();
     assert_eq!(escaped, None, "a flipped write root resolved outside");
+}
+
+/// The same flip injected at every point of the walk: after the n-th
+/// component is looked at and before that answer is used, the root (or the
+/// link it is reached through) is swapped for a link out of the workspace.
+#[test]
+fn a_write_root_flipped_after_each_look_never_resolves_outside() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    let Some(Fixture { ws, outside, _dirs }) = fixture(
+        "a_write_root_flipped_after_each_look_never_resolves_outside",
+        false,
+    ) else {
+        return;
+    };
+    std::fs::create_dir_all(outside.join("sub")).unwrap();
+    let target = ws.join("target");
+    let parked = ws.join("parked");
+    let evil = ws.join("evil");
+    let clear = |path: &Path| {
+        if path.is_symlink() {
+            std::fs::remove_file(path).unwrap();
+        } else if path.exists() {
+            std::fs::remove_dir_all(path).unwrap();
+        }
+    };
+    let policy = writing_policy(&ws, &target.join("sub"));
+    let depth = target.join("sub").components().count();
+    let mut flips = 0;
+    for starts_as_link in [false, true] {
+        for at in 1..=depth {
+            for path in [&target, &parked, &evil, &ws.join("real")] {
+                clear(path);
+            }
+            std::os::unix::fs::symlink(&outside, &evil).unwrap();
+            if starts_as_link {
+                std::fs::create_dir_all(ws.join("real/sub")).unwrap();
+                std::os::unix::fs::symlink(ws.join("real"), &target).unwrap();
+            } else {
+                std::fs::create_dir_all(target.join("sub")).unwrap();
+            }
+            let looks = Rc::new(Cell::new(0));
+            let flipped = Rc::new(Cell::new(false));
+            crate::stdlib::sandbox::paths::AFTER_LOOK.with(|hook| {
+                let (looks, flipped) = (looks.clone(), flipped.clone());
+                let (target, parked, evil) = (target.clone(), parked.clone(), evil.clone());
+                *hook.borrow_mut() = Some(Box::new(move |_: &Path| {
+                    looks.set(looks.get() + 1);
+                    if looks.get() == at && !flipped.get() {
+                        std::fs::rename(&target, &parked).unwrap();
+                        std::fs::rename(&evil, &target).unwrap();
+                        flipped.set(true);
+                    }
+                }));
+            });
+            let granted = crate::stdlib::sandbox::process_sandbox_policy_write_roots(&policy);
+            crate::stdlib::sandbox::paths::AFTER_LOOK.with(|hook| *hook.borrow_mut() = None);
+            flips += usize::from(flipped.get());
+            assert!(
+                !granted.iter().any(|root| root.starts_with(&outside)),
+                "flipped after look {at} (root started as a link: {starts_as_link}): \
+                 granted {granted:?}"
+            );
+        }
+    }
+    assert!(flips > 0, "the flip never fired, so nothing was measured");
+    eprintln!("[a_write_root_flipped_after_each_look_never_resolves_outside] {flips} flips");
 }
 
 /// A write root on or over the user's own git, gh or ssh configuration is not

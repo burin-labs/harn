@@ -106,7 +106,14 @@ pub(crate) fn resolve_through_host_links(
             continue;
         }
         let next = current.join(&name);
-        match std::fs::symlink_metadata(&next) {
+        let looked = std::fs::symlink_metadata(&next);
+        #[cfg(test)]
+        AFTER_LOOK.with(|hook| {
+            if let Some(hook) = hook.borrow_mut().as_mut() {
+                hook(&next);
+            }
+        });
+        match looked {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 followed += 1;
                 if followed > MAX_LINKS || untrusted(&current) {
@@ -132,6 +139,33 @@ pub(crate) fn resolve_through_host_links(
         }
     }
     Ok(normalize_os_path_alias(&current))
+}
+
+#[cfg(all(
+    test,
+    any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "openbsd",
+        target_os = "windows"
+    )
+))]
+type LookHook = Box<dyn FnMut(&Path)>;
+
+#[cfg(all(
+    test,
+    any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "openbsd",
+        target_os = "windows"
+    )
+))]
+thread_local! {
+    /// Runs between looking at a component and acting on the answer, so a
+    /// test can change the tree at exactly that point.
+    pub(crate) static AFTER_LOOK: std::cell::RefCell<Option<LookHook>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// `path`'s root (prefix and root directory) and its remaining names, last
