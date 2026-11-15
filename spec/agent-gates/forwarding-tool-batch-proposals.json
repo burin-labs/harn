@@ -1,6 +1,22 @@
 [
   {
     "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+    "expression": "tool_batch_scope_is_current(\n      harness.agent,\n      to_string(options?.session_id ?? \"\"),\n      options,\n      plan.scope,\n    )",
+    "owner": "tool_batch_scope_is_current",
+    "evidence": "Continuation forwards options to the canonical scope owner, which rechecks the original run, accepted controls and retained context after observations.",
+    "consumers": [{"scope": "AgentSpec", "function": "tool_batch_scope_is_current", "parameter": "options"}]
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+    "expression": "__dispatch_tool_calls_with_middleware(\n      harness,\n      confirmed.map({ entry -> entry.call }),\n      tools,\n      options,\n      cap,\n      confirmed.map({ entry -> entry.index }),\n    )",
+    "owner": "__dispatch_tool_calls_with_middleware",
+    "evidence": "Continued mutations use the same independently audited middleware option consumer and preserve their original call indices; confirmation bypasses no policy boundary.",
+    "consumers": [{"scope": "AgentSpec", "function": "__dispatch_tool_calls_with_middleware", "parameter": "options"}]
+  },
+  {
+    "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
     "expression": "__sync_tool_search_state(opts, turn_opts)",
     "owner": "__sync_tool_search_state",
