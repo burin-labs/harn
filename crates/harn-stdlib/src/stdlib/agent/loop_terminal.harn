@@ -634,8 +634,8 @@ pub fn __agent_loop_terminal_boundary(
     terminal_error,
     state.suspend_result,
   ) {
-    const attempted = state?.tool_calls_attempted ?? 0
-    const succeeded = state?.tool_calls_succeeded ?? 0
+    const attempted = state?.completion_tool_calls_attempted ?? state?.tool_calls_attempted ?? 0
+    const succeeded = state?.completion_tool_calls_succeeded ?? state?.tool_calls_succeeded ?? 0
     // The filesystem read happens once, here, and only for a run that is about
     // to seal a natural terminal. A caller who declared nothing pays nothing:
     // the audit's declared list is empty and it touches no path.

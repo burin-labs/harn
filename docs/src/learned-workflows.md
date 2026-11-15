@@ -33,6 +33,8 @@ Changing them requires new evidence. A source revision alone doesn't identify
 the running runtime; use its [linked content fingerprint](runtime-content-fingerprint.md).
 
 The middleware checks identity before selection and again before dispatch.
+An execution guard repeats the check after approval and interception, before
+the executor receives the call. A waiting approval can't preserve a stale result.
 Unavailable measurements cause fallback. It also requires the original user
 request to remain current, so a continuation or steer can't silently reuse an
 earlier selection.

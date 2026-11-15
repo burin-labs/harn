@@ -349,10 +349,21 @@ fn build_agent_options(
         error: "Request or learned capability changed after selection; execution refused.",
       }
     }
-    const result = if setup.tool_caller == nil {
-      next(call)
+    const guarded = if selected {
+      call
+        + {
+          execution_guard: { ->
+            current_identity(setup)
+              && fresh_request(harness.agent, identity.turn.session_id, setup.request)
+          },
+        }
     } else {
-      setup.tool_caller(call, next)
+      call
+    }
+    const result = if setup.tool_caller == nil {
+      next(guarded)
+    } else {
+      setup.tool_caller(guarded, next)
     }
     if selected {
       if verified_mutation(result) {

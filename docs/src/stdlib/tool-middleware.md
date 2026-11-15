@@ -53,6 +53,7 @@ fn(call, next) -> result_dict
 //     schema:             dict | nil,    // input parameters JSON schema
 //     description:        string,        // tool description
 //     turn:               {iteration: int, session_id: string},
+//     execution_guard?:   fn() -> bool,
 //   }
 //   next: fn(call) -> result_dict        // bottom of the stack runs
 //                                        // the runtime default dispatch
@@ -65,6 +66,11 @@ Each layer can:
 - **Short-circuit**: return a result dict without calling `next`.
 - **Augment audit data**: attach an `audit` key to the result dict;
   the runtime fans it out as a `tool_call_audit` AgentEvent.
+
+An `execution_guard` runs after approval and interception, immediately before
+executor dispatch. Only `true` permits execution; missing guards preserve normal
+dispatch. Use a deterministic guard to recheck preconditions that can change
+while approval waits. A guard can refuse a call but grants no authority.
 
 The result dict mirrors the dispatch result shape:
 

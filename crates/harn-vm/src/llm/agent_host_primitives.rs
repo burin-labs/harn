@@ -14,6 +14,7 @@ use super::{agent_runtime, agent_session_host, agent_tools, helpers, permissions
 mod cancelled_tool;
 mod denial_results;
 mod dispatch_approval;
+mod dispatch_guard;
 pub(super) mod event_capture;
 mod host_permission;
 mod prepared_consent;
@@ -532,7 +533,10 @@ async fn dispatch_tool_call_live(
         || crate::orchestration::execution_policy_active()
         || permissions::dynamic_permission_policy_active()
         || permissions::session_has_grants(&session_id)
-        || crate::orchestration::tool_precheck_active();
+        || crate::orchestration::tool_precheck_active()
+        || call
+            .get("execution_guard")
+            .is_some_and(|guard| !matches!(guard, VmValue::Nil));
     let _policy_guard = if policy_machinery_active {
         Some(agent_session_host::install_session_policy_guard(options)?)
     } else {
@@ -1088,6 +1092,17 @@ async fn dispatch_tool_call_live(
         )));
     }
 
+    if !dispatch_guard::permits(&ctx, call.get("execution_guard")).await? {
+        return Ok(json_to_vm_value(&agent_primitive_denied_tool(
+            &tool_name,
+            &tool_id,
+            &tool_args,
+            "Execution contract changed while this tool call waited; execution refused.",
+            crate::agent_events::ToolCallErrorCategory::PermissionDenied,
+            None,
+            None,
+        )));
+    }
     let started = std::time::Instant::now();
     // Session-scoped MCP clients (from opts.mcp_servers) bypass the bridge.
     let session_mcp = {

@@ -54,7 +54,9 @@ files or reconstructing compatibility fields themselves.
 Harn scripts can read the same linked receipt before making a provider call:
 
 ```harn
-import { runtime_content_fingerprint } from "std/runtime/content_fingerprint"
+import {
+  runtime_content_fingerprint,
+} from "std/runtime/content_fingerprint"
 
 fn main(harness: Harness) {
   const identity = runtime_content_fingerprint(harness.runtime)
