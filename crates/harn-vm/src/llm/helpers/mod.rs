@@ -29,6 +29,7 @@ pub use messages::{
 pub use opt_get::{opt_bool, opt_float, opt_int, opt_str};
 pub use options::admit_reasoning_literals;
 pub use options::extract_llm_options;
+pub(crate) use options::DIRECTIVE_IDS_KEY;
 pub use options::{
     assemble_system_prompt, compose_system_prompt, directive_envelope_message,
     directive_nonce_for_session, expects_structured_output, extract_json,

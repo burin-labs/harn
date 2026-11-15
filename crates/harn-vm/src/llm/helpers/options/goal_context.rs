@@ -60,12 +60,19 @@ pub(super) fn project_goal_context(
     if !records.values().any(|reminder| reminder.goal_pin.is_some()) {
         return rendered_bytes;
     }
-    let texts = messages
-        .iter()
-        .filter_map(person_text)
-        .map(str::to_string)
-        .collect::<HashSet<_>>();
-    if texts.is_empty() {
+    let covered_objectives = {
+        let texts = messages
+            .iter()
+            .filter_map(person_text)
+            .collect::<HashSet<_>>();
+        records
+            .values()
+            .filter_map(|reminder| reminder.goal_pin.as_ref())
+            .filter(|pin| texts.contains(pin.spec.objective.as_str()))
+            .map(|pin| pin.spec.objective.clone())
+            .collect::<HashSet<_>>()
+    };
+    if covered_objectives.is_empty() {
         return rendered_bytes;
     }
     for message in messages {
@@ -88,7 +95,9 @@ pub(super) fn project_goal_context(
             let Some(pin) = &reminder.goal_pin else {
                 continue;
             };
-            if !texts.contains(&pin.spec.objective) || reminder.body == pin.objective_covered_body {
+            if !covered_objectives.contains(&pin.spec.objective)
+                || reminder.body == pin.objective_covered_body
+            {
                 continue;
             }
             let full = reminder_directive_text(reminder);
