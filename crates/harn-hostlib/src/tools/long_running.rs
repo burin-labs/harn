@@ -36,7 +36,6 @@
 //! `cancel_handle`.
 
 use std::collections::{BTreeMap, VecDeque};
-use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock};
@@ -54,6 +53,8 @@ use crate::process::{
 use crate::tools::args::to_agent_path;
 use crate::tools::proc::{self, CaptureConfig, CommandStatus, EnvMode};
 
+#[path = "long_running_output.rs"]
+mod output;
 #[path = "long_running_response.rs"]
 mod response;
 
@@ -188,6 +189,9 @@ pub(crate) struct OutputState {
     pub(crate) stdout: Vec<u8>,
     pub(crate) stderr: Vec<u8>,
     pub(crate) combined: Vec<u8>,
+    stage_stdout: Vec<u8>,
+    stage_stderr: Vec<u8>,
+    capture_read_failed: bool,
     pub(crate) terminal: Option<VmValue>,
     /// Wall-clock instant of the most recent stdout/stderr chunk, used to derive
     /// `silence_ms` on progress snapshots (the byte-stall decision trigger).
@@ -409,6 +413,7 @@ struct WaiterContext {
     /// The command grant's private directory, kept until the waiter has
     /// reaped the child and returns.
     granted: Option<harn_vm::stdlib::process::GrantedSpawn>,
+    stage_capture: Option<proc::stage_output::StageCapture>,
 }
 
 struct ProgressThreadContext {
@@ -512,6 +517,7 @@ pub(crate) fn spawn_long_running_with_options(
     if let Some(granted) = &granted {
         proc::apply_command_grant(granted, &mut spec);
     }
+    let stage_capture = proc::stage_output::StageCapture::for_spawn(&mut spec, options.capture)?;
     let launching = granted.as_ref().map(|granted| granted.launching());
     let handle = process_handle::spawn_process(spec).map_err(|error| {
         proc::process_error_to_hostlib(builtin, requested_cwd.as_deref(), &effective_cwd, error)
@@ -587,6 +593,7 @@ pub(crate) fn spawn_long_running_with_options(
         output_feed,
         private_filter,
         granted,
+        stage_capture,
     };
     let waiter_thread_name = waiter_context.handle_id.clone();
     let capture = options.capture;
@@ -675,26 +682,22 @@ fn waiter_thread(
         .ok()
         .map(|file| Arc::new(Mutex::new(file)));
 
-    let stdout_thread = handle.take_stdout().map(|out| {
-        spawn_output_drain(
-            out,
-            context.private_filter.stream(),
-            context.output_feed.clone(),
-            planned.stdout_path.clone(),
-            combined_file.clone(),
-            true,
-        )
-    });
-    let stderr_thread = handle.take_stderr().map(|err| {
-        spawn_output_drain(
-            err,
-            context.private_filter.stream(),
-            context.output_feed.clone(),
-            planned.stderr_path.clone(),
-            combined_file.clone(),
-            false,
-        )
-    });
+    let stage_readers = context
+        .stage_capture
+        .as_mut()
+        .and_then(|stage| stage.take_readers());
+    let drains = output::spawn_drains(
+        handle.take_stdout(),
+        handle.take_stderr(),
+        stage_readers,
+        output::DrainContext {
+            filter: &context.private_filter,
+            feed: context.output_feed.clone(),
+            stdout_path: planned.stdout_path.clone(),
+            stderr_path: planned.stderr_path.clone(),
+            combined_file,
+        },
+    );
 
     let progress_thread = context
         .progress_interval
@@ -735,22 +738,20 @@ fn waiter_thread(
     let waited = handle.wait();
     let status = waited.as_ref().ok().copied();
 
-    if let Some(thread) = stdout_thread {
-        let _ = thread.join();
-    }
-    if let Some(thread) = stderr_thread {
+    for thread in drains {
         let _ = thread.join();
     }
     done.store(true, Ordering::Release);
     drop(progress_thread);
-    let (stdout, mut stderr) = {
-        let state = context
-            .output_feed
-            .state
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        (state.stdout.clone(), state.stderr.clone())
-    };
+    let output::CompletedOutput {
+        stdout,
+        mut stderr,
+        #[cfg(unix)]
+        stage_stdout,
+        #[cfg(unix)]
+        stage_stderr,
+        capture_read_failed,
+    } = output::completed(&context.output_feed);
     if let Err(error) = waited.as_ref() {
         stderr
             .extend_from_slice(format!("\nharn: process completion refused: {error}\n").as_bytes());
@@ -863,6 +864,37 @@ fn waiter_thread(
         },
     );
     payload.insert("timed_out".into(), serde_json::Value::Bool(timed_out));
+    if let Some(stage) = context.stage_capture.as_ref() {
+        let stage = if capture_read_failed {
+            proc::stage_output::StageOutput::Unmeasured {
+                reason: "capture_read_failed",
+            }
+        } else {
+            stage
+                .finish(
+                    proc::stage_output::StageOutputBytes {
+                        #[cfg(unix)]
+                        relay_complete: handle.stage_output_complete(),
+                        stdout: &stdout,
+                        stderr: &stderr,
+                        #[cfg(unix)]
+                        stage_stdout: &stage_stdout,
+                        #[cfg(unix)]
+                        stage_stderr: &stage_stderr,
+                    },
+                    command_status == CommandStatus::Completed && signal_name.is_none(),
+                    capture,
+                    &context.private_filter,
+                )
+                .unwrap_or(proc::stage_output::StageOutput::Unmeasured {
+                    reason: "capture_artifacts_unavailable",
+                })
+        };
+        payload.insert(
+            "stage_output".into(),
+            serde_json::to_value(stage).expect("typed stage output"),
+        );
+    }
     if !cancelled && waited.is_ok() && grant_error.is_none() {
         if let Some(receipt) = handle.verifier_execution_receipt() {
             payload.insert(
@@ -974,55 +1006,6 @@ fn waiter_thread(
     if let Some(tx) = completion_tx {
         let _ = tx.try_send(());
     }
-}
-
-/// Drain one output pipe. Bytes are redacted here, before the progress
-/// snapshots, the output waits and their matcher, the final result, and the
-/// artifact files the agent is pointed at can read them.
-fn spawn_output_drain(
-    mut reader: Box<dyn Read + Send>,
-    mut redactor: harn_vm::session_inputs::StreamRedactor,
-    output_feed: Arc<OutputFeed>,
-    path: std::path::PathBuf,
-    combined_file: Option<Arc<Mutex<std::fs::File>>>,
-    stdout: bool,
-) -> std::thread::JoinHandle<()> {
-    harn_parser::runtime_stack::spawn(move || {
-        let mut file = std::fs::File::create(path).ok();
-        let mut deliver = |chunk: &[u8]| {
-            if let Some(file) = file.as_mut() {
-                let _ = file.write_all(chunk);
-            }
-            if let Ok(mut state) = output_feed.state.lock() {
-                if let Some(combined) = combined_file.as_ref() {
-                    if let Ok(mut combined) = combined.lock() {
-                        let _ = combined.write_all(chunk);
-                    }
-                }
-                if stdout {
-                    state.stdout.extend_from_slice(chunk);
-                } else {
-                    state.stderr.extend_from_slice(chunk);
-                }
-                state.combined.extend_from_slice(chunk);
-                state.last_output_at = Some(std::time::Instant::now());
-            }
-            output_feed.notify.notify_waiters();
-        };
-        let mut buf = [0_u8; 8192];
-        loop {
-            let read = match reader.read(&mut buf) {
-                Ok(0) => break,
-                Ok(read) => read,
-                Err(_) => break,
-            };
-            deliver(&redactor.push(&buf[..read]));
-        }
-        let rest = redactor.finish();
-        if !rest.is_empty() {
-            deliver(&rest);
-        }
-    })
 }
 
 /// Next delay in the progress backoff schedule: double the current delay,

@@ -167,6 +167,7 @@
 - [Semantic dispatch](./stdlib/decision.md)
 - [Learned workflows](./stdlib/learned-workflows.md)
 - [Command sequence plans](./stdlib/command-sequence-plan.md)
+- [Command stage output](./stdlib/command-stage-output.md)
 - [Daemon stdlib](./stdlib/daemon.md)
 - [Current session builtin](./stdlib/agent_session_current_id.md)
 - [Compaction pins and the goal object](./stdlib/agent-pins-goal.md)

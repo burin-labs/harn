@@ -1,0 +1,124 @@
+import { connector_lifecycle, git_forge_pull_request_event } from "std/connectors/shared"
+
+pipeline test_forge_envelopes_preserve_raw_fields_and_scalar_normalization() {
+  const payload = {
+    provider: "github",
+    action: "closed",
+    repository: {full_name: "owner/repo", id: 99, extension: true},
+    pull_request: {
+      number: "17",
+      merged: "true",
+      user: {login: 7},
+      head: {ref: false, sha: 12, extension: [1, 2]},
+      base: {ref: "main", sha: "base"},
+      extension: {keep: true},
+    },
+    provider_metadata: {source: "payload", extension: true},
+    extension: {keep: [1, 2]},
+  }
+  const event = git_forge_pull_request_event(
+    nil,
+    {payload: {event: {provider_payload: payload}}},
+    {provider_metadata: {source: "options"}},
+  )
+  if event == nil {
+    throw "the wrapped pull request must reach normalization"
+  }
+  assert_eq(event.lifecycle, "merged")
+  assert_eq(event.repository.id, "99")
+  assert_eq(event.pull_request.number, 17)
+  assert_eq(event.pull_request.author, "7")
+  assert_eq(event.pull_request.head_ref, "false")
+  assert_eq(event.pull_request.head_sha, "12")
+  assert_eq(event.provider_metadata, {source: "options", extension: true})
+  assert_eq(event.raw_payload, payload)
+}
+
+pipeline test_forge_non_record_nested_containers_keep_fallbacks() {
+  for value in [nil, false, 7, "legacy", []] {
+    const event = git_forge_pull_request_event(
+      "github",
+      {
+        payload: value,
+        event: value,
+        repository: {full_name: "owner/repo"},
+        pull_request: {number: 1, head: value, base: value, last_commit: value},
+      },
+    )
+    if event == nil {
+      throw "optional containers must not discard a valid pull request"
+    }
+    assert_eq(event.pull_request.head_ref, nil)
+    assert_eq(event.pull_request.head_sha, nil)
+    assert_eq(event.pull_request.base_ref, nil)
+    assert_eq(event.pull_request.base_sha, nil)
+  }
+}
+
+pipeline test_forge_provider_specific_records_preserve_extensions() {
+  const raw = {
+    project: {path_with_namespace: "group/project", id: 42, extension: true},
+    user: "alex",
+    object_attributes: {iid: 9, action: "update", last_commit: {id: "commit", extension: true}},
+    extension: {keep: true},
+  }
+  const gitlab = git_forge_pull_request_event("gitlab", {raw: raw})
+  if gitlab == nil {
+    throw "the GitLab merge request must reach normalization"
+  }
+  assert_eq(gitlab.repository.full_name, "group/project")
+  assert_eq(gitlab.pull_request.head_sha, "commit")
+  assert_eq(gitlab.pull_request.author, "alex")
+  assert_eq(gitlab.raw_payload, raw)
+  for provider in ["gitea", "forgejo"] {
+    const event = git_forge_pull_request_event(
+      provider,
+      {
+        raw: {
+          action: "closed",
+          repository: {full_name: "team/repo", website: "https://example.test", extension: true},
+          pull_request: {number: 3, merged: false, user: "sam", head: {ref: "feature"}},
+        },
+      },
+    )
+    if event == nil {
+      throw "the Gitea-shaped pull request must reach normalization"
+    }
+    assert_eq(event.provider, provider)
+    assert_eq(event.repository.provider, provider)
+    assert_eq(event.writeback.provider, provider)
+    assert_eq(event.repository.web_url, "https://example.test")
+    assert_eq(event.pull_request.author, "sam")
+    assert_eq(event.lifecycle, "closed")
+  }
+}
+
+pipeline test_forge_selected_payload_refuses_non_record_values() {
+  for value in [false, 7, "legacy", []] {
+    const result = try {
+      git_forge_pull_request_event("github", {provider_payload: value})
+    }
+    assert(is_err(result), "selected payloads must retain their record boundary")
+  }
+  assert_eq(git_forge_pull_request_event("github", {repository: {}}), nil)
+  assert_eq(git_forge_pull_request_event("unsupported", {}), nil)
+}
+
+pipeline test_connector_binding_match_keeps_duplicate_path_refusal(harness: Harness) {
+  const lifecycle = connector_lifecycle("fixture", "forge-boundary-lifecycle")
+  lifecycle.init(harness.runtime, {extension: true})
+  const duplicate = lifecycle.activate(
+    harness.runtime,
+    [{id: "one", match: {path: "same", extension: true}}, {id: "two", path: "same"}],
+  )
+  assert(is_err(duplicate))
+  assert_eq(unwrap_err(duplicate).code, "activation")
+  assert_eq(lifecycle.state(harness.runtime).active, false)
+  const accepted = lifecycle.activate(
+    harness.runtime,
+    [{id: "one", match: false}, {id: "two", match: {path: "other", extension: true}}],
+  )
+  assert_eq(accepted.bindings, 2)
+  assert_eq(lifecycle.state(harness.runtime).bindings.two.match.extension, true)
+  lifecycle.shutdown(harness.runtime)
+}

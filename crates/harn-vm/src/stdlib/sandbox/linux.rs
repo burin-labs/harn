@@ -26,10 +26,8 @@ use crate::value::VmError;
 
 pub(super) struct Backend;
 
-#[path = "linux_descriptors.rs"]
-mod descriptors;
+pub(super) use super::unix_descriptors::DescriptorTransfer;
 use crate::process_sandbox::DeviceMountFinalization;
-pub use descriptors::DescriptorTransfer;
 #[path = "linux_bwrap.rs"]
 pub(super) mod bwrap;
 pub(crate) use bwrap::sealed_filter as sealed_launch_bytes;

@@ -461,3 +461,10 @@ slow-timeout = { period = "60s", terminate-after = 5, grace-period = "10s" }
 [[profile.e2e.overrides]]
 filter = "package(harn-cli) and kind(test)"
 leak-timeout = { period = "15s", result = "pass" }
+
+# The host-declared root boundary tests may report not_measured on a host that
+# cannot build their fixture. Their output is shown on success too, so a CI log
+# says whether each one measured its boundary or only passed.
+[[profile.default.overrides]]
+filter = 'package(harn-vm) and test(/sandbox::tests::write_root_links::/)'
+success-output = "immediate"

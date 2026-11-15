@@ -203,7 +203,10 @@ impl ProcessSpawner for MockSpawner {
             state,
             stdin_is_piped: spec.use_stdin
                 && !matches!(&spec.output_capture, OutputCapture::Inherit),
-            output_is_piped: matches!(&spec.output_capture, OutputCapture::Pipe),
+            output_is_piped: !matches!(
+                &spec.output_capture,
+                OutputCapture::Inherit | OutputCapture::File { .. }
+            ),
             stdin_taken: false,
             stdout_taken: false,
             stderr_taken: false,

@@ -1053,6 +1053,10 @@ jobs:
       # Every test share compiles the graph the cache writer warms. A share
       # whose selection resolves different dependency features recompiles them
       # and everything above them after an exact cache hit.
+      - name: Install Node for Cargo unit-graph checks
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
       - name: Check test shares compile the cached graph
         timeout-minutes: 2
         run: bash scripts/ci/check_test_share_unit_graphs.sh
@@ -2663,7 +2667,7 @@ jobs:
           cache-dependency-path: package-lock.json
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Check CI latency policy
-        uses: burin-labs/.github/.github/actions/ci-latency-policy@fb0b947f5ba9cbc1210f7feb3e5be954a3886f6a
+        uses: burin-labs/.github/.github/actions/ci-latency-policy@2e03686922fc615537d868b48e74a56a7efeac9f
         with:
           baseline-sha: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
           github-token: ${{ github.token }}

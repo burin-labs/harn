@@ -74,6 +74,138 @@ fn normalize_os_path_alias(path: &Path) -> PathBuf {
     path.to_path_buf()
 }
 
+/// Resolve `path` one component at a time, the way [`normalize_for_policy`]
+/// does, but refuse to follow a link whose own directory `untrusted` reports a
+/// confined child can write. Returns the canonical path, with a missing tail
+/// appended under its deepest existing ancestor, or `Err` naming the link.
+///
+/// Each component is looked at once (`lstat`), and the answer both decides
+/// whether to follow it and becomes the path: there is no second resolution a
+/// link could change in between. The result names no link, so a link swapped
+/// in later cannot redirect it: Seatbelt matches the resolved path of each
+/// access, and Landlock checks the real path of the descriptor it opened.
+///
+/// Each directory keeps the name it has on disk, so on a case-insensitive
+/// volume `untrusted` and every later comparison see the canonical spelling,
+/// not the declared one.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+))]
+pub(crate) fn resolve_through_host_links(
+    path: &Path,
+    untrusted: &mut dyn FnMut(&Path) -> bool,
+) -> Result<PathBuf, PathBuf> {
+    walk_host_links(path, untrusted, &mut |_| {})
+}
+
+/// [`resolve_through_host_links`], with `after_look` run between looking at
+/// each component and acting on the answer, so a test can change the tree at
+/// exactly that point.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+))]
+pub(crate) fn walk_host_links(
+    path: &Path,
+    untrusted: &mut dyn FnMut(&Path) -> bool,
+    after_look: &mut dyn FnMut(&Path),
+) -> Result<PathBuf, PathBuf> {
+    const MAX_LINKS: usize = 40;
+    let (mut current, mut pending) = split_root(&lexical_for_policy(path));
+    let mut followed = 0;
+    while let Some(name) = pending.pop() {
+        if name == ".." {
+            current.pop();
+            continue;
+        }
+        if name == "." {
+            continue;
+        }
+        let next = current.join(&name);
+        let looked = std::fs::symlink_metadata(&next);
+        after_look(&next);
+        match looked {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                followed += 1;
+                if followed > MAX_LINKS || untrusted(&current) {
+                    return Err(next);
+                }
+                let Ok(target) = std::fs::read_link(&next) else {
+                    return Err(next);
+                };
+                let (root, names) = split_root(&target);
+                if target.is_absolute() {
+                    current = root;
+                }
+                pending.extend(names);
+            }
+            Ok(_) => current = on_disk_spelling(next)?,
+            Err(_) => {
+                let mut missing = next;
+                while let Some(name) = pending.pop() {
+                    missing.push(name);
+                }
+                return Ok(normalize_os_path_alias(&normalize_lexically(&missing)));
+            }
+        }
+    }
+    Ok(normalize_os_path_alias(&current))
+}
+
+/// `next`, which was just seen not to be a link, as it is spelled on disk.
+/// A resolution that lands anywhere but `next` up to letter case means the
+/// tree moved under the walk, and is refused.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+))]
+fn on_disk_spelling(next: PathBuf) -> Result<PathBuf, PathBuf> {
+    // Windows canonical paths carry a verbatim (`\\?\`) prefix no declared
+    // root has, so the declared spelling stands there.
+    if cfg!(windows) {
+        return Ok(next);
+    }
+    match std::fs::canonicalize(&next) {
+        Ok(real)
+            if real
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&next.to_string_lossy()) =>
+        {
+            Ok(real)
+        }
+        Ok(_) => Err(next),
+        Err(_) => Ok(next),
+    }
+}
+
+/// `path`'s root (prefix and root directory) and its remaining names, last
+/// first, so they pop in walking order.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+))]
+fn split_root(path: &Path) -> (PathBuf, Vec<std::ffi::OsString>) {
+    let mut root = PathBuf::new();
+    let mut names = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(_) | Component::RootDir => root.push(component.as_os_str()),
+            other => names.push(other.as_os_str().to_os_string()),
+        }
+    }
+    names.reverse();
+    (root, names)
+}
+
 fn normalize_lexically(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
     for component in path.components() {

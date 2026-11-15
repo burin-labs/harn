@@ -99,6 +99,10 @@
         "stdout": { "type": "boolean", "default": true },
         "stderr": { "type": "boolean", "default": true },
         "merge_stderr": { "type": "boolean", "default": false },
+        "final_stage": {
+          "type": "boolean", "default": false,
+          "description": "Request runner-owned final-stage output. Unsupported syntax, startup state or transport is explicitly unmeasured; the original command still runs."
+        },
         "max_inline_bytes": { "type": "integer", "minimum": 0, "default": 50000 },
         "transport": {
           "type": "string",

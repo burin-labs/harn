@@ -44,6 +44,8 @@ use journal_cleanup::OwnerJournalCleanup;
 mod output_relay;
 #[cfg(unix)]
 mod owner_pipe;
+#[cfg(unix)]
+mod stage_relay;
 #[doc(hidden)]
 pub mod test_reexec;
 #[cfg(unix)]
@@ -192,6 +194,10 @@ struct GuardianCommandRequest {
     cleanup_token: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pinned_verifier_descriptors: Vec<i32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    stage_output_descriptors: Vec<i32>,
+    #[serde(default)]
+    stage_output_command: Option<super::program_lookup::StageOutputCommand>,
     /// Absent means this run confines no child process at all, which is the
     /// same answer the direct spawn path acts on. It never means "confinement
     /// was wanted and could not be built": that is an error at the seam that
@@ -205,8 +211,15 @@ struct GuardianCommandRequest {
 #[cfg(unix)]
 struct PreparedCommand {
     request: GuardianCommandRequest,
-    #[cfg(target_os = "linux")]
     inherited_descriptors: harn_vm::process_sandbox::DescriptorTransfer,
+    stage_relay: Option<stage_relay::StageRelay>,
+}
+
+#[cfg(unix)]
+struct PreparedPayload {
+    command: Command,
+    cleanup_token: String,
+    stage_relay: Option<stage_relay::StageRelay>,
 }
 
 #[cfg(unix)]
@@ -242,6 +255,7 @@ pub(crate) fn prepare_guardian(
     super::real::validate_program(spec)?;
     let output_capture = match &spec.output_capture {
         OutputCapture::Pipe => GuardianOutputCapture::Pipe,
+        OutputCapture::PipeWithStage { .. } => GuardianOutputCapture::Pipe,
         OutputCapture::File {
             stdout_path,
             stderr_path,
@@ -309,6 +323,8 @@ pub(crate) fn prepare_guardian(
             prepared.env_cleared,
         )
     };
+    let stage_command =
+        super::program_lookup::stage_output_command(spec, &prepared.command, prepared.env_cleared);
     let mut payload = prepared.command;
     payload.env(
         harn_vm::op_interrupt::PROCESS_OWNER_TOKEN_ENV,
@@ -327,6 +343,23 @@ pub(crate) fn prepare_guardian(
         spec.use_stdin,
     );
     request.output_capture = output_capture;
+    let stage_transfer = match &spec.output_capture {
+        OutputCapture::PipeWithStage {
+            stdout,
+            stderr,
+            entered,
+            ..
+        } if stage_command.is_some() => {
+            Some(harn_vm::process_sandbox::DescriptorTransfer::shared_files(
+                vec![stdout.clone(), stderr.clone(), entered.clone()],
+            ))
+        }
+        _ => None,
+    };
+    if let Some(transfer) = stage_transfer.as_ref() {
+        request.stage_output_descriptors = transfer.numbers();
+    }
+    request.stage_output_command = stage_command;
     request.test_reexec = reexec_args.is_some();
     #[cfg(target_os = "linux")]
     if let Some(pinned) = pinned.as_ref() {
@@ -362,6 +395,9 @@ pub(crate) fn prepare_guardian(
         .process_group(0);
     if let Some(confinement) = confinement {
         confinement.hand_to(&mut guardian);
+    }
+    if let Some(transfer) = stage_transfer {
+        transfer.attach(&mut guardian);
     }
     #[cfg(target_os = "linux")]
     let witness = if let Some(pinned) = pinned {
@@ -569,6 +605,8 @@ impl GuardianCommandRequest {
             cancel_request_fd: None,
             payload_stdin,
             pinned_verifier_descriptors: Vec::new(),
+            stage_output_descriptors: Vec::new(),
+            stage_output_command: None,
             confinement,
             program: os_bytes(command.get_program()),
             args: command.get_args().map(os_bytes).collect(),
@@ -764,7 +802,11 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
     // their named descriptors now belong exclusively to this startup process.
     let prepared = unsafe { PreparedCommand::from_inherited_request(request) }
         .and_then(PreparedCommand::into_command);
-    let (mut payload_command, cleanup_token) = match prepared {
+    let PreparedPayload {
+        command: mut payload_command,
+        cleanup_token,
+        stage_relay,
+    } = match prepared {
         Ok(prepared) => prepared,
         Err(error) => {
             write_startup(StartupMessage {
@@ -795,6 +837,9 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
             return Err(error);
         }
     };
+    // The child owns its inherited handles now. Retaining the command would
+    // keep relay writers open and prevent their EOF from settling.
+    drop(payload_command);
     let payload_pid = payload.id();
     #[cfg(target_os = "linux")]
     let payload_identity = cancel_request::ChildIdentity::open(payload_pid).ok();
@@ -809,9 +854,31 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
         test_reexec::write_boundary(&cleanup_token)?;
     }
 
-    let stdout = payload.stdout.take();
-    let stderr = payload.stderr.take();
-    let mut open_outputs = u8::from(stdout.is_some()) + u8::from(stderr.is_some());
+    let stage_observed = stage_relay.is_some();
+    let (stdout, stderr, stage_pumps) = match stage_relay {
+        Some(relay) => {
+            let (stdout, stderr, pumps) = relay.into_parts();
+            (
+                Some(Box::new(stdout) as Box<dyn Read + Send>),
+                Some(Box::new(stderr) as Box<dyn Read + Send>),
+                Vec::from(pumps),
+            )
+        }
+        None => (
+            payload
+                .stdout
+                .take()
+                .map(|reader| Box::new(reader) as Box<dyn Read + Send>),
+            payload
+                .stderr
+                .take()
+                .map(|reader| Box::new(reader) as Box<dyn Read + Send>),
+            Vec::new(),
+        ),
+    };
+    let mut open_outputs =
+        usize::from(stdout.is_some()) + usize::from(stderr.is_some()) + stage_pumps.len();
+    let mut output_complete = true;
     let payload_stdin = payload.stdin.take();
     let (event_tx, event_rx) = std::sync::mpsc::channel();
 
@@ -834,15 +901,22 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
     if let Some(mut stdout) = stdout {
         let event_tx = event_tx.clone();
         harn_parser::runtime_stack::spawn(move || {
-            let _ = output_relay::copy(&mut stdout, io::stdout());
-            let _ = event_tx.send(GuardianEvent::OutputClosed);
+            let complete = output_relay::copy(&mut stdout, io::stdout()).is_ok();
+            let _ = event_tx.send(GuardianEvent::OutputClosed(complete));
         });
     }
     if let Some(mut stderr) = stderr {
         let event_tx = event_tx.clone();
         harn_parser::runtime_stack::spawn(move || {
-            let _ = output_relay::copy(&mut stderr, io::stderr());
-            let _ = event_tx.send(GuardianEvent::OutputClosed);
+            let complete = output_relay::copy(&mut stderr, io::stderr()).is_ok();
+            let _ = event_tx.send(GuardianEvent::OutputClosed(complete));
+        });
+    }
+    for pump in stage_pumps {
+        let event_tx = event_tx.clone();
+        harn_parser::runtime_stack::spawn(move || {
+            let complete = pump.run().is_ok();
+            let _ = event_tx.send(GuardianEvent::OutputClosed(complete));
         });
     }
     {
@@ -869,6 +943,7 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
     drop(event_tx);
 
     let mut payload_status = None;
+    let mut observed_cleanup = None;
     #[cfg(target_os = "linux")]
     let mut cancellation_cleanup = None;
     while let Ok(event) = event_rx.recv() {
@@ -918,12 +993,26 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
                 {
                     cleanup.guardian_custody_complete = true;
                 }
-                completion_receipt::write(&mut cleanup_receipt, &cleanup)?;
-                completion_receipt::refuse_survivors(&cleanup)?;
+                if let Err(error) = completion_receipt::refuse_survivors(&cleanup) {
+                    completion_receipt::write(&mut cleanup_receipt, &cleanup, false)?;
+                    return Err(error);
+                }
+                observed_cleanup = Some(cleanup);
             }
-            GuardianEvent::OutputClosed => open_outputs = open_outputs.saturating_sub(1),
+            GuardianEvent::OutputClosed(complete) => {
+                output_complete &= complete;
+                open_outputs = open_outputs.saturating_sub(1);
+            }
         }
         if let Some(status) = payload_status.filter(|_| open_outputs == 0) {
+            let cleanup = observed_cleanup
+                .as_ref()
+                .ok_or_else(|| io::Error::other("guardian cleanup was not observed"))?;
+            completion_receipt::write(
+                &mut cleanup_receipt,
+                cleanup,
+                stage_observed && output_complete,
+            )?;
             harn_vm::op_interrupt::remove_process_owner_group_journal(&cleanup_token);
             propagate_exit(status);
         }
@@ -1258,7 +1347,7 @@ fn wait_for_payload_exit(
         match events.recv() {
             Ok(GuardianEvent::PayloadExited(status)) => *payload_status = Some(status?),
             Ok(
-                GuardianEvent::OutputClosed
+                GuardianEvent::OutputClosed(_)
                 | GuardianEvent::OwnerClosed
                 | GuardianEvent::InputFailed(_),
             ) => {}
@@ -1324,7 +1413,7 @@ enum GuardianEvent {
     OwnerClosed,
     InputFailed(io::Error),
     PayloadExited(io::Result<ExitStatus>),
-    OutputClosed,
+    OutputClosed(bool),
 }
 
 #[cfg(unix)]

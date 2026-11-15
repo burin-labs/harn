@@ -6,6 +6,71 @@ use std::process::Command;
 
 use super::SpawnSpec;
 
+fn shell_startup_bounded(
+    command: &Command,
+    env_cleared: bool,
+    overrides: &std::collections::BTreeMap<String, String>,
+) -> bool {
+    let changes_lookup = |name: &std::ffi::OsStr| {
+        let Some(name) = name.to_str() else {
+            return true;
+        };
+        let value = overrides.get(name).map(OsString::from).or_else(|| {
+            match command.get_envs().find(|(key, _)| *key == name) {
+                Some((_, value)) => value.map(OsString::from),
+                None if !env_cleared => std::env::var_os(name),
+                None => None,
+            }
+        });
+        value.is_some_and(|value| {
+            harn_vm::shells::shell_startup_entry_may_change_lookup(name, &value.to_string_lossy())
+        })
+    };
+    !command.get_envs().any(|(name, _)| changes_lookup(name))
+        && !overrides.keys().any(|name| changes_lookup(name.as_ref()))
+        && (env_cleared || !std::env::vars_os().any(|(name, _)| changes_lookup(&name)))
+}
+
+#[cfg(unix)]
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(super) struct StageOutputCommand {
+    source_arg: usize,
+    plan: harn_vm::shells::FinalOutputStage,
+}
+
+#[cfg(unix)]
+impl StageOutputCommand {
+    pub(super) fn render(&self, args: &mut [Vec<u8>], descriptors: [i32; 3]) -> Option<()> {
+        let source = std::str::from_utf8(args.get(self.source_arg)?).ok()?;
+        let rewritten = self.plan.capture_source(source, descriptors)?;
+        args[self.source_arg] = rewritten.into_bytes();
+        Some(())
+    }
+}
+
+#[cfg(unix)]
+pub(super) fn stage_output_command(
+    spec: &SpawnSpec,
+    command: &Command,
+    env_cleared: bool,
+) -> Option<StageOutputCommand> {
+    let super::OutputCapture::PipeWithStage { plan, .. } = &spec.output_capture else {
+        return None;
+    };
+    if !shell_startup_bounded(command, env_cleared, &std::collections::BTreeMap::new()) {
+        return None;
+    }
+    let prepared_args: Vec<OsString> = command.get_args().map(OsString::from).collect();
+    let original: Vec<OsString> = spec.args.iter().map(OsString::from).collect();
+    if original.len() < 2 || !prepared_args.ends_with(&original) {
+        return None;
+    }
+    Some(StageOutputCommand {
+        source_arg: prepared_args.len() - original.len() + 1,
+        plan: plan.clone(),
+    })
+}
+
 /// Filesystem presence is lookup evidence, never verifier identity or success.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProgramLookupObservation {
@@ -106,26 +171,10 @@ pub fn observe_program_lookup(
             None => None,
         }
     };
-    if plan.requires_clean_shell_environment {
-        let changes_lookup = |name: &std::ffi::OsStr| {
-            name.to_str().is_some_and(|name| {
-                value(name).is_some_and(|value| {
-                    harn_vm::shells::shell_startup_entry_may_change_lookup(
-                        name,
-                        &value.to_string_lossy(),
-                    )
-                })
-            })
-        };
-        if command.get_envs().any(|(name, _)| changes_lookup(name))
-            || plan
-                .environment
-                .keys()
-                .any(|name| changes_lookup(name.as_ref()))
-            || (!env_cleared && std::env::vars_os().any(|(name, _)| changes_lookup(&name)))
-        {
-            return Unmeasured(ShellStartupUnbounded);
-        }
+    if plan.requires_clean_shell_environment
+        && !shell_startup_bounded(command, env_cleared, &plan.environment)
+    {
+        return Unmeasured(ShellStartupUnbounded);
     }
     let mut extensions = if cfg!(windows) {
         value("PATHEXT")

@@ -27,7 +27,7 @@ use super::policy_allows_network;
     target_os = "windows"
 ))]
 pub(crate) fn process_sandbox_policy_read_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    normalized_process_roots(&policy.process_sandbox.read_roots)
+    trusted_process_roots(policy, &policy.process_sandbox.read_roots, RootUse::Read)
 }
 
 #[cfg(any(
@@ -37,7 +37,7 @@ pub(crate) fn process_sandbox_policy_read_roots(policy: &CapabilityPolicy) -> Ve
     target_os = "windows"
 ))]
 pub(crate) fn process_sandbox_policy_write_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    normalized_process_roots(&policy.process_sandbox.write_roots)
+    trusted_process_roots(policy, &policy.process_sandbox.write_roots, RootUse::Write)
 }
 
 /// Every directory a child confined by `policy` may write under, made
@@ -87,7 +87,11 @@ pub fn process_sandbox_writable_roots(policy: &CapabilityPolicy) -> Vec<PathBuf>
 /// Directories a confined child may place a Unix-domain socket under.
 #[cfg(target_os = "linux")]
 pub(crate) fn process_sandbox_unix_socket_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    normalized_process_roots(&policy.process_sandbox.unix_socket_roots)
+    trusted_process_roots(
+        policy,
+        &policy.process_sandbox.unix_socket_roots,
+        RootUse::Write,
+    )
 }
 
 /// What the active backend will actually do with a Unix-socket grant.
@@ -126,6 +130,133 @@ pub fn unix_socket_enforcement(policy: &CapabilityPolicy) -> UnixSocketEnforceme
 pub(crate) fn serve_only_unavailable_on_host() -> bool {
     super::active_backend_mechanism_limits()
         .contains(&super::enforcement::MechanismLimit::UnixSocketGrantUnavailable)
+}
+
+/// What a confined child may do under a host-declared root.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+))]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RootUse {
+    Read,
+    /// Write, create or bind: the user's own configuration is refused too.
+    Write,
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+))]
+fn trusted_process_roots(
+    policy: &CapabilityPolicy,
+    declared: &[String],
+    usage: RootUse,
+) -> Vec<PathBuf> {
+    host_resolved_roots(policy, declared.iter().map(PathBuf::from), usage)
+}
+
+/// Whether a link in `dir` is one a confined child under `policy` could have
+/// placed: `dir` is under a root the child can write. The writable set is
+/// computed only when a declared root first crosses a link.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+))]
+pub(crate) fn link_dir_is_untrusted(
+    policy: &CapabilityPolicy,
+) -> impl FnMut(&std::path::Path) -> bool + '_ {
+    let mut child_writable: Option<Vec<PathBuf>> = None;
+    move |dir| {
+        child_writable
+            .get_or_insert_with(|| process_sandbox_writable_roots(policy))
+            .iter()
+            .any(|root| dir.starts_with(root))
+    }
+}
+
+/// Host-declared roots, each resolved only through links the host placed.
+///
+/// A root is resolved for every spawn, so a link along its path decides where
+/// the grant lands. A link that sits in a directory a confined child can
+/// write, or that a workspace checkout brought with it, is not the host's
+/// choice, and a root reached through one is refused. So is a write root that
+/// resolves into, onto, or over a file git, gh or ssh read as the user's own
+/// configuration. Each refusal is reported once.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+))]
+pub(crate) fn host_resolved_roots(
+    policy: &CapabilityPolicy,
+    declared: impl IntoIterator<Item = PathBuf>,
+    usage: RootUse,
+) -> Vec<PathBuf> {
+    let mut untrusted = link_dir_is_untrusted(policy);
+    let protected = match usage {
+        RootUse::Write => crate::user_dirs::home_dir()
+            .filter(|home| home.is_absolute())
+            .map(|home| super::workspace_env::grant_spawn::trusted_config_paths(&home))
+            .unwrap_or_default(),
+        RootUse::Read => Vec::new(),
+    };
+    let mut roots = Vec::new();
+    for root in declared {
+        let root = super::resolve_policy_path(&root.to_string_lossy());
+        let resolved = match super::paths::resolve_through_host_links(&root, &mut untrusted) {
+            Ok(resolved) => resolved,
+            Err(link) => {
+                refuse_root(
+                    &root,
+                    &format!(
+                        "it is reached through the link {}, which sits where a confined process \
+                         can write; declare the directory it should resolve to instead",
+                        link.display()
+                    ),
+                );
+                continue;
+            }
+        };
+        if let Some(config) = protected
+            .iter()
+            .find(|config| resolved.starts_with(config) || config.starts_with(&resolved))
+        {
+            refuse_root(
+                &root,
+                &format!(
+                    "it would let a confined process write {}; declare a narrower directory",
+                    config.display()
+                ),
+            );
+            continue;
+        }
+        if !roots.contains(&resolved) {
+            roots.push(resolved);
+        }
+    }
+    roots
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+))]
+fn refuse_root(root: &std::path::Path, reason: &str) {
+    let message = format!(
+        "process sandbox root {} is not granted: {reason}",
+        root.display()
+    );
+    super::warn_once(&message, &message);
 }
 
 #[cfg(all(test, unix))]

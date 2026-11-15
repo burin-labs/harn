@@ -74,10 +74,19 @@ pipeline test_hyphenated_workflow_fields_preserve_typed_values() {
   assert_eq(job_continue_on_error({"continue-on-error": optional_expression}), optional_expression)
   assert_eq(strategy_fail_fast({strategy: {"fail-fast": false}}), false)
   assert_eq(strategy_max_parallel({strategy: {"max-parallel": 2}}), 2)
+  assert_eq(strategy_max_parallel({strategy: {"max-parallel": 0}}), 0)
+  for job in [nil, {}, {strategy: {}}] {
+    assert_eq(strategy_fail_fast(job), nil)
+    assert_eq(strategy_max_parallel(job), nil)
+  }
   assert_eq(concurrency_cancel({"cancel-in-progress": true}), true)
   assert_eq(concurrency_cancel("group shorthand"), nil)
   assert_eq(trigger_ignored_paths({"paths-ignore": ["docs/**"]}), ["docs/**"])
   assert_eq(action_post_condition({runs: {"post-if": "success()"}}), "success()")
+  assert_eq(action_post_condition({runs: {"post-if": ""}}), "")
+  for action in [nil, {}, {runs: {}}] {
+    assert_eq(action_post_condition(action), nil)
+  }
 }
 
 pipeline test_hyphenated_workflow_fields_refuse_malformed_owned_values() {
