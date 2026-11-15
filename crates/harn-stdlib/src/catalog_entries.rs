@@ -430,6 +430,7 @@ catalog_entries! {
     "agent/pattern_knowledge" => "stdlib/agent/pattern_knowledge.harn",
     "agent/crystallization_curator" => "stdlib/agent/crystallization_curator.harn",
     "agent/learned" => "stdlib/agent/learned.harn",
+    "agent/learned/binding" => "stdlib/agent/learned/binding.harn",
     "agent/learned/contracts" => "stdlib/agent/learned/contracts.harn",
     "agent/learned/deferred" => "stdlib/agent/learned/deferred.harn",
     "agent/learned/qualification" => "stdlib/agent/learned/qualification.harn",
@@ -519,6 +520,7 @@ catalog_entries! {
     ],
     prompt_assets: [
     "agent/learned/prompts/bind.harn.prompt" => "stdlib/agent/learned/prompts/bind.harn.prompt",
+    "agent/learned/prompts/check_binding.harn.prompt" => "stdlib/agent/learned/prompts/check_binding.harn.prompt",
     "agent/learned/prompts/curation.harn.prompt" => "stdlib/agent/learned/prompts/curation.harn.prompt",
     "eval/hypothesis/prompts/intake.harn.prompt" => "stdlib/eval/hypothesis/prompts/intake.harn.prompt",
     "signals/prompts/reminder.harn.prompt" => "stdlib/signals/prompts/reminder.harn.prompt",
