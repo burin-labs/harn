@@ -193,6 +193,8 @@ pub enum OutputCapture {
         entered: Arc<std::fs::File>,
         /// Canonical source-range plan, rendered after the guardian owns shell slots.
         plan: harn_vm::shells::FinalOutputStage,
+        /// Preserve diagnostic text if startup or descriptor admission prevents capture.
+        clause_diagnostics: Option<Vec<String>>,
     },
     /// Capture stdout/stderr through pre-created private files.
     File {

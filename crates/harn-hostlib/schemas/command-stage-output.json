@@ -2,12 +2,25 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://harnlang.com/schemas/hostlib/command-stage-output.json",
   "description": "Runner-owned output attribution, not proof that an executable ran tests.",
+  "$defs": {
+    "failed_clause": {
+      "type": "object",
+      "properties": {
+        "index": { "type": "integer", "minimum": 1 },
+        "total": { "type": "integer", "minimum": 1 },
+        "source": { "type": "string" }
+      },
+      "required": ["index", "total", "source"],
+      "additionalProperties": false
+    }
+  },
   "oneOf": [
     {
       "type": "object",
       "properties": {
         "status": { "const": "unmeasured" },
-        "reason": { "type": "string" }
+        "reason": { "type": "string" },
+        "failed_clause": { "$ref": "#/$defs/failed_clause" }
       },
       "required": ["status", "reason"],
       "additionalProperties": false
@@ -24,7 +37,8 @@
         "output_path": { "type": "string" },
         "stdout_path": { "type": "string" },
         "stderr_path": { "type": "string" },
-        "line_count": { "type": "integer", "minimum": 0 }
+        "line_count": { "type": "integer", "minimum": 0 },
+        "failed_clause": { "$ref": "#/$defs/failed_clause" }
       },
       "required": ["status", "argv", "stdout", "stderr", "stdout_truncated", "stderr_truncated", "output_path", "stdout_path", "stderr_path", "line_count"],
       "additionalProperties": false

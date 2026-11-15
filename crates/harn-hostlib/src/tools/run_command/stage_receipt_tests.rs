@@ -1,135 +1,141 @@
 use std::collections::BTreeMap;
-use std::io::Read;
-use std::os::unix::fs::FileExt;
-use std::sync::Arc;
+use std::io::{self, Read};
+use std::sync::{mpsc, Arc};
 
 use crate::process::{EnvMode, OutputCapture, OwnerDeathPolicy, SpawnSpec, WaitOutcome};
 use crate::tools::proc::stage_output::{StageCapture, StageOutput, StageOutputBytes};
 
+type Reader = (
+    mpsc::Receiver<io::Result<Vec<u8>>>,
+    std::thread::JoinHandle<()>,
+);
+
+fn start_read(mut reader: Box<dyn Read + Send>) -> Reader {
+    let (sender, receiver) = mpsc::sync_channel(1);
+    let thread = harn_parser::runtime_stack::spawn(move || {
+        let mut bytes = Vec::new();
+        let result = reader.read_to_end(&mut bytes).map(|_| bytes);
+        let _ = sender.send(result);
+    });
+    (receiver, thread)
+}
+
+fn finish_read((receiver, thread): Reader) -> Vec<u8> {
+    let bytes =
+        harn_clock::test_support::recv_within("owned capture reader EOF", &receiver).unwrap();
+    thread.join().unwrap();
+    bytes
+}
+
 #[test]
-fn payload_written_entry_cannot_confirm_failed_stage_relay() {
-    let root = tempfile::tempdir().unwrap();
-    std::fs::write(
-        root.path().join("forge.py"),
-        r"import os, stat
-found = []
-for fd in range(3, 10):
-    try:
-        if stat.S_ISREG(os.fstat(fd).st_mode) and os.pread(fd, 1, 0) == b'1':
-            os.pwrite(fd, b'2', 0)
-            found.append(fd)
-    except OSError:
-        pass
-assert len(found) == 1, found
-with open('payload-entry-written', 'w') as marker:
+fn private_clause_observation_cannot_replace_failed_output_relay() {
+    for failed in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("forge.py"),
+            r"import fcntl, os, socket, stat
+if os.environ['FORGE_OBSERVATION'] == '1':
+    left, right = socket.socketpair()
+    controls = {left.fileno(), right.fileno()}
+    seen, attempted = set(), []
+    for fd in range(3, 10):
+        try:
+            flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+            if stat.S_ISSOCK(os.fstat(fd).st_mode) and flags & os.O_ACCMODE != os.O_RDONLY:
+                if fd in controls:
+                    seen.add(fd)
+                else:
+                    os.write(fd, b'999\n')
+                    attempted.append(fd)
+        except OSError:
+            pass
+    assert len(seen) == 2 and len(attempted) == 2, (seen, attempted)
+with open('payload-reached', 'w') as marker:
     marker.write('reached')
 print('stage')
 ",
-    )
-    .unwrap();
-    let private_sink = tempfile::NamedTempFile::new().unwrap();
-    let stdout = Arc::new(std::fs::File::open(private_sink.path()).unwrap());
-    let stderr = Arc::new(tempfile::tempfile().unwrap());
-    let entered = Arc::new(tempfile::tempfile().unwrap());
-    let args = vec![
-        "-c".into(),
-        "printf setup && /usr/bin/python3 forge.py".into(),
-    ];
-    let harn_vm::shells::OutputStageInvocation::FinalPosixStage(plan) =
-        harn_vm::shells::plan_invocation_output_stage("/bin/sh", &args)
-    else {
-        panic!("canonical literal stage");
-    };
-    let mut process = crate::process::default_spawner()
-        .spawn(SpawnSpec {
+        )
+        .unwrap();
+        let private_sink = tempfile::NamedTempFile::new().unwrap();
+        let mut spec = SpawnSpec {
             builtin: "stage_receipt_control",
             program: "/bin/sh".into(),
-            args,
+            args: vec![
+                "-c".into(),
+                "printf setup && /usr/bin/python3 forge.py".into(),
+            ],
             cwd: Some(root.path().to_path_buf()),
-            env: BTreeMap::new(),
+            env: BTreeMap::from([(
+                "FORGE_OBSERVATION".into(),
+                if failed { "0" } else { "1" }.into(),
+            )]),
             env_remove: Vec::new(),
             env_mode: EnvMode::Replace,
             use_stdin: false,
             configure_process_group: true,
             owner_death: OwnerDeathPolicy::KillContainment,
-            output_capture: OutputCapture::PipeWithStage {
-                stdout,
-                stderr,
-                entered: entered.clone(),
-                plan,
+            output_capture: OutputCapture::Pipe,
+        };
+        let mut capture = StageCapture::for_spawn(
+            &mut spec,
+            &super::proc::CaptureConfig {
+                final_stage: true,
+                ..Default::default()
             },
-        })
-        .unwrap();
-    let status = process
-        .wait_with_timeout(Some(harn_clock::test_support::HANG_CEILING), &|| false)
-        .unwrap();
-    assert!(matches!(status, WaitOutcome::Exited(status) if status.code == Some(0)));
-    assert_eq!(
-        std::fs::read_to_string(root.path().join("payload-entry-written")).unwrap(),
-        "reached"
-    );
-    let mut byte = [0];
-    entered.read_exact_at(&mut byte, 0).unwrap();
-    assert_eq!(
-        byte, *b"2",
-        "the payload actually forged the old completion byte"
-    );
-    let mut aggregate = Vec::new();
-    process
-        .take_stdout()
+        )
         .unwrap()
-        .read_to_end(&mut aggregate)
         .unwrap();
-    assert_eq!(aggregate, b"setupstage\n");
-    assert_eq!(
-        std::fs::metadata(private_sink.path()).unwrap().len(),
-        0,
-        "the read-only stage sink received no bytes"
-    );
-    assert!(
-        !process.stage_output_complete(),
-        "the guardian must report the actual relay failure"
-    );
-    let capture = StageCapture::Shell {
-        argv: vec!["/usr/bin/python3".into(), "forge.py".into()],
-        readers: None,
-        entered: entered.clone(),
-    };
-    let observed = capture
-        .finish(
-            StageOutputBytes {
-                relay_complete: process.stage_output_complete(),
-                stdout: &aggregate,
-                stderr: &[],
-                stage_stdout: &[],
-                stage_stderr: &[],
-            },
-            true,
-            super::proc::CaptureConfig::default(),
-            &harn_vm::session_inputs::OutputFilter::capture_for_spawn(),
-        )
-        .unwrap();
-    assert!(
-        matches!(observed, StageOutput::Unmeasured { .. }),
-        "payload-writable entry bytes cannot prove a failed relay completed: {observed:?}"
-    );
-    entered.write_all_at(b"1", 0).unwrap();
-    let observed = capture
-        .finish(
-            StageOutputBytes {
-                relay_complete: process.stage_output_complete(),
-                stdout: &aggregate,
-                stderr: &[],
-                stage_stdout: &[],
-                stage_stderr: &[],
-            },
-            true,
-            super::proc::CaptureConfig::default(),
-            &harn_vm::session_inputs::OutputFilter::capture_for_spawn(),
-        )
-        .unwrap();
-    assert!(
-        matches!(observed, StageOutput::Unmeasured { .. }),
-        "a valid start byte cannot replace the failed relay receipt"
-    );
+        if failed {
+            let OutputCapture::PipeWithStage { stdout, .. } = &mut spec.output_capture else {
+                panic!("actual private stage transport");
+            };
+            *stdout = Arc::new(std::fs::File::open(private_sink.path()).unwrap());
+        }
+        let readers = capture.take_readers().unwrap();
+        let stage_stdout = start_read(readers.stdout);
+        let stage_stderr = start_read(readers.stderr);
+        let observation = start_read(readers.observation);
+        let mut process = crate::process::default_spawner().spawn(spec).unwrap();
+        let stdout = start_read(process.take_stdout().unwrap());
+        let stderr = start_read(process.take_stderr().unwrap());
+        let status = process
+            .wait_with_timeout(Some(harn_clock::test_support::HANG_CEILING), &|| false)
+            .unwrap();
+        assert!(matches!(status, WaitOutcome::Exited(status) if status.code == Some(0)));
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("payload-reached")).unwrap(),
+            "reached"
+        );
+        let stdout = finish_read(stdout);
+        let stderr = finish_read(stderr);
+        let stage_stdout = finish_read(stage_stdout);
+        let stage_stderr = finish_read(stage_stderr);
+        let observation = finish_read(observation);
+        assert_eq!(
+            observation, b"1\n2\n",
+            "payload writes cannot reach the clause channel"
+        );
+        assert_eq!(process.stage_output_complete(), !failed);
+        let observed = capture
+            .finish(
+                StageOutputBytes {
+                    relay_complete: process.stage_output_complete(),
+                    stdout: &stdout,
+                    stderr: &stderr,
+                    stage_stdout: &stage_stdout,
+                    stage_stderr: &stage_stderr,
+                    observation: &observation,
+                },
+                Some(0),
+                &super::proc::CaptureConfig::default(),
+                &harn_vm::session_inputs::OutputFilter::capture_for_spawn(),
+            )
+            .unwrap();
+        if failed {
+            assert_eq!(std::fs::metadata(private_sink.path()).unwrap().len(), 0);
+            assert!(matches!(observed, StageOutput::Unmeasured { .. }));
+        } else {
+            assert!(matches!(observed, StageOutput::Captured { .. }));
+        }
+    }
 }

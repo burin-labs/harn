@@ -52,40 +52,45 @@ impl PreparedCommand {
         }
         let mut stage_relay = None;
         if let Some(command) = request.stage_output_command.take() {
-            let slots = inherited_descriptors.reserve_owned_slots(
-                &request.stage_output_descriptors,
-                harn_vm::shells::FinalOutputStage::descriptor_slots(),
-            )?;
-            if let Some(slots) = slots {
-                let descriptors: [i32; 3] = slots
-                    .as_slice()
-                    .try_into()
-                    .map_err(|_| io::Error::other("invalid stage descriptor assignment"))?;
-                let (relay, assigned) =
-                    stage_relay::StageRelay::prepare(&mut inherited_descriptors, descriptors)?;
-                let payload_slots = inherited_descriptors.reserve_owned_slots(
-                    &assigned,
+            if command.captures_output() {
+                let slots = inherited_descriptors.reserve_owned_slots(
+                    &request.stage_output_descriptors,
                     harn_vm::shells::FinalOutputStage::descriptor_slots(),
                 )?;
-                if let Some(payload_slots) = payload_slots {
-                    let payload: [i32; 3] = payload_slots
+                if let Some(slots) = slots {
+                    let descriptors: [i32; 3] = slots
                         .as_slice()
                         .try_into()
-                        .map_err(|_| io::Error::other("invalid relay descriptor assignment"))?;
-                    if command.render(&mut request.args, payload).is_some() {
-                        request.stage_output_descriptors = payload_slots;
-                        stage_relay = Some(relay);
+                        .map_err(|_| io::Error::other("invalid stage descriptor assignment"))?;
+                    let (relay, assigned) =
+                        stage_relay::StageRelay::prepare(&mut inherited_descriptors, descriptors)?;
+                    let payload_slots = inherited_descriptors.reserve_owned_slots(
+                        &assigned,
+                        harn_vm::shells::FinalOutputStage::descriptor_slots(),
+                    )?;
+                    if let Some(payload_slots) = payload_slots {
+                        let payload: [i32; 3] = payload_slots
+                            .as_slice()
+                            .try_into()
+                            .map_err(|_| io::Error::other("invalid relay descriptor assignment"))?;
+                        if command.render(&mut request.args, payload).is_some() {
+                            request.stage_output_descriptors = payload_slots;
+                            stage_relay = Some(relay);
+                        } else {
+                            inherited_descriptors.discard_owned(&payload_slots);
+                            request.stage_output_descriptors.clear();
+                        }
                     } else {
-                        inherited_descriptors.discard_owned(&payload_slots);
+                        inherited_descriptors.discard_owned(&assigned);
                         request.stage_output_descriptors.clear();
                     }
                 } else {
-                    inherited_descriptors.discard_owned(&assigned);
+                    inherited_descriptors.discard_owned(&request.stage_output_descriptors);
                     request.stage_output_descriptors.clear();
                 }
-            } else {
-                inherited_descriptors.discard_owned(&request.stage_output_descriptors);
-                request.stage_output_descriptors.clear();
+            }
+            if stage_relay.is_none() {
+                let _ = command.render_diagnostics(&mut request.args);
             }
         }
         Ok(Self {

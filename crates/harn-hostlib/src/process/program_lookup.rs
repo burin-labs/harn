@@ -36,10 +36,24 @@ fn shell_startup_bounded(
 pub(super) struct StageOutputCommand {
     source_arg: usize,
     plan: harn_vm::shells::FinalOutputStage,
+    capture: bool,
+    clause_diagnostics: Option<Vec<String>>,
 }
 
 #[cfg(unix)]
 impl StageOutputCommand {
+    pub(super) fn captures_output(&self) -> bool {
+        self.capture
+    }
+
+    pub(super) fn render_diagnostics(&self, args: &mut [Vec<u8>]) -> Option<()> {
+        let diagnostics = self.clause_diagnostics.as_deref()?;
+        let source = std::str::from_utf8(args.get(self.source_arg)?).ok()?;
+        let rewritten = self.plan.diagnostic_source(source, diagnostics)?;
+        args[self.source_arg] = rewritten.into_bytes();
+        Some(())
+    }
+
     pub(super) fn render(&self, args: &mut [Vec<u8>], descriptors: [i32; 3]) -> Option<()> {
         let source = std::str::from_utf8(args.get(self.source_arg)?).ok()?;
         let rewritten = self.plan.capture_source(source, descriptors)?;
@@ -54,10 +68,16 @@ pub(super) fn stage_output_command(
     command: &Command,
     env_cleared: bool,
 ) -> Option<StageOutputCommand> {
-    let super::OutputCapture::PipeWithStage { plan, .. } = &spec.output_capture else {
+    let super::OutputCapture::PipeWithStage {
+        plan,
+        clause_diagnostics,
+        ..
+    } = &spec.output_capture
+    else {
         return None;
     };
-    if !shell_startup_bounded(command, env_cleared, &std::collections::BTreeMap::new()) {
+    let capture = shell_startup_bounded(command, env_cleared, &std::collections::BTreeMap::new());
+    if !capture && clause_diagnostics.is_none() {
         return None;
     }
     let prepared_args: Vec<OsString> = command.get_args().map(OsString::from).collect();
@@ -68,6 +88,8 @@ pub(super) fn stage_output_command(
     Some(StageOutputCommand {
         source_arg: prepared_args.len() - original.len() + 1,
         plan: plan.clone(),
+        capture,
+        clause_diagnostics: clause_diagnostics.clone(),
     })
 }
 

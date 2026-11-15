@@ -9,7 +9,8 @@ use crate::value::{VmError, VmValue};
 mod command_grant;
 mod command_plan;
 pub use command_plan::{
-    plan_invocation, plan_invocation_output_stage, plan_posix_command, plan_posix_sequence,
+    plan_final_output_stage, plan_invocation, plan_invocation_clause_diagnostics,
+    plan_invocation_output_stage, plan_posix_command, plan_posix_sequence,
     shell_startup_entry_may_change_lookup, CommandPlan, FinalOutputStage, OutputStageInvocation,
 };
 
@@ -43,6 +44,15 @@ pub struct ShellInvocation {
     pub args: Vec<String>,
     pub command_arg_index: usize,
     pub shell: ShellDescriptor,
+}
+
+impl ShellInvocation {
+    /// Actual source position from the shell resolver. This establishes no
+    /// bounded-startup or output-capture authority.
+    pub fn posix_command_source_arg(&self) -> Option<usize> {
+        (shell_dialect_for_id(&self.program) == Some(ShellDialect::Posix))
+            .then_some(self.command_arg_index)
+    }
 }
 
 /// Shell grammars understood by Harn's command-safety analyzer.

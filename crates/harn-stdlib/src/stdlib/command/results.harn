@@ -15,8 +15,15 @@ pub type CommandSandboxReport = {
   network: CommandNetworkGrants,
 }
 
+/** Original clause entered before a normal nonzero shell exit. */
+pub type CommandFailedClause = {index: int, total: int, source: string}
+
 /** Final-stage output observed by the runner, or the reason it was not measured. */
-pub type CommandStageOutput = {status: "unmeasured", reason: string} \
+pub type CommandStageOutput = {
+  status: "unmeasured",
+  reason: string,
+  failed_clause?: CommandFailedClause,
+} \
   | {
   status: "captured",
   argv: list<string>,
@@ -28,6 +35,7 @@ pub type CommandStageOutput = {status: "unmeasured", reason: string} \
   stdout_path: string,
   stderr_path: string,
   line_count: int,
+  failed_clause?: CommandFailedClause,
 }
 
 /** Common fields guaranteed by normalized command results. */

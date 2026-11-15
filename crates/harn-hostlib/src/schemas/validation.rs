@@ -7,6 +7,9 @@ use crate::error::HostlibError;
 
 use super::{SchemaKind, SCHEMAS};
 
+#[cfg(all(test, unix))]
+mod stage_tests;
+
 struct CompiledSchema {
     body: Result<VmValue, String>,
 }

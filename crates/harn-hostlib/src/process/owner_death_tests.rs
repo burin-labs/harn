@@ -60,6 +60,7 @@ fn guardian_keeps_final_stage_output_on_its_owned_handles() {
                 stdout: stdout.clone(),
                 stderr: stderr.clone(),
                 entered: entered.clone(),
+                clause_diagnostics: None,
                 plan,
             },
         })
@@ -81,7 +82,7 @@ fn guardian_keeps_final_stage_output_on_its_owned_handles() {
         file.read_to_end(&mut bytes).unwrap();
         bytes
     };
-    assert_eq!(read(&entered), b"1");
+    assert_eq!(read(&entered), b"1\n2\n");
     assert!(
         process.stage_output_complete(),
         "the guardian independently confirmed the relays"

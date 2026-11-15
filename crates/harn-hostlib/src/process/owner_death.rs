@@ -349,7 +349,10 @@ pub(crate) fn prepare_guardian(
             stderr,
             entered,
             ..
-        } if stage_command.is_some() => {
+        } if stage_command
+            .as_ref()
+            .is_some_and(|command| command.captures_output()) =>
+        {
             Some(harn_vm::process_sandbox::DescriptorTransfer::shared_files(
                 vec![stdout.clone(), stderr.clone(), entered.clone()],
             ))

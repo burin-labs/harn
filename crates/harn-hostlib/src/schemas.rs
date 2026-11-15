@@ -8,6 +8,8 @@
 //!
 //! Schemas use JSON Schema draft 2020-12.
 
+#[cfg(test)]
+mod bundle;
 mod validation;
 
 pub(crate) use validation::{validate_request_args, validate_response};
