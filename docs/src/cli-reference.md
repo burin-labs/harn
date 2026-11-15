@@ -479,13 +479,23 @@ family options. Clone options `--upload-pack`/`-u`, `--template`,
 receive no login.
 
 A granted clone accepts one plain HTTPS github.com repository URL and an
-optional destination. Git transfers into a private Git directory with an
-empty template. After Git exits successfully, Harn moves that repository into
-the destination's ordinary `.git` directory before reporting success. The
+optional new destination whose parent exists. An existing destination,
+including an empty directory, is refused before the login is exposed and is
+left unchanged. Git transfers the complete checkout into a private directory
+with an empty template. After Git exits successfully, Harn gives that checkout
+an ordinary `.git` directory and publishes it to a new destination before
+reporting success. On the same filesystem, publication uses an exclusive
+directory rename. The
 result contains Git's normal repository config, with no login, credential
 helper or Harn control setting. The credential socket and control config stay
-outside the cloned repository. If the destination's Git marker changes before
-handoff, Harn refuses to replace it.
+outside the cloned repository. A destination created during the transfer is
+preserved and completion is refused. A Git child that fails or is cancelled
+creates no public destination. Across filesystems, Harn exclusively reserves
+the final directory and copies through its open handle. Tracked symlinks are
+copied as links; Git metadata still requires regular files and directories.
+An incomplete cross-filesystem handoff can leave a partial destination even
+when Git exited with code zero. Harn reports the completion failure and retains
+that directory or its replacement; inspect its contents before retrying.
 The same handoff runs for foreground, background and automatically backgrounded
 commands. A failed handoff reports a blocked command even if Git itself exited
 with code zero; it does not publish a successful command receipt.

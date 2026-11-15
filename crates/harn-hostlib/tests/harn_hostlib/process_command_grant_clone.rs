@@ -22,7 +22,7 @@ impl Drop for FinishMock {
     }
 }
 
-fn background_clone_case(changed_marker: bool, cancelled: bool) {
+fn background_clone_case(destination_appeared: bool, cancelled: bool) {
     let _env_guard = super::super::process_tools_e2e::lock_env();
     // Unix-domain socket addresses have a small fixed byte limit. Keep the
     // real credential socket out of the much longer Cargo target temp path.
@@ -92,17 +92,23 @@ fn background_clone_case(changed_marker: bool, cancelled: bool) {
         .exists());
 
     let checkout = fixture.workspace("checkout");
+    assert!(!checkout.exists(), "transfer must remain private");
     let marker = checkout.join(".git");
+    let worktree = repository.with_file_name("worktree");
+    assert_eq!(spec.args.last(), Some(&worktree.display().to_string()));
     std::fs::create_dir_all(&repository).unwrap();
     std::fs::write(repository.join("HEAD"), "ref: refs/heads/main\n").unwrap();
     std::fs::write(repository.join("config"), "[core]\n\tbare = false\n").unwrap();
-    std::fs::create_dir_all(&checkout).unwrap();
-    let marker_contents = if changed_marker {
-        "foreign marker\n".to_string()
-    } else {
-        format!("gitdir: {}\n", repository.display())
-    };
-    std::fs::write(&marker, &marker_contents).unwrap();
+    std::fs::create_dir_all(&worktree).unwrap();
+    std::fs::write(
+        worktree.join(".git"),
+        format!("gitdir: {}\n", repository.display()),
+    )
+    .unwrap();
+    if destination_appeared {
+        std::fs::create_dir(&checkout).unwrap();
+        std::fs::write(&marker, "foreign marker\n").unwrap();
+    }
     assert!(
         result.try_recv().is_err(),
         "live child cannot publish completion"
@@ -127,10 +133,10 @@ fn background_clone_case(changed_marker: bool, cancelled: bool) {
     if cancelled {
         assert_eq!(require_str(&terminal, "status"), "killed");
         assert!(
-            !marker.exists(),
-            "cancelled clone removes only its own marker"
+            !checkout.exists(),
+            "cancelled clone never creates a public destination"
         );
-    } else if changed_marker {
+    } else if destination_appeared {
         assert_eq!(require_str(&terminal, "status"), "blocked");
         assert_eq!(
             require_int(&terminal, "exit_code"),
@@ -139,7 +145,10 @@ fn background_clone_case(changed_marker: bool, cancelled: bool) {
         );
         assert!(require_str(&terminal, "stderr").contains("command completion refused"));
         assert!(!terminal.contains_key("verifier_receipt"));
-        assert_eq!(std::fs::read_to_string(&marker).unwrap(), marker_contents);
+        assert_eq!(
+            std::fs::read_to_string(&marker).unwrap(),
+            "foreign marker\n"
+        );
     } else {
         assert_eq!(require_str(&terminal, "status"), "completed");
         assert_eq!(require_int(&terminal, "exit_code"), 0);
@@ -164,7 +173,7 @@ fn background_clone_hands_off_git_directory_before_publishing_success() {
 }
 
 #[test]
-fn background_clone_changed_marker_refuses_success_without_rewriting_child_exit() {
+fn background_clone_new_destination_refuses_success_without_rewriting_child_exit() {
     background_clone_case(true, false);
 }
 

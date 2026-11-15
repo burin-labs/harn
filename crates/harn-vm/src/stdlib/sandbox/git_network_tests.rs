@@ -976,6 +976,57 @@ fn a_confined_granted_fetch_push_and_clone_land() {
 }
 
 #[test]
+fn granted_clone_rewrites_only_its_destination_and_preserves_existing_entries() {
+    let _granted = Granted::enter();
+    let fixture = Fixture::new();
+    fixture.publish_working_file();
+    assert_succeeded(
+        &fixture
+            .granted(
+                &["clone", "--branch", "main", &fixture.url, "main", "--quiet"],
+                &[],
+            )
+            .expect("new destination receives the login"),
+    );
+    let cloned = fixture.ws().join("main");
+    assert_eq!(
+        std::fs::read(cloned.join("checked-out.txt")).unwrap(),
+        b"nonempty clone payload\n"
+    );
+    assert!(ok(&cloned, &["status", "--porcelain"]).is_empty());
+    assert!(fixture
+        .requests()
+        .iter()
+        .any(|request| request == &format!("Basic {}", base64_login())));
+
+    let existing = fixture.ws().join("existing");
+    std::fs::create_dir(&existing).unwrap();
+    std::fs::write(existing.join("canary"), b"preserve existing directory").unwrap();
+    let args = ["clone", &fixture.url, "existing"].map(str::to_string);
+    assert!(
+        crate::stdlib::process::granted_spawn("git", &args, &fixture.ws(), &BTreeMap::new())
+            .is_err()
+    );
+    assert!(
+        fixture.requests().is_empty(),
+        "existing destination refuses before HTTP or login exposure"
+    );
+    assert_eq!(
+        std::fs::read(existing.join("canary")).unwrap(),
+        b"preserve existing directory"
+    );
+    let empty = fixture.ws().join("empty");
+    std::fs::create_dir(&empty).unwrap();
+    let args = ["clone", &fixture.url, "empty"].map(str::to_string);
+    assert!(
+        crate::stdlib::process::granted_spawn("git", &args, &fixture.ws(), &BTreeMap::new())
+            .is_err()
+    );
+    assert_eq!(std::fs::read_dir(empty).unwrap().count(), 0);
+    assert!(fixture.requests().is_empty());
+}
+
+#[test]
 fn granted_clone_ignores_hostile_templates_helpers_proxy_and_tracing() {
     let _granted = Granted::enter();
     let fixture = Fixture::new();

@@ -35,10 +35,10 @@
 //!   recursion, automatic gc and prompts are off.
 //! - Only macOS grants it: a same-user process's access to the granted git's
 //!   memory is not yet measured on Linux, and Windows has no confinement.
-//! - A clone transfers into a separate private Git directory with an empty
-//!   template. After the child is reaped, only that directory becomes the
-//!   destination's ordinary `.git`; controller config and the login socket
-//!   remain private.
+//! - A clone transfers its complete checkout into the private grant scope with
+//!   an empty template. After reap, its Git directory becomes ordinary `.git`
+//!   inside that private checkout, then an exclusive rename publishes a new
+//!   destination. Controller config and the login socket remain private.
 //! - Only `clone`, `fetch`, `push` and `ls-remote` with known options are granted.
 //!   Other subcommands, options naming programs or writing config, and remotes
 //!   that are not copied run without the login.
@@ -114,6 +114,7 @@ struct Invocation<'a> {
     /// A single-repository fetch's refspecs.
     refspecs: Vec<&'a str>,
     destination: Option<&'a str>,
+    destination_index: Option<usize>,
 }
 
 /// Flags each subcommand may take with the login: none runs a program, names
@@ -219,12 +220,12 @@ fn parse(args: &[String]) -> Option<Invocation<'_>> {
     };
     let is_flag = |name: &str| COMMON_FLAGS.contains(&name) || flags.contains(&name);
     let mut positionals = Vec::new();
-    let mut words = rest.iter();
+    let mut words = rest.iter().enumerate();
     let mut options_done = false;
     let (mut all, mut multiple) = (false, false);
-    while let Some(word) = words.next() {
+    while let Some((index, word)) = words.next() {
         if options_done || !word.starts_with('-') || word == "-" {
-            positionals.push(word.as_str());
+            positionals.push((index + 1, word.as_str()));
             continue;
         }
         if word == "--" {
@@ -263,6 +264,12 @@ fn parse(args: &[String]) -> Option<Invocation<'_>> {
             }
         }
     }
+    let destination_index = if command == Command::Clone {
+        positionals.get(1).map(|(index, _)| *index)
+    } else {
+        None
+    };
+    let positionals: Vec<_> = positionals.into_iter().map(|(_, value)| value).collect();
     let mut refspecs = Vec::new();
     let destination = if command == Command::Clone {
         if !(1..=2).contains(&positionals.len())
@@ -297,6 +304,7 @@ fn parse(args: &[String]) -> Option<Invocation<'_>> {
         all,
         refspecs,
         destination,
+        destination_index,
     })
 }
 

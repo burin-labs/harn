@@ -541,6 +541,72 @@ pub(super) fn mkdirat_name(
 }
 
 #[cfg(unix)]
+pub(super) fn entry_exists_at(
+    parent_fd: libc::c_int,
+    name: impl AsRef<std::ffi::OsStr>,
+) -> io::Result<bool> {
+    Ok(stat_at(parent_fd, name)?.is_some())
+}
+
+#[cfg(unix)]
+pub(super) fn entry_matches_open_fd(
+    parent_fd: libc::c_int,
+    name: impl AsRef<std::ffi::OsStr>,
+    opened_fd: libc::c_int,
+) -> io::Result<bool> {
+    let Some(current) = stat_at(parent_fd, name)? else {
+        return Ok(false);
+    };
+    let mut held = std::mem::MaybeUninit::<libc::stat>::uninit();
+    if unsafe { libc::fstat(opened_fd, held.as_mut_ptr()) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let held = unsafe { held.assume_init() };
+    Ok(current.st_dev == held.st_dev && current.st_ino == held.st_ino)
+}
+
+#[cfg(unix)]
+fn stat_at(
+    parent_fd: libc::c_int,
+    name: impl AsRef<std::ffi::OsStr>,
+) -> io::Result<Option<libc::stat>> {
+    let name = c_name(name)?;
+    let mut metadata = std::mem::MaybeUninit::<libc::stat>::uninit();
+    let result = unsafe {
+        libc::fstatat(
+            parent_fd,
+            name.as_ptr(),
+            metadata.as_mut_ptr(),
+            libc::AT_SYMLINK_NOFOLLOW,
+        )
+    };
+    if result == 0 {
+        return Ok(Some(unsafe { metadata.assume_init() }));
+    }
+    let error = io::Error::last_os_error();
+    if error.kind() == io::ErrorKind::NotFound {
+        Ok(None)
+    } else {
+        Err(error)
+    }
+}
+
+#[cfg(unix)]
+pub(super) fn symlinkat_name(
+    target: impl AsRef<std::ffi::OsStr>,
+    parent_fd: libc::c_int,
+    name: impl AsRef<std::ffi::OsStr>,
+) -> io::Result<()> {
+    let target = c_name(target)?;
+    let name = c_name(name)?;
+    if unsafe { libc::symlinkat(target.as_ptr(), parent_fd, name.as_ptr()) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(unix)]
 pub(super) fn renameat_name(
     old_parent_fd: libc::c_int,
     old_name: &str,
