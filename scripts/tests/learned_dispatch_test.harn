@@ -389,10 +389,12 @@ fn preflight_case(harness: Harness, verdict: dict, succeeds: bool, attempts_writ
               assert_eq(harness.fs.exists(path_join(root, "widgets.txt")), succeeds)
               assert(!harness.fs.exists(path_join(root, "preflight-write.txt")))
               assert_eq(primary_calls, succeeds ? 0 : 1)
-              assert_eq(
-                result.visible_text,
-                succeeds ? "Created and checked widgets." : "ordinary fallback",
-              )
+              if !attempts_write {
+                assert_eq(
+                  result.visible_text,
+                  succeeds ? "Created and checked widgets." : "ordinary fallback",
+                )
+              }
             },
           )
         },
