@@ -53,7 +53,7 @@ fn(call, next) -> result_dict
 //     schema:             dict | nil,    // input parameters JSON schema
 //     description:        string,        // tool description
 //     turn:               {iteration: int, session_id: string},
-//     execution_guard?:   fn() -> bool,
+//     execution_guard?:   fn(dict<string, unknown>) -> bool,
 //   }
 //   next: fn(call) -> result_dict        // bottom of the stack runs
 //                                        // the runtime default dispatch
@@ -68,7 +68,8 @@ Each layer can:
   the runtime fans it out as a `tool_call_audit` AgentEvent.
 
 An `execution_guard` runs after approval and interception, immediately before
-executor dispatch. Only `true` permits execution; missing guards preserve normal
+executor dispatch, receiving the actual arguments after interception. Only
+`true` permits execution; missing guards preserve normal
 dispatch. Use a deterministic guard to recheck preconditions that can change
 while approval waits. A guard can refuse a call but grants no authority.
 

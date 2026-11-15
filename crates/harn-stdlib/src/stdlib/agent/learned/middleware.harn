@@ -483,8 +483,10 @@ fn build_agent_options(
     const guarded = if selected {
       call
         + {
-          execution_guard: { ->
-            current_identity(setup)
+          execution_guard: { arguments: dict<string, unknown> ->
+            const action = prepared
+            return action != nil && arguments == action.arguments
+              && current_identity(setup)
               && fresh_request(harness.agent, identity.turn.session_id, setup.request)
           },
         }

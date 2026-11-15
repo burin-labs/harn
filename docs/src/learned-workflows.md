@@ -53,6 +53,7 @@ share their preparation function; the mutation rechecks it because project
 state may change between calls.
 An execution guard repeats the check after approval and interception, before
 the executor receives the call. A waiting approval can't preserve a stale result.
+Rewritten arguments must still match the values that passed the binding check.
 Unavailable measurements cause fallback. It also requires the original user
 request to remain current, so a continuation or steer can't silently reuse an
 earlier selection.

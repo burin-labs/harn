@@ -1075,7 +1075,7 @@ async fn dispatch_tool_call_live(
             Some((decision.terminal_denial(), Some(decision.receipt)))
         });
     let final_denial = if final_denial.is_none()
-        && !dispatch_guard::permits(&ctx, call.get("execution_guard")).await?
+        && !dispatch_guard::permits(&ctx, call.get("execution_guard"), &tool_args).await?
     {
         Some((denial_results::execution_contract_changed(), None))
     } else {

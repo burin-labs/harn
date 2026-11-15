@@ -5,11 +5,13 @@ use crate::value::{VmError, VmValue};
 pub(super) async fn permits(
     ctx: &crate::vm::AsyncBuiltinCtx,
     guard: Option<&VmValue>,
+    arguments: &serde_json::Value,
 ) -> Result<bool, VmError> {
     match guard {
         None | Some(VmValue::Nil) => Ok(true),
         Some(VmValue::Closure(guard)) => {
-            let value = ctx.child_vm().call_closure_pub(guard, &[]).await?;
+            let arguments = crate::schema::json_to_vm_value(arguments);
+            let value = ctx.child_vm().call_closure_pub(guard, &[arguments]).await?;
             Ok(matches!(value, VmValue::Bool(true)))
         }
         Some(_) => Ok(false),
@@ -35,7 +37,7 @@ mod tests {
         for (source, granted) in [("true", true), ("false", false), ("nil", false)] {
             let guard = compiled_closure(
                 "may_execute",
-                &format!("fn may_execute() {{ return {source} }}"),
+                &format!("fn may_execute(arguments: dict) {{ return {source} }}"),
             );
             let call = VmValue::dict([
                 ("id", VmValue::string(format!("guard-{source}"))),
@@ -65,6 +67,71 @@ mod tests {
                 );
                 assert_ne!(result["rendered_result"], "executed");
             }
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn guard_checks_the_arguments_after_interception() {
+        use super::super::tool_failure_recording_tests::compiled_closure;
+        use crate::orchestration::ToolInterceptionScope;
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+
+        let interception = ToolInterceptionScope::new();
+        for replacement in ["approved", "rewritten"] {
+            let hooks = Arc::new(AtomicUsize::new(0));
+            let observed = hooks.clone();
+            interception.before("guarded", move || {
+                observed.fetch_add(1, Ordering::SeqCst);
+                Some(serde_json::json!({"resource": replacement}))
+            });
+            let handler =
+                compiled_closure("handler", "fn handler(args: dict) { return args.resource }");
+            let guard = compiled_closure(
+                "may_execute",
+                "fn may_execute(arguments: dict) { return arguments.resource == \"approved\" }",
+            );
+            let tools = VmValue::dict([(
+                "tools",
+                VmValue::list(vec![VmValue::dict([
+                    ("name", VmValue::string("guarded")),
+                    ("handler", VmValue::Closure(handler)),
+                ])]),
+            )]);
+            let call = VmValue::dict([
+                ("id", VmValue::string(format!("guard-{replacement}"))),
+                ("name", VmValue::string("guarded")),
+                (
+                    "arguments",
+                    VmValue::dict([("resource", VmValue::string("approved"))]),
+                ),
+                ("execution_guard", VmValue::Closure(guard)),
+            ]);
+            let mut vm = crate::new_vm();
+            crate::register_vm_stdlib(&mut vm);
+            let result = super::super::host_agent_dispatch_tool_call(
+                crate::vm::AsyncBuiltinCtx::for_test(vm),
+                call,
+                Some(&tools),
+                &crate::value::DictMap::new(),
+            )
+            .await
+            .unwrap();
+            let result = crate::llm::helpers::vm_value_to_json(&result);
+            assert_eq!(hooks.load(Ordering::SeqCst), 1, "{result}");
+            assert_eq!(result["ok"], replacement == "approved", "{result}");
+            if replacement == "approved" {
+                assert_eq!(result["rendered_result"], "approved");
+            } else {
+                assert_eq!(
+                    result["denial"]["machine_reason"],
+                    "execution_contract_changed"
+                );
+                assert_ne!(result["rendered_result"], "rewritten");
+            }
+            interception.clear_hooks();
         }
     }
 }
