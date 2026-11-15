@@ -33,7 +33,7 @@ pub fn macos_fixture_overlap_errors(workflow: CiWorkflow?) -> list<string> {
   }
   const install_index = step_index_by_name(steps, "Install rename language-server fixtures")
   const restore_index = step_index_by_name(steps, "Restore macOS workspace warm artifact")
-  const wait_index = step_index_by_name(steps, wait.name ?? "")
+  const wait_index = steps.index_of(wait)
   const budget_index = step_index_by_name(steps, "Measure the build budget")
   const test_index = step_index_by_name(steps, "Run workspace nextest")
   for prerequisite in [
