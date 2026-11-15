@@ -649,7 +649,7 @@ mod declaration_0065 {
 mod declaration_0066 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
-    # [harn_builtin_macros :: harn_builtin_metadata (exposure = "runtime_internal" , effects = [] , sig = "__host_agent_session_replace_messages(session_id: string, messages: list, summary?: any) -> nil" , category = "agent.host" , runtime_only = true)]
+    # [harn_builtin_macros :: harn_builtin_metadata (exposure = "runtime_internal" , effects = [] , sig = "__host_agent_session_replace_messages(session_id: string, messages: list, summary?: any) -> dict" , category = "agent.host" , runtime_only = true)]
     #[doc = " Replace the session's transcript message list (used by Harn-driven auto-compact)."]
     fn host_agent_session_replace_messages_builtin() {}
 }

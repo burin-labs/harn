@@ -48,6 +48,31 @@ use super::{
     COMPACTION_RECEIPT_SCHEMA_VERSION,
 };
 
+/// Commit message-only loop compaction while applying the live reminder policy.
+pub(crate) fn apply_compacted_session_messages(
+    session_id: &str,
+    messages: &[JsonValue],
+    summary: Option<&str>,
+) -> Result<ReminderCompactReport, String> {
+    let reminder_events = crate::agent_sessions::transcript(session_id)
+        .and_then(|transcript| {
+            transcript
+                .as_dict()
+                .map(super::transcript_compactable_events)
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|event| reminder_from_event(event).is_some())
+        .collect();
+    let reminder_report = compact_reminder_events(reminder_events);
+    crate::agent_sessions::replace_messages_with_summary(session_id, messages, summary)?;
+    for event in &reminder_report.preserved_events {
+        crate::agent_sessions::append_event(session_id, event.clone())?;
+    }
+    emit_reminder_lifecycle_records(Some(session_id), &reminder_report);
+    Ok(reminder_report)
+}
+
 /// Identifies the call-site that initiated compaction. The string form is
 /// exposed in hook payloads and `AgentEvent::TranscriptCompacted` so
 /// downstream consumers can route user-initiated compactions differently from
@@ -290,6 +315,20 @@ pub struct ReminderCompactReport {
     pub decremented_count: usize,
     /// Count of reminders that carried `preserve_on_compact = true`.
     pub preserved_count: usize,
+}
+
+impl ReminderCompactReport {
+    pub fn count_fields(&self) -> serde_json::Map<String, JsonValue> {
+        serde_json::Map::from_iter([
+            (
+                "reminders_decremented".into(),
+                self.decremented_count.into(),
+            ),
+            ("reminders_expired".into(), self.expired.len().into()),
+            ("reminders_deduped".into(), self.deduped.len().into()),
+            ("reminders_preserved".into(), self.preserved_count.into()),
+        ])
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -627,22 +666,7 @@ fn build_hook_payload(
             if let Some(id) = snapshot_asset_id {
                 map.insert("snapshot_asset_id".to_string(), serde_json::json!(id));
             }
-            map.insert(
-                "reminders_decremented".to_string(),
-                serde_json::json!(reminder_report.decremented_count),
-            );
-            map.insert(
-                "reminders_expired".to_string(),
-                serde_json::json!(reminder_report.expired.len()),
-            );
-            map.insert(
-                "reminders_deduped".to_string(),
-                serde_json::json!(reminder_report.deduped.len()),
-            );
-            map.insert(
-                "reminders_preserved".to_string(),
-                serde_json::json!(reminder_report.preserved_count),
-            );
+            map.extend(reminder_report.count_fields());
         }
     }
     payload
@@ -695,12 +719,9 @@ fn build_event_metadata(
         "estimated_tokens_after": metrics.estimated_tokens_after,
         "new_summary_len": summary.len(),
         "snapshot_asset_id": metrics.snapshot_asset_id.as_deref(),
-        "reminders_decremented": reminder_report.decremented_count,
-        "reminders_expired": reminder_report.expired.len(),
-        "reminders_deduped": reminder_report.deduped.len(),
-        "reminders_preserved": reminder_report.preserved_count,
     });
     if let Some(map) = metadata.as_object_mut() {
+        map.extend(reminder_report.count_fields());
         for (key, value) in compaction_policy_metadata_fields(&config.policy) {
             map.insert(key.to_string(), value);
         }

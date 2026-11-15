@@ -1,0 +1,87 @@
+import { agent_loop } from "std/agent/loop"
+import { agent_session_inject_reminder, agent_session_revoke_reminder } from "std/agent/state"
+import { llm_text, with_llm_script } from "std/testing"
+
+fn assert_live_reminders(agent: HarnessAgent, sid: string) -> nil {
+  const active = transcript_events_by_kind(agent.snapshot(sid), "system_reminder").map(
+    { event -> event.reminder.dedupe_key },
+  )
+    .to_list()
+  assert_eq(
+    len(active.filter({ key -> key == "durable" })),
+    1,
+    "the durable reminder must survive exactly once",
+  )
+  for retired in ["foldable", "expired", "revoked"] {
+    assert(!active.contains(retired), "${retired} must not be resurrected by compaction")
+  }
+  return nil
+}
+
+pipeline test_loop_compaction_preserves_only_live_durable_reminders(harness: Harness) {
+  const sid = harness.agent.open("loop-reminder-compact-${harness.random.uuid()}")
+  harness.agent.with_run(sid, {session_id: sid}, { -> nil })
+  assert_eq(
+    len(transcript_events_by_kind(harness.agent.snapshot(sid), "agent_run_terminal")),
+    1,
+    "the fixture must include an old terminal that compaction must not replay",
+  )
+  for (name, options) in iter(
+    {
+      durable: {preserve_on_compact: true},
+      foldable: {preserve_on_compact: false},
+      expired: {preserve_on_compact: true, ttl_turns: 1},
+    },
+  ) {
+    agent_session_inject_reminder(harness.agent, sid, {body: name, dedupe_key: name} + options)
+  }
+  const revoked = agent_session_inject_reminder(
+    harness.agent,
+    sid,
+    {body: "revoked", dedupe_key: "revoked", preserve_on_compact: true},
+  )
+  agent_session_revoke_reminder(harness.agent, sid, revoked)
+  let archived = 0
+  with_llm_script(
+    harness.llm,
+    [llm_text("Working. " + "x" * 4000), llm_text("Finished. ##DONE##")],
+    { ->
+      harness.agent.with_run(
+        sid,
+        {session_id: sid},
+        { ->
+          agent_loop(
+            harness,
+            "Inspect this task.",
+            nil,
+            {
+              provider: "mock",
+              session_id: sid,
+              loop_until_done: true,
+              max_iterations: 3,
+              auto_compact: {keep_first: 0},
+              compact_threshold: 1,
+              compact_keep_last: 1,
+              compact_strategy: "custom",
+              compact_callback: { messages ->
+                archived = archived + len(messages)
+                return {summary: "Earlier observations were archived."}
+              },
+            },
+          )
+        },
+      )
+      assert(archived > 0, "the actual loop must archive messages")
+      assert_live_reminders(harness.agent, sid)
+      const compactions = transcript_events_by_kind(harness.agent.snapshot(sid), "compaction")
+      assert(len(compactions) > 0, "the canonical loop must publish an application record")
+      assert(
+        compactions.all({ event -> event.metadata.reminders_preserved >= 1 }),
+        "the application record must report the durable reminder it actually preserved",
+      )
+      assert_eq(compactions[0].metadata.reminders_preserved, 1)
+      assert_eq(len(harness.llm.mock_calls()), 2, "compaction must reach the next served request")
+    },
+  )
+  harness.agent.close(sid)
+}
