@@ -28,7 +28,7 @@
     "report": "Report raw assessment selection and incompatibility counts, binding/preflight fallback reasons, commitment coverage, committed execution failures, settled provider cost, end-to-end latency, and the owner's risk verdict. Certification is conditional on commitment, not a claim that the selector is perfect."
   },
   "execution": {
-    "max_concurrent": 2,
+    "max_concurrent": 4,
     "max_provider_spend_usd_session": 4.0,
     "workspace": "One fresh isolated application copy per trial. Source workspace remains unchanged.",
     "grader": "Reuse the calibrated v1 grader on the application's actual dispatch path for supported committed outputs. Wrongly committed negatives are errors regardless of their output. Preserve the application's originals and require exactly the intended source additions.",
