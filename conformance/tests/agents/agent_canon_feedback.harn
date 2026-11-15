@@ -163,6 +163,21 @@ pipeline main(harness: Harness, task: unknown) {
         ),
       )
       const slice = canon_slice_from_files([{path: "src/main.foo", text: "const bad = true;"}])
+      const slice_packs = canon_resolve_packs(
+        harness.env,
+        harness.fs,
+        {canon_root: dir, slice: {files: slice.files, extension: true}},
+      )
+      require slice_packs.map({ pack -> pack.id }) == ["zig"],
+        "slice containers preserve inferred pack selection"
+      for value in [nil, false, 7, "legacy", []] {
+        require canon_resolve_packs(harness.env, harness.fs, {canon_root: dir, slice: value}) == [],
+          "non-record slice containers preserve empty file fallback"
+      }
+      const invalid_slice = try {
+        canon_resolve_packs(harness.env, harness.fs, {canon_root: dir, slice: {files: 7}})
+      }
+      require is_err(invalid_slice), "a malformed files field must still refuse"
       const result = canon_evaluate_slice(harness, slice, {canon_root: dir, files: slice.files})
       harness.stdio.println(result.status)
       harness.stdio.println(to_string(result.packs[0].report.records[0].name == "no_bad"))
@@ -314,6 +329,44 @@ pipeline main(harness: Harness, task: unknown) {
       harness.stdio.println(to_string(reminder_events[0].reminder.tags[0] == "harn-canon"))
       harness.stdio.println(to_string(contains(reminder_events[0].reminder.body, "no_bad")))
       harness.agent.close(reminder_session_id)
+      const custom_session_id = harness.agent.open(
+        "canon-custom-reminder-" + harness.random.uuid_v7(),
+      )
+      const custom_options = {
+        tags: [],
+        dedupe_key: "canon-custom",
+        ttl_turns: 2,
+        preserve_on_compact: false,
+        propagate: "none",
+      }
+      canon_inject_feedback(
+        harness,
+        custom_session_id,
+        slice,
+        {canon_root: dir, files: slice.files, inject: "reminder", reminder: custom_options},
+      )
+      const custom_events = transcript_events_by_kind(
+        harness.agent.snapshot(custom_session_id),
+        "system_reminder",
+      )
+      require len(custom_events) == 1, "custom reminder options must reach session delivery"
+      require custom_events[0].reminder.tags == [], "present empty tags must not use the default"
+      require custom_events[0].reminder.dedupe_key == "canon-custom", "custom dedupe key survives"
+      require custom_events[0].reminder.ttl_turns == 2, "custom reminder lifetime survives"
+      require !custom_events[0].reminder.preserve_on_compact,
+        "present false must not use the default"
+      require custom_events[0].reminder.propagate == "none", "additional host-owned options survive"
+      const invalid_reminder = try {
+        canon_inject_feedback(
+          harness,
+          custom_session_id,
+          slice,
+          {canon_root: dir, files: slice.files, inject: "reminder", reminder: {ttl_turns: 0}},
+        )
+      }
+      require is_err(invalid_reminder),
+        "invalid reminder values must still reach the host's refusal"
+      harness.agent.close(custom_session_id)
       harness.agent.close(path_session_id)
       harness.agent.close(session_id)
     },
