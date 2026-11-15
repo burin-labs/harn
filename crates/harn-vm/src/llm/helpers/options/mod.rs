@@ -15,6 +15,7 @@ mod defaults;
 mod directive_placement;
 mod extract;
 mod generation;
+mod goal_context;
 mod governance;
 mod json;
 mod model_resolution;

@@ -387,8 +387,8 @@ use runtime_store::{
 pub(crate) use transcript_lifecycle::settle_assistant_publication;
 pub use transcript_lifecycle::*;
 pub(crate) use transcript_lifecycle::{
-    append_event_to_state, canonical_prompt_snapshot, replay_transcript_change,
-    replay_transcript_snapshot,
+    append_event_to_state, canonical_directive_envelope_matches, canonical_prompt_snapshot,
+    goal_envelope_reminders, replay_transcript_change, replay_transcript_snapshot,
 };
 pub use types::*;
 pub use workspace_roots::{PreparedWorkspaceRoots, WorkspaceRootsError};

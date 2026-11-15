@@ -10,6 +10,15 @@ pub type GoalSpec = {
   retired_criteria?: list<GoalCriterion>,
 }
 
+/** Durable goal rendering data; context lifecycle adds no managed-goal policy. */
+pub type GoalPinProjection = {
+  spec: GoalSpec,
+  lifecycle: "managed" | "context",
+  control_id?: string,
+  max_body?: int,
+  objective_covered_body: string,
+}
+
 fn __goal_pin_criteria(criteria: list<GoalCriterion>) -> list<GoalCriterion> {
   let out = []
   let index = 0
@@ -64,8 +73,11 @@ pub fn goal_under_obligations(g: GoalSpec, obligations: any = nil) -> GoalSpec {
  * @errors: []
  * @api_stability: internal
  */
-pub fn __render_goal_text(g: GoalSpec) -> string {
-  let lines = ["## Goal", "Objective: " + g.objective]
+pub fn __render_goal_text(g: GoalSpec, objective_covered: bool = false) -> string {
+  let lines = ["## Goal"]
+  if !objective_covered {
+    lines.push("Objective: " + g.objective)
+  }
   if len(g.success_criteria ?? []) > 0 {
     lines.push("Success criteria:")
     for crit in g.success_criteria {

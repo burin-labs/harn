@@ -846,12 +846,29 @@ payload is validated as a reminder spec; non-standard host metadata belongs unde
 `_meta`. Malformed reminder payloads are rejected with `HARN-RMD-002`; unknown
 top-level reminder options are rejected with `HARN-RMD-001`.
 
-`pin_reminder` can include a typed `goal_pin` projection with `spec` and
+`pin_reminder` can include a typed `goal_pin` projection with `spec`, required
+`lifecycle` (`managed` or `context`), `objective_covered_body`, and optional
 `control_id`. The spec carries the objective, active and retired criteria
 (`id` and `description`), constraints, and budget. Machine-check callbacks stay
-with the caller. Harn updates this projection when a recorded retarget lands,
+with the caller. Harn updates managed projections when a recorded retarget lands,
 so the pin preserves the current goal across compaction. An optional `max_body`
 preserves the visible-body limit from `pin_reminder` when Harn refreshes the pin.
+
+A `context` projection only supplies rendering metadata. It keeps the caller's
+wording, authority and bound; managed retarget and completion policy do not
+consume it. `pin_reminder` selects this lifecycle through
+`meta.goal_lifecycle: "context"`; ordinary goal pins select `managed`.
+
+At final request assembly, an objective already present verbatim in an actual
+selected user message may be omitted from its matching canonical goal envelope.
+Known tool results and harness directives do not count as user requests.
+Filtering, rewriting or truncating the user text restores the full objective.
+Harn checks role, full content and ordered reminder IDs against the immutable
+stored message, then replaces only a unique complete goal block produced by the
+canonical renderer. Unrelated reminder expiry cannot alter that served prefix.
+Projector-authored text stays unchanged. Caller-supplied origins, anchors and
+byte ranges grant no authority.
+Full text remains durable; distinct criteria and constraints remain rendered.
 
 Hosts that need an operator-facing queue can call
 `session/pending_prompts` with `{ "sessionId": "..." }`. The response is

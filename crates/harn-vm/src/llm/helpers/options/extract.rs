@@ -223,7 +223,7 @@ pub fn extract_llm_options(args: &[VmValue]) -> Result<crate::llm::api::LlmCallO
     let directive_session_id = directive_session_id(options.as_ref())?;
     let pending_reminders = pending_reminders_from_session(directive_session_id.as_deref());
     let rendered_reminders = render_pending_reminders(&caps, &pending_reminders);
-    let reminder_lifecycle = rendered_reminder_lifecycle(
+    let mut reminder_lifecycle = rendered_reminder_lifecycle(
         session_id.as_deref(),
         opt_int(&options, "_iteration").unwrap_or(0),
         &pending_reminders,
@@ -446,6 +446,16 @@ pub fn extract_llm_options(args: &[VmValue]) -> Result<crate::llm::api::LlmCallO
     } else {
         apply_rendered_reminder_messages(messages, &rendered_reminders, &directive_nonce)
     };
+    let goal_rendered_bytes = super::goal_context::project_goal_context(
+        &mut messages,
+        directive_session_id.as_deref(),
+        &pending_reminders,
+    );
+    for reminder in &mut reminder_lifecycle {
+        if let Some(bytes) = goal_rendered_bytes.get(&reminder.reminder_id) {
+            reminder.rendered_bytes = *bytes;
+        }
+    }
     let message_lineage = crate::llm::message_lineage::take_from_messages(&mut messages);
     super::reminders::strip_internal_message_metadata(&mut messages);
     super::reminders::elide_envelope_contract_stated_in_system(
