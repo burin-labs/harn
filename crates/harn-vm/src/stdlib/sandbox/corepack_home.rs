@@ -31,8 +31,13 @@ fn resolve(lookup: impl Fn(&str) -> Option<String>, windows: bool) -> Option<Ins
         let home = lookup("HOME");
         let userprofile = lookup("USERPROFILE");
         let home = crate::user_dirs::home_dir_from(
-            home.as_deref().map(std::ffi::OsStr::new),
-            userprofile.as_deref().map(std::ffi::OsStr::new),
+            home.as_deref()
+                .filter(|_| !windows)
+                .map(std::ffi::OsStr::new),
+            userprofile
+                .as_deref()
+                .filter(|_| windows)
+                .map(std::ffi::OsStr::new),
         );
         let home = home.filter(|path| path.is_absolute())?;
         (
@@ -119,7 +124,8 @@ mod tests {
             (true, "AppData/Local/node/corepack"),
         ] {
             let home_value = home.to_str().unwrap();
-            let root = resolved(&[("HOME", home_value)], windows).unwrap();
+            let key = if windows { "USERPROFILE" } else { "HOME" };
+            let root = resolved(&[(key, home_value)], windows).unwrap();
             assert_eq!(PathBuf::from(root.path), home.join(suffix));
             assert_eq!(root.source, Source::Home);
         }
@@ -134,5 +140,25 @@ mod tests {
             PathBuf::from(profile.path),
             home.join("AppData/Local/node/corepack")
         );
+    }
+
+    #[test]
+    fn platform_home_selection_does_not_cross_into_a_different_installation() {
+        let unix_home = std::env::temp_dir().join("posix-home");
+        let windows_home = std::env::temp_dir().join("windows-profile");
+        let values = [
+            ("HOME", unix_home.to_str().unwrap()),
+            ("USERPROFILE", windows_home.to_str().unwrap()),
+        ];
+        assert_eq!(
+            PathBuf::from(resolved(&values, false).unwrap().path),
+            unix_home.join(".cache/node/corepack")
+        );
+        assert_eq!(
+            PathBuf::from(resolved(&values, true).unwrap().path),
+            windows_home.join("AppData/Local/node/corepack")
+        );
+        assert_eq!(resolved(&values[..1], true), None);
+        assert_eq!(resolved(&values[1..], false), None);
     }
 }
