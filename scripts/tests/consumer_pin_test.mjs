@@ -89,11 +89,13 @@ test('an unreadable default repository cannot produce a pin',t=>{
 
 test('candidate attempts share one captured pin and have no automatic baseline exemption jobs',()=>{
   const workflow=load(fs.readFileSync(path.join(root,'.github/workflows/ci.yml'),'utf8'));
+  const budgets=JSON.parse(fs.readFileSync(path.join(root,'.github/ci-latency.json'),'utf8')).required.jobs;
   for(const name of ['consumer-check','consumer-check-retry']) {
     assert.equal(workflow.jobs[name].with.consumer_revision,'${{ needs.consumer-pin.outputs.sha }}');
   }
   for(const name of ['consumer-base-cli','consumer-base-check','consumer-base-check-retry']) {
     assert.equal(workflow.jobs[name],undefined);
+    assert.equal(budgets[name],undefined);
     assert.ok(!workflow.jobs['ci-status'].needs.includes(name));
   }
   const env=workflow.jobs['ci-status'].steps.find(step=>step.name==='Check job results')?.env
