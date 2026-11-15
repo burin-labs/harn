@@ -16,11 +16,11 @@ fn recovery_session(root: &std::path::Path) -> String {
 }
 
 #[test]
-#[ignore = "subprocess fixture invoked by the restart recovery controls"]
-fn exits_after_first_move_publication() {
-    let root = std::path::PathBuf::from(
-        std::env::var_os("HARN_EXT_FILE_BATCH_CRASH_ROOT").expect("fixture root"),
-    );
+fn file_group_crash_fixture() {
+    let Some(root) = std::env::var_os("HARN_EXT_FILE_BATCH_CRASH_ROOT") else {
+        return;
+    };
+    let root = std::path::PathBuf::from(root);
     let session = recovery_session(&root);
     let _locks = scope_conditional_replace_lock_root(root.join("locks"));
     let creation_first = std::env::var("HARN_EXT_FILE_BATCH_CREATE_FIRST").unwrap() == "1";
@@ -70,8 +70,7 @@ fn interrupted_move(creation_first: bool, staged: bool) -> tempfile::TempDir {
     let child = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
-            "fs::batch::tests::exits_after_first_move_publication",
-            "--ignored",
+            "fs::batch::tests::file_group_crash_fixture",
             "--nocapture",
         ])
         .env("HARN_EXT_FILE_BATCH_CRASH_ROOT", &root)

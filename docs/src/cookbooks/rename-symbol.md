@@ -86,9 +86,11 @@ its tool call's `tool_call_update` as `_meta.harn.data.progress`: `phase` is
 server), `elapsed_ms` and `cancellable`, repeated every second during a wait.
 
 When the host runs with a staged-fs session (`harness.fs.set_mode`), every
-touched file lands in the overlay; one `harness.fs.commit_staged` flips them
-atomically. Without a session, the host still buffers the full plan in memory
-and only writes after pre-flight passes, so a clean run is all-or-nothing.
+touched file lands in the overlay. `harness.fs.commit_staged` checks and applies
+the complete group, including both paths of a filename move. Files publish
+individually; the recorded transaction restores their original images on failure
+and retains recovery data after an interrupted publication. Without a session,
+the host checks the complete plan before applying the same recoverable group.
 
 Supported languages (first batch): Harn, Rust, TypeScript/TSX, JavaScript/JSX,
 Python, Swift, Go, and Java on Unix.
