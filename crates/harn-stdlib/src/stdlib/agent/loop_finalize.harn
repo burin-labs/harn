@@ -1,3 +1,4 @@
+import { tool_batch_retire } from "std/agent/loop_batch_proposals"
 import "std/agent/loop_resource_dispatch"
 import "std/agent/loop_result_status"
 import "std/agent/loop_support"
@@ -219,6 +220,7 @@ pub fn __agent_loop_finalize(harness: Harness, message: any, session: dict, stat
   if discovery_unavailable {
     final_status = "completion_unverified"
   }
+  tool_batch_retire(harness.agent, session.session_id, opts)
   const result = agent_session_finalize(
     harness.agent,
     session.session_id,

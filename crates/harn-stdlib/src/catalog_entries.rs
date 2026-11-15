@@ -358,6 +358,8 @@ catalog_entries! {
     "agent/loop_audit_flushes" => "stdlib/agent/loop_audit_flushes.harn",
     "agent/loop_tool_calls" => "stdlib/agent/loop_tool_calls.harn",
     "agent/loop_batch_continuation" => "stdlib/agent/loop_batch_continuation.harn",
+    "agent/loop_batch_classification" => "stdlib/agent/loop_batch_classification.harn",
+    "agent/loop_batch_proposals" => "stdlib/agent/loop_batch_proposals.harn",
     "agent/loop_resource_dispatch" => "stdlib/agent/loop_resource_dispatch.harn",
     "agent/loop_dispatch_options" => "stdlib/agent/loop_dispatch_options.harn",
     "agent/loop_turn_options" => "stdlib/agent/loop_turn_options.harn",

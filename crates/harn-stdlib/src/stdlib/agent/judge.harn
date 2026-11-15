@@ -74,6 +74,7 @@ pub import {
   __judge_gaps_unattributed_count,
   __judge_ungrounded_gap_quotes,
 } from "std/agent/judge_verdict"
+import { tool_batch_pending_count } from "std/agent/loop_batch_proposals"
 import {
   CompletionObligations,
   agent_completion_obligations,
@@ -253,9 +254,7 @@ fn __judge_payload(
   const evidence_packet = completion_requirement_evidence_packet(projected.packet, text)
   const evidence_serialized = json_stringify(evidence_packet)
   const evidence_stats = projected.stats + {serialized_chars: len(evidence_serialized)}
-  const pending_tool_batch_effect_count = len(
-    opts?._tool_batch_dependency_state?.deferred_signatures ?? [],
-  )
+  const pending_tool_batch_effect_count = tool_batch_pending_count(opts)
   // Read from the session's control records, not from `messages`: an accepted
   // stop delivers no user message, so the transcript in hand cannot show one.
   const obligations = agent_completion_obligations(agent, session.session_id, session?.task ?? "")
