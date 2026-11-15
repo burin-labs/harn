@@ -10,9 +10,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Every directory a workspace file or a confined child could occupy, made
-/// canonical: workspace roots, sandbox write roots, toolchain and package
-/// caches, the workspace-local temp dir, the process and spawn cwd, and the
-/// host temp dir.
+/// canonical: each active policy's writable roots, the package cache, the
+/// process and spawn cwd, and the host temp dir.
 pub(crate) fn untrusted_roots(spawn_cwd: &Path) -> Vec<PathBuf> {
     let mut roots = vec![
         spawn_cwd.to_path_buf(),
@@ -26,17 +25,7 @@ pub(crate) fn untrusted_roots(spawn_cwd: &Path) -> Vec<PathBuf> {
         .into_iter()
         .chain(super::super::active_sandbox_policy().map(|(policy, _)| policy));
     for policy in policies {
-        roots.extend(super::super::process_sandbox_roots(&policy));
-        #[cfg(any(
-            target_os = "linux",
-            target_os = "macos",
-            target_os = "openbsd",
-            target_os = "windows"
-        ))]
-        roots.extend(super::super::process_sandbox_policy_write_roots(&policy));
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
-        roots.extend(super::super::process_sandbox_developer_toolchain_cache_roots(&policy));
-        roots.extend(super::workspace_local_tmpdir(&policy));
+        roots.extend(super::super::process_sandbox_writable_roots(&policy));
     }
     let mut roots: Vec<PathBuf> = roots
         .into_iter()
@@ -197,8 +186,19 @@ thread_local! {
 /// Harn home nor a user home has none: its fallback is the temp dir, where
 /// [`create_spawn_dir`] always refuses, so no credential can land there, and
 /// denying it would refuse every hardened spawn whose workspace holds that dir.
+///
+/// The path is canonical, like every per-spawn directory [`create_spawn_dir`]
+/// makes: the sandbox matches resolved paths, so a Harn home reached through a
+/// link would otherwise leave the denial naming a path nothing resolves to.
 pub(crate) fn denied_read_root() -> Option<PathBuf> {
-    crate::mcp_oauth::configured_harn_home_dir().map(|home| home.join("grant-spawns"))
+    crate::mcp_oauth::configured_harn_home_dir().map(|home| canonical_spawns_root(&home))
+}
+
+/// `home`'s per-spawn root with every link resolved, before or after the root
+/// or the home itself exists: the same normalization a backend renders a root
+/// from, which resolves a missing path through its deepest existing ancestor.
+fn canonical_spawns_root(home: &Path) -> PathBuf {
+    super::super::normalize_for_policy(&home.join("grant-spawns"))
 }
 
 /// The one per-spawn directory the spawn this thread is launching may read:
@@ -456,5 +456,43 @@ mod tests {
         std::os::unix::fs::symlink(&planted, linked.join("tool")).unwrap();
         let entries = trusted_path_entries(linked.to_str().unwrap(), &untrusted);
         assert_eq!(trusted_program("tool", &entries, &untrusted), None);
+    }
+
+    /// A Harn home reached through a link: the denial must name the resolved
+    /// root the per-spawn directories live under, or Seatbelt never matches it
+    /// and every confined sibling may read them and ask their sockets.
+    #[test]
+    fn a_linked_harn_home_denies_the_resolved_spawn_root() {
+        let base = tempfile::tempdir().unwrap();
+        let real = base.path().join("real-home");
+        std::fs::create_dir(&real).unwrap();
+        let linked = base.path().join("linked-home");
+        std::os::unix::fs::symlink(&real, &linked).unwrap();
+        let resolved = std::fs::canonicalize(&real).unwrap().join("grant-spawns");
+        assert_ne!(linked.join("grant-spawns"), resolved);
+        // Before the root exists, and after a spawn directory is made in it.
+        assert_eq!(canonical_spawns_root(&linked), resolved);
+        std::fs::create_dir(linked.join("grant-spawns")).unwrap();
+        let leaf = std::fs::canonicalize(linked.join("grant-spawns"))
+            .unwrap()
+            .join("1-0-0");
+        std::fs::create_dir(&leaf).unwrap();
+        assert_eq!(canonical_spawns_root(&linked), resolved);
+        assert!(leaf.starts_with(canonical_spawns_root(&linked)));
+    }
+
+    /// A Harn home not made yet, under a linked parent: the denial must still
+    /// name the resolved root the home will be created at.
+    #[test]
+    fn a_missing_harn_home_under_a_link_denies_the_resolved_spawn_root() {
+        let base = tempfile::tempdir().unwrap();
+        let real = base.path().join("real-parent");
+        std::fs::create_dir(&real).unwrap();
+        let linked = base.path().join("linked-parent");
+        std::os::unix::fs::symlink(&real, &linked).unwrap();
+        let resolved = std::fs::canonicalize(&real)
+            .unwrap()
+            .join("home/grant-spawns");
+        assert_eq!(canonical_spawns_root(&linked.join("home")), resolved);
     }
 }

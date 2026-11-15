@@ -584,6 +584,7 @@ pub type AgentContextSpec = {
 /** Observability extensions that do not alter agent semantics. */
 pub type AgentObservabilitySpec = {
   llm_transcript_dir?: string,
+  llm_transcript_raw?: bool,
   on_delta?: any,
   /**
    * Ask the agent to declare a plain-language heading for each run of tool

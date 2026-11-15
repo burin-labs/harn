@@ -132,12 +132,33 @@ pub fn normalize_workspace_path(path: &str, workspace_root: Option<&Path>) -> Op
 /// workspace directory. Unlike [`normalize_workspace_path`], this follows
 /// symlinks and never applies leading-slash root-drift recovery.
 pub fn canonicalize_existing_workspace_path(path: &Path, workspace_root: &Path) -> Option<String> {
+    canonicalize_existing_workspace_path_checked(path, workspace_root)
+        .ok()
+        .flatten()
+        .map(|relative| {
+            let path = to_posix(&relative.to_string_lossy());
+            if path.is_empty() {
+                ".".to_string()
+            } else {
+                path
+            }
+        })
+}
+
+/// Resolve an existing contained path to its native relative path.
+///
+/// `Ok(None)` means the path is empty, outside the workspace, or the workspace
+/// is not a directory. Missing or unreadable paths return their I/O error.
+pub fn canonicalize_existing_workspace_path_checked(
+    path: &Path,
+    workspace_root: &Path,
+) -> std::io::Result<Option<PathBuf>> {
     if path.as_os_str().is_empty() {
-        return None;
+        return Ok(None);
     }
-    let canonical_root = std::fs::canonicalize(workspace_root).ok()?;
-    if !canonical_root.is_dir() {
-        return None;
+    let canonical_root = std::fs::canonicalize(workspace_root)?;
+    if !std::fs::metadata(&canonical_root)?.is_dir() {
+        return Ok(None);
     }
 
     let target = if path.is_absolute() {
@@ -145,14 +166,11 @@ pub fn canonicalize_existing_workspace_path(path: &Path, workspace_root: &Path) 
     } else {
         canonical_root.join(path)
     };
-    let canonical_target = std::fs::canonicalize(target).ok()?;
-    let relative = canonical_target.strip_prefix(&canonical_root).ok()?;
-    let workspace_path = to_posix(&relative.to_string_lossy());
-    Some(if workspace_path.is_empty() {
-        ".".to_string()
-    } else {
-        workspace_path
-    })
+    let canonical_target = std::fs::canonicalize(target)?;
+    let Ok(relative) = canonical_target.strip_prefix(&canonical_root) else {
+        return Ok(None);
+    };
+    Ok(Some(relative.to_path_buf()))
 }
 
 pub fn classify_workspace_path(path: &str, workspace_root: Option<&Path>) -> WorkspacePathInfo {
@@ -780,6 +798,40 @@ mod tests {
         assert_eq!(
             normalize_workspace_path("/packages/app", Some(dir.path())).as_deref(),
             Some("packages/app")
+        );
+    }
+
+    #[test]
+    fn checked_existing_path_distinguishes_containment_from_unavailable() {
+        let root = tempfile::tempdir().unwrap();
+        let inside = root.path().join("inside.harn");
+        std::fs::write(&inside, "inside").unwrap();
+        assert_eq!(
+            canonicalize_existing_workspace_path_checked(&inside, root.path()).unwrap(),
+            Some(PathBuf::from("inside.harn"))
+        );
+        let outside = tempfile::tempdir().unwrap();
+        let file = outside.path().join("outside.harn");
+        std::fs::write(&file, "outside").unwrap();
+        assert_eq!(
+            canonicalize_existing_workspace_path_checked(&file, root.path()).unwrap(),
+            None
+        );
+        let missing =
+            canonicalize_existing_workspace_path_checked(Path::new("missing.harn"), root.path())
+                .unwrap_err();
+        assert_eq!(missing.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checked_existing_path_preserves_native_filename_components() {
+        let root = tempfile::tempdir().unwrap();
+        let relative = PathBuf::from("inside\\..\\capture.json");
+        std::fs::write(root.path().join(&relative), "captured").unwrap();
+        assert_eq!(
+            canonicalize_existing_workspace_path_checked(&relative, root.path()).unwrap(),
+            Some(relative)
         );
     }
 

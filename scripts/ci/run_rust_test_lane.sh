@@ -89,13 +89,23 @@ print_memory() {
 
 # shellcheck disable=SC2329 # invoked by traps below
 report_on_signal() {
-  local signal="$1"
-  report_resources "Rust test resources after ${signal}"
-  exit 143
+  local signal="$1" status=143
+  if [[ "$signal" == INT ]]; then
+    status=130
+  fi
+  trap - TERM INT
+  if [[ -n "$child_pid" ]]; then
+    # The owned test-env Bash child cannot trap an inherited ignored INT.
+    kill -s TERM "$child_pid" 2>/dev/null || true
+    wait "$child_pid" 2>/dev/null || true
+  fi
+  report_resources "Rust test resources after SIG${signal}"
+  exit "$status"
 }
 
-trap 'report_on_signal SIGTERM' TERM
-trap 'report_on_signal SIGINT' INT
+child_pid=""
+trap 'report_on_signal TERM' TERM
+trap 'report_on_signal INT' INT
 
 report_resources "Rust test resources before"
 memory_mb=unmeasured
@@ -105,10 +115,65 @@ if [[ -n "${RUST_TEST_JOB_LIMIT_MINUTES:-}" ]]; then
 fi
 started=$SECONDS
 status=0
-if [[ -n "${RUST_TEST_STDOUT_PATH:-}" ]]; then
-  bash "$test_env" --per-test-state "$@" >"$RUST_TEST_STDOUT_PATH" || status=$?
+if [[ -n "${RUST_TEST_INVENTORY_PATH:-}" ]]; then
+  reporter="${RUST_TEST_REPORTER:?captured nextest requires its prepared reporter}"
+  events="${RUST_TEST_STDOUT_PATH:?captured nextest requires an event destination}"
+  planner="$(dirname "${BASH_SOURCE[0]}")/nextest_inventory.harn"
+  plan="$events.plan.json"
+  : >"$events"
+  "$reporter" run --standalone --no-sandbox "$planner" -- \
+    --execution-plan "$RUST_TEST_INVENTORY_PATH" >"$plan"
+  count=$(jq -er 'length | select(. > 0)' "$plan")
+  no_fail_fast=0
+  for argument in "$@"; do
+    [[ "$argument" != --no-fail-fast ]] || no_fail_fast=1
+  done
+  for ((invocation = 0; invocation < count; invocation++)); do
+    filter=$(jq -er ".[$invocation].filter" "$plan")
+    args=("$@")
+    found=0
+    for ((index = 0; index < ${#args[@]}; index++)); do
+      case "${args[$index]}" in
+        -E|--filter-expr)
+          ((index += 1))
+          args[index]="(${args[$index]}) and ($filter)"
+          found=1
+          ;;
+        --filter-expr=*)
+          args[index]="--filter-expr=(${args[$index]#--filter-expr=}) and ($filter)"
+          found=1
+          ;;
+        -E?*)
+          args[index]="-E(${args[$index]#-E}) and ($filter)"
+          found=1
+          ;;
+      esac
+    done
+    ((found)) || args+=(-E "$filter")
+    jq -cn --argjson invocation "$(jq -c ".[$invocation]" "$plan")" \
+      '{type:"harn-invocation",event:"started",binary_id:$invocation.binary_id}' >>"$events"
+    bash "$test_env" --per-test-state "${args[@]}" >>"$events" &
+    child_pid=$!
+    invocation_status=0
+    wait "$child_pid" || invocation_status=$?
+    child_pid=""
+    if ((invocation_status != 0)); then
+      status=$invocation_status
+      # Pinned nextest 0.9.132: NextestExitCode::TEST_RUN_FAILED is 100.
+      # Infrastructure and signal exits must not launch another group.
+      ((no_fail_fast && invocation_status == 100)) || break
+    fi
+  done
+elif [[ -n "${RUST_TEST_STDOUT_PATH:-}" ]]; then
+  bash "$test_env" --per-test-state "$@" >"$RUST_TEST_STDOUT_PATH" &
+  child_pid=$!
+  wait "$child_pid" || status=$?
+  child_pid=""
 else
-  bash "$test_env" --per-test-state "$@" || status=$?
+  bash "$test_env" --per-test-state "$@" &
+  child_pid=$!
+  wait "$child_pid" || status=$?
+  child_pid=""
 fi
 duration=$((SECONDS - started))
 if [[ -n "${RUST_TEST_JOB_LIMIT_MINUTES:-}" ]]; then

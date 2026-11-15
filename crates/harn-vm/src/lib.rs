@@ -321,6 +321,7 @@ pub use harn_vm_core::value;
 pub mod verification;
 pub mod visible_text;
 use harn_vm_core::vm;
+pub use harn_vm_core::vm::subtask::spawn_lifecycle_cleanup;
 pub mod waitpoints;
 pub use harn_vm_core::windows_path;
 pub mod workspace_anchor;

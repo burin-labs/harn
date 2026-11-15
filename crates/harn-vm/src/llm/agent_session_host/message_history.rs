@@ -291,7 +291,7 @@ pub(super) fn pair_orphaned_tool_use(
 ) -> usize {
     // Repair is synchronous, so this route cannot remain installed while a
     // terminal flush yields to another cleanup on the shared worker thread.
-    let _transcript_scope = super::lifecycle::TranscriptDirScope::push(transcript_dir);
+    let _transcript_scope = crate::llm::agent_observe::TranscriptDirScope::push(transcript_dir);
     let Some(transcript) = crate::agent_sessions::transcript(session_id) else {
         return 0;
     };

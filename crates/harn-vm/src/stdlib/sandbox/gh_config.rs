@@ -27,7 +27,7 @@
 
 use std::path::Path;
 
-use crate::stdlib::process::ExecProfile;
+use crate::stdlib::process::{ExecProfile, SeedRequest, Seeded};
 
 pub(crate) const GH_PROFILE: ExecProfile = ExecProfile {
     program: "gh",
@@ -202,7 +202,11 @@ fn auth_refusal(args: &[String]) -> Option<&'static str> {
 /// user's allowed keys, and a `hosts.yml` holding `token` for github.com only.
 /// Both are marked current, so gh never migrates them or looks up the
 /// account over the network. An unreadable user config is an error.
-fn seed_granted_config(dir: &Path, token: &str) -> std::io::Result<()> {
+fn seed_granted_config(request: &SeedRequest<'_>) -> std::io::Result<Option<Seeded>> {
+    write_granted_config(request.dir, request.token).map(|()| Some(Seeded::default()))
+}
+
+fn write_granted_config(dir: &Path, token: &str) -> std::io::Result<()> {
     if token.chars().any(char::is_control) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,

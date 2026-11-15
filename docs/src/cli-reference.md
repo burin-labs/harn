@@ -460,6 +460,59 @@ process is gone, or that is older than 24 hours, is deleted. Links and entries
 that are not owner-only directories are left alone and never followed. An unconfined process of the same user can read
 the file for as long as the granted `gh` runs.
 
+##### A granted `git`
+
+A `for=git` grant must expose `GH_TOKEN` or `GITHUB_TOKEN`, and reaches git
+only as an HTTPS login for github.com repositories. It is granted on macOS
+only; elsewhere git runs without it. Only `git fetch`, `git push` and
+`git ls-remote` with known options receive it. Every other subcommand
+(including `pull`, `clone` and aliases), a global option before the
+subcommand, and an option that names a program or writes configuration
+(`--upload-pack`, `--receive-pack`, `--exec`, `--signed`, `-u`/`--set-upstream`,
+`--recurse-submodules`, `--filter`, fetch `--tags`, and the shallow-history
+options `--depth`, `--deepen`, `--shallow-since`, `--shallow-exclude`,
+`--unshallow` and `--update-shallow`) run without the login.
+
+A granted git never opens the repository's git directory as its own.
+`GIT_DIR` is the private per-spawn directory, whose `config` Harn writes;
+`GIT_CONFIG_NOSYSTEM` is set and `GIT_CONFIG_GLOBAL` is an empty file. So no
+repository, global or system setting reaches it: no hooks, credential
+helpers, aliases, proxies, TLS settings, filesystem monitor, `insteadOf`
+rewrites or `pushurl`. From the repository config Harn copies only remotes
+whose every URL is a plain `https://github.com/OWNER/REPO`, their refspecs, and
+branch tracking, read with `git config --file` and no includes. A remote whose
+fetch refspec stores outside `refs/remotes/NAME/` is not copied.
+
+| Per-spawn entry | Points at |
+|---|---|
+| `objects`, `FETCH_HEAD` | the repository's own, so fetched objects land there |
+| `refs/remotes/NAME` | the repository's tracking refs for each remote the command reaches |
+| `HEAD`, `refs/heads`, `refs/tags`, `packed-refs`, `shallow` | private copies, so no other repository ref can change |
+| `credential.sock` | a socket Harn serves the login on, for each reached repository URL |
+
+No file holds the login. Git's built-in `credential-cache` helper asks the
+per-spawn socket, with `credential.useHttpPath`, and Harn answers only a `get`
+for a reached repository URL. A socket cannot be read as a file, so a
+repository that points an alternate, a ref, `FETCH_HEAD` or any other path at
+the socket or the per-spawn directory reads no login. Only the granted git's
+own sandbox profile may connect to its socket; every confined child is denied
+connections into the per-spawn root.
+
+Harn refuses the grant when `shallow` or `packed-refs` is not a regular file,
+or when a reached remote's tracking directory, a directory above it within
+`refs`, or anything under it is a link when the command starts. It reads the
+repository's `.git` file, `commondir`, `HEAD` and config only as regular files,
+and git parses a private copy of that config, never the file itself.
+
+The per-spawn config allows only the `https` protocol, keeps TLS verification
+on, turns off hooks, the filesystem monitor, submodule recursion, automatic
+gc and prompts, and sets `tagOpt = --no-tags` on every copied remote. A
+command that reaches any remote that was not copied, or a fetch refspec that
+stores outside the remote's tracking namespace, runs without the login and
+with the user's own configuration. Objects reached through the repository's
+alternates are read as the confined git's own sandbox allows; the per-spawn
+directory holds no object store.
+
 A run record's `admitted_environment` lists the names a child could see, so it
 omits in-process grants; their receipts carry `exposed_to: "in_process"`.
 

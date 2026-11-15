@@ -1090,7 +1090,8 @@ isolated execution host for untrusted repair code that requires that guarantee.
 | Capability / policy | `sandbox-exec` rule | Effect |
 |---|---|---|
 | always | `(deny default)` | every operation requires an explicit allow |
-| always | `(allow process*)` + `(allow sysctl-read)` + `(allow mach-lookup)` + `(allow file-read-data (literal "/"))` | minimum surface required to exec a binary |
+| always | `(allow process*)` + `(allow sysctl-read)` + `(allow file-read-data (literal "/"))` | minimum surface required to exec a binary |
+| always | `(allow mach-lookup (global-name ...))` for a fixed list of system services: directory, logging, notification, preference, trust and keychain, network configuration, file events and exec policy services | toolchains, TLS and git work; other system services, which act outside the command's profile, stay out of reach (defense in depth) |
 | always | `(allow signal (target same-sandbox))` | a process can signal its own sandboxed children, not the host's processes |
 | always | `(allow ipc-posix-sem (ipc-posix-name-prefix "/mp-"))` | Python `multiprocessing` locks work; other processes' named semaphores stay out of reach |
 | standard process devices | `(allow file-read* ...)` for `/dev/null`, `/dev/zero`, `/dev/random`, `/dev/urandom`, `/dev/stdin`, `/dev/stdout`, `/dev/stderr`, and `/dev/fd`; `(allow file-write* ...)` only for `/dev/null`, `/dev/stdout`, `/dev/stderr`, and `/dev/fd` | common stdio, entropy, and zero devices work without granting broad `/dev` writes |

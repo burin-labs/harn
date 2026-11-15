@@ -11,7 +11,10 @@ use super::persistence::{
     compaction_events_from_transcript, daemon_events_from_sidecar, replay_of_event_id_from_run,
     run_trace_id, signature_status_label, trigger_event_from_run,
 };
-use super::transcript_descriptor::pointer_for_llm_transcript_sidecar;
+use super::transcript_descriptor::{
+    pointer_for_llm_transcript_sidecar, unavailable_llm_transcript_pointer,
+    LlmTranscriptDescriptorError,
+};
 use super::types::{
     CompactionEventRecord, DaemonEventRecord, RunActionGraphEdgeRecord, RunActionGraphNodeRecord,
     RunObservabilityRecord, RunPlannerRoundRecord, RunRecord, RunStageRecord,
@@ -136,15 +139,21 @@ pub fn derive_run_observability(
     run: &RunRecord,
     persisted_path: Option<&Path>,
 ) -> RunObservabilityRecord {
-    let transcript_path = persisted_path
-        .and_then(|path| super::transcript_descriptor::discover_llm_transcript_sidecar(run, path));
-    derive_run_observability_with_transcript(run, persisted_path, transcript_path.as_deref())
+    let transcript_path = match persisted_path {
+        Some(path) => super::transcript_descriptor::discover_llm_transcript_sidecar(run, path),
+        None => Ok(None),
+    };
+    derive_run_observability_with_transcript(
+        run,
+        persisted_path,
+        transcript_path.as_ref().map(|path| path.as_deref()),
+    )
 }
 
 pub(super) fn derive_run_observability_with_transcript(
     run: &RunRecord,
     persisted_path: Option<&Path>,
-    llm_transcript_path: Option<&Path>,
+    llm_transcript_path: Result<Option<&Path>, &LlmTranscriptDescriptorError>,
 ) -> RunObservabilityRecord {
     let mut action_graph_nodes = Vec::new();
     let mut action_graph_edges = Vec::new();
@@ -543,10 +552,14 @@ pub(super) fn derive_run_observability_with_transcript(
     }
 
     if let Some(path) = persisted_path {
-        if let Some(sidecar_path) = llm_transcript_path {
-            if let Some(pointer) = pointer_for_llm_transcript_sidecar(run, path, sidecar_path) {
-                transcript_pointers.push(pointer);
-            }
+        match llm_transcript_path {
+            Ok(Some(sidecar_path)) => transcript_pointers.push(pointer_for_llm_transcript_sidecar(
+                run,
+                path,
+                sidecar_path,
+            )),
+            Err(error) => transcript_pointers.push(unavailable_llm_transcript_pointer(run, error)),
+            Ok(None) => {}
         }
         daemon_events.extend(daemon_events_from_sidecar(path));
     }
@@ -568,7 +581,7 @@ pub(super) fn derive_run_observability_with_transcript(
 pub(super) fn refresh_run_observability(
     run: &mut RunRecord,
     persisted_path: Option<&Path>,
-    llm_transcript_path: Option<&Path>,
+    llm_transcript_path: Result<Option<&Path>, &LlmTranscriptDescriptorError>,
 ) {
     run.observability = Some(derive_run_observability_with_transcript(
         run,

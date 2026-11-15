@@ -241,7 +241,7 @@ pub(crate) fn run_with_filter(
         // interrupt path below (scope cancellation / deadline expiry) can
         // reap grandchildren with a single group signal.
         configure_process_group: true,
-        owner_death: process_handle::OwnerDeathPolicy::None,
+        owner_death: process_handle::OwnerDeathPolicy::KillContainment,
         output_capture: file_capture
             .as_ref()
             .map(FileCapture::output_capture)
@@ -361,7 +361,7 @@ pub(crate) fn run_with_filter(
                 signal,
                 sandbox_signal,
                 false,
-                None,
+                handle.cleanup_report(),
             )
         }
         process_handle::WaitOutcome::TimedOut(report) => (
@@ -652,6 +652,10 @@ pub(crate) fn process_error_to_hostlib(
     err: ProcessError,
 ) -> HostlibError {
     match err {
+        error @ ProcessError::GuardianNotInitialized => HostlibError::Backend {
+            builtin,
+            message: error.to_string(),
+        },
         ProcessError::InvalidArgv(message) => HostlibError::InvalidParameter {
             builtin,
             param: "argv",

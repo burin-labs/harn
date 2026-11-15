@@ -111,9 +111,7 @@ while True: signal.pause()
         if deadline { "timed_out" } else { "killed" }
     );
     assert_eq!(require_bool(&terminal, "timed_out"), deadline);
-    // The test guardian re-executes libtest, which writes its startup banner
-    // to stdout before forwarding the payload's partial line.
-    assert!(require_str(&terminal, "stdout").ends_with("before"));
+    assert_eq!(require_str(&terminal, "stdout"), "before");
     assert_eq!(require_str(&terminal, "stderr"), "warning");
     let cleanup = require_nested_dict(&terminal, "process_cleanup");
     assert!(require_bool(&cleanup, "guardian_custody_complete"));

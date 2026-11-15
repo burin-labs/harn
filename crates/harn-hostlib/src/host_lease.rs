@@ -691,8 +691,8 @@ impl HostLeaseStore {
             Some(requested_at_ms.saturating_add(60_000)),
             &identity,
         )?;
-        if receipt.status == HostLeaseAcquireStatus::Deferred {
-            self.remove_waiter(&identity.waiter_id)?;
+        if receipt.queue.is_some() {
+            self.remove_waiter_owned(&identity.waiter_id)?;
         }
         Ok(receipt)
     }
@@ -997,9 +997,26 @@ impl HostLeaseStore {
         domain: &str,
         lease_id: &str,
     ) -> Result<HostLeaseReleaseReceipt, HostLeaseError> {
+        self.release_for_domain_with_registry_timeout(
+            host,
+            resource_class,
+            domain,
+            lease_id,
+            SQLITE_MUTATION_BUSY_TIMEOUT,
+        )
+    }
+
+    pub(crate) fn release_for_domain_with_registry_timeout(
+        &self,
+        host: &str,
+        resource_class: HostLeaseResourceClass,
+        domain: &str,
+        lease_id: &str,
+        registry_timeout: Duration,
+    ) -> Result<HostLeaseReleaseReceipt, HostLeaseError> {
         let resource = HostLeaseResourceKey::normalize(host, resource_class, domain)?;
         let lease_id = normalize_component("lease_id", lease_id)?;
-        let conn = self.connection(SQLITE_MUTATION_BUSY_TIMEOUT)?;
+        let conn = self.connection(registry_timeout)?;
         let released = conn.execute(
             "DELETE FROM host_leases
              WHERE host = ?1 AND resource_class = ?2 AND domain = ?3 AND lease_id = ?4",
@@ -1070,7 +1087,7 @@ impl HostLeaseStore {
     }
 
     #[cfg(test)]
-    fn with_busy_handler(mut self, handler: fn(i32) -> bool) -> Self {
+    pub(crate) fn with_busy_handler(mut self, handler: fn(i32) -> bool) -> Self {
         self.busy_handler = Some(handler);
         self
     }

@@ -270,6 +270,8 @@ const E2E_SUBPROCESS_PATHS: list<string> = [
   "crates/harn-cli/tests/harn_cli_e2e/process_smoke_cli.rs",
   // Relative PATH lookup must survive the real child process changing directories.
   "crates/harn-cli/tests/harn_cli_e2e/relative_path_resolution_cli.rs",
+  // Transcript inspection resolves relative run paths from the CLI's cwd and loads captured sidecars.
+  "crates/harn-cli/tests/harn_cli_e2e/runs_view_cli.rs",
   // Shared checkpoint mutations must retain keys and one initial value across real CLI processes.
   "crates/harn-cli/tests/harn_cli_e2e/checkpoint_concurrency.rs",
   // Init exit status and Git visibility of real runtime stores require the project CLI process.
@@ -627,6 +629,9 @@ const NON_TEST_WALL_CLOCK_ALLOWLIST: list<string> = [
   // Bubblewrap setup waits on real OS descendants; its monotonic deadline
   // bounds inherited pipes through the existing subprocess interrupt owner.
   "crates/harn-vm/src/stdlib/sandbox/linux_bwrap_probe.rs",
+  // The signing filter's per-connection deadline bounds real socket reads and
+  // writes from a confined client; OS socket timeouts run on real time.
+  "crates/harn-vm/src/stdlib/sandbox/signing_agent.rs",
   "crates/harn-vm/src/llm/api/partial_tool_args.rs",
   "crates/harn-vm/src/llm/api/transport.rs",
   "crates/harn-vm/src/llm/autonomy_budget.rs",
