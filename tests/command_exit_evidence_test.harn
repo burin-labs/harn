@@ -61,8 +61,10 @@ pipeline test_shell_success_proof_covers_only_required_commands() {
     const proof = shell_exit_evidence(command, "bash")
     assert(proof.scope == "unmeasured", command + ": " + proof.reason)
   }
-  assert(shell_exit_evidence("Write-Output ok", "pwsh").scope == "unmeasured")
-  assert(shell_exit_evidence("echo ok", "cmd").scope == "unmeasured")
+  assert_eq(shell_exit_evidence("Write-Output ok", "pwsh").scope, "all_commands")
+  assert_eq(shell_exit_evidence("echo ok", "cmd").scope, "all_commands")
+  assert(shell_exit_evidence("false; Write-Output ok", "pwsh").scope != "all_commands")
+  assert(shell_exit_evidence("failed-check & echo ok", "cmd").scope != "all_commands")
   assert(shell_exit_evidence("echo ok", "unknown-shell").scope == "unmeasured")
   assert(shell_exit_evidence("set -o pipefail; false | cat", "sh").scope == "masked")
   assert(shell_exit_evidence("(false; true)", "bash").scope == "masked")

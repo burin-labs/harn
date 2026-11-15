@@ -1,7 +1,7 @@
 import {
   assert_retained_mutation_barrier,
   retained_proposal_trial,
-} from "../../conformance/testlib/tool_batch_proposals"
+} from "./fixtures/retained_tool_proposals"
 
 @test
 pipeline test_retained_verification_cannot_confirm_past_failed_mutation(harness: Harness) {

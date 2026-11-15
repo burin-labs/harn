@@ -12,8 +12,8 @@ use harn_vm::agent_events::AgentEventSink;
 async fn retained_proposal_resolution_reaches_the_typed_acp_boundary() {
     use harn_vm::agent_events::{ToolBatchProposalResolution, ToolBatchProposalResolutionKind};
 
-    let notifications = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
+    let notifications = harn_clock::test_support::within(
+        "retained-proposal ACP event",
         collect_notifications(vec![AgentEvent::ToolBatchProposalResolution {
             session_id: "session-proposal".to_owned(),
             resolution: ToolBatchProposalResolution {
@@ -28,8 +28,7 @@ async fn retained_proposal_resolution_reaches_the_typed_acp_boundary() {
             },
         }]),
     )
-    .await
-    .expect("the real ACP sink must emit the retained-proposal event");
+    .await;
     assert_eq!(notifications.len(), 1);
     let params = &notifications[0]["params"];
     assert_eq!(params["sessionId"], "session-proposal");

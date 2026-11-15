@@ -1,7 +1,7 @@
 // Trigger: one response proposes an edit beside an observation.
 // Effect: explicit confirmation executes the original body through ordinary dispatch.
 // Negative: discard or a newer observation cannot execute the stale proposal.
-import { retained_proposal_trial } from "../../testlib/tool_batch_proposals"
+import { retained_proposal_trial } from "../../../tests/agent/fixtures/retained_tool_proposals"
 import { contract_effect, contract_negative } from "./lib/mechanism_contract"
 
 pipeline default(harness: Harness) {

@@ -1,3 +1,4 @@
+// Shared real-loop evidence for agent tests and the registered mechanism contract.
 import {
   agent_capture_events,
   agent_event_report,
@@ -136,6 +137,98 @@ pub type RetainedProposalTrial = {
   requests: int,
   body_copies: int,
   stable_tools: bool,
+}
+
+type ServedProposalProof = {requests: int, body_copies: int, stable_tools: bool}
+
+type MutationOutcome = {mutations: int, attempted: int, succeeded: int}
+
+fn assert_mutation_outcome(
+  fs: HarnessFs,
+  variant: string,
+  path: string,
+  body: string,
+  outcome: MutationOutcome,
+) -> nil {
+  const should_write = ["resume", "replay", "revise"].contains(variant)
+  assert_eq(outcome.mutations, should_write ? 1 : 0)
+  assert_eq(
+    outcome.attempted,
+    variant == "discard" || variant == "compacted" || variant == "new_direction" ? 1 : 2,
+  )
+  assert_eq(outcome.succeeded, should_write || variant == "reread" ? 2 : 1)
+  if should_write {
+    assert_eq(fs.read_text(path), variant == "revise" ? "revised" : body)
+  } else {
+    assert(!fs.exists(path), "an abandoned, denied or invalidated proposal must not mutate")
+  }
+  return nil
+}
+
+fn assert_served_proposals(
+  calls: list,
+  variant: string,
+  confirmation_bytes: int,
+  body_bytes: int,
+) -> ServedProposalProof {
+  assert_eq(
+    len(calls),
+    variant == "reread" ? 4 : 3,
+    "both the confirmation and terminal must reach model serving",
+  )
+  assert(
+    calls[0].tools.any({ tool -> (tool?.function?.name ?? __tool_registry_name(tool)) == RESOLVE }),
+    "the no-pending request must really serve the stable confirmation contract",
+  )
+  assert_eq(calls[0].tools, calls[1].tools, "retention must preserve the served schema prefix")
+  assert_eq(calls[1].tools, calls[2].tools, "resolution must preserve served tool definitions")
+  let original_bodies = 0
+  for message in calls[2].messages {
+    if message?.role != "assistant" {
+      continue
+    }
+    for call in message?.tool_calls ?? [] {
+      if (call?.function?.name ?? __tool_registry_name(call)) == "edit_value" {
+        original_bodies = original_bodies + 1
+      }
+    }
+  }
+  if variant == "resume" || variant == "replay" {
+    assert_eq(original_bodies, 1, "confirmation must not regenerate the stored edit body")
+    assert(confirmation_bytes < body_bytes / 3, "confirmation must be shorter than the stored body")
+  }
+  return {
+    requests: len(calls),
+    body_copies: original_bodies,
+    stable_tools: calls[0].tools == calls[1].tools && calls[1].tools == calls[2].tools,
+  }
+}
+
+fn assert_resolution_events(
+  events: list,
+  variant: string,
+  archived: int,
+  archived_at_proposal: int,
+) -> list {
+  const resolutions = events.filter({ event -> event?.type == "tool_batch_proposal_resolution" })
+    .to_list()
+  assert(len(resolutions) > 0, "retirement must be measured through the canonical event path")
+  for event in resolutions {
+    const report = agent_event_report(event, agent_tool_batch_proposal_resolution_event_schema())
+    assert(
+      report.ok,
+      "the native resolution event and public schema must agree: " + json_stringify(report),
+    )
+  }
+  assert(resolutions.any({ event -> event.resolution.pending_count == 0 }))
+  if variant == "compacted" {
+    assert(
+      archived > archived_at_proposal,
+      "compaction must really archive retained source context",
+    )
+    assert(resolutions.any({ event -> event.resolution.reason == "context_compacted" }))
+  }
+  return resolutions
 }
 
 /** Run one deterministic public-loop trial and return its measured observations. */
@@ -310,92 +403,30 @@ pub fn retained_proposal_trial(harness: Harness, variant: string) -> RetainedPro
               },
             },
           )
-          const calls = harness.llm.mock_calls()
-          assert_eq(
-            len(calls),
-            variant == "reread" ? 4 : 3,
-            "both the confirmation and terminal must reach model serving",
-          )
-          assert(
-            calls[0].tools.any(
-              { tool -> (tool?.function?.name ?? __tool_registry_name(tool)) == RESOLVE },
-            ),
-            "the no-pending request must really serve the stable confirmation contract",
-          )
-          assert_eq(
-            calls[0].tools,
-            calls[1].tools,
-            "retaining a proposal must not invalidate the served tool schema prefix",
-          )
-          assert_eq(
-            calls[1].tools,
-            calls[2].tools,
-            "consuming or invalidating proposals must not change served tool definitions",
-          )
-          let original_bodies = 0
-          for message in calls[2].messages {
-            if message?.role != "assistant" {
-              continue
-            }
-            for call in message?.tool_calls ?? [] {
-              if (call?.function?.name ?? __tool_registry_name(call)) == "edit_value" {
-                original_bodies = original_bodies + 1
-              }
-            }
-          }
-          if variant == "resume" || variant == "replay" {
-            assert_eq(
-              original_bodies,
-              1,
-              "confirmation must not regenerate the stored edit body in assistant history",
+          return {run: result}
+            + assert_served_proposals(
+              harness.llm.mock_calls(),
+              variant,
+              confirmation_bytes,
+              len(body),
             )
-            assert(
-              confirmation_bytes < len(body) / 3,
-              "the actual confirmation must be materially shorter than the stored body",
-            )
-          }
-          return {
-            run: result,
-            requests: len(calls),
-            body_copies: original_bodies,
-            stable_tools: calls[0].tools == calls[1].tools && calls[1].tools == calls[2].tools,
-          }
         },
       )
     },
   )
-  const should_write = ["resume", "replay", "revise"].contains(variant)
-  assert_eq(harness.runtime.atomic_get(writes), should_write ? 1 : 0)
-  assert_eq(
-    attempted,
-    variant == "discard" || variant == "compacted" || variant == "new_direction" ? 1 : 2,
+  assert_mutation_outcome(
+    harness.fs,
+    variant,
+    path,
+    body,
+    {mutations: harness.runtime.atomic_get(writes), attempted: attempted, succeeded: succeeded},
   )
-  assert_eq(succeeded, should_write || variant == "reread" ? 2 : 1)
-  if should_write {
-    assert_eq(harness.fs.read_text(path), variant == "revise" ? "revised" : body)
-  } else {
-    assert(!harness.fs.exists(path), "an abandoned, denied or invalidated proposal must not mutate")
-  }
-  const resolutions = captured.events.filter(
-    { event -> event?.type == "tool_batch_proposal_resolution" },
+  const resolutions = assert_resolution_events(
+    captured.events,
+    variant,
+    archived,
+    archived_at_proposal,
   )
-    .to_list()
-  assert(len(resolutions) > 0, "retirement must be measured through the canonical event path")
-  for event in resolutions {
-    const report = agent_event_report(event, agent_tool_batch_proposal_resolution_event_schema())
-    assert(
-      report.ok,
-      "the native resolution event and public Harn schema must agree: " + json_stringify(report),
-    )
-  }
-  assert(resolutions.any({ event -> event.resolution.pending_count == 0 }))
-  if variant == "compacted" {
-    assert(
-      archived > archived_at_proposal,
-      "compaction must really archive source after proposal retention",
-    )
-    assert(resolutions.any({ event -> event.resolution.reason == "context_compacted" }))
-  }
   return {
     observations: harness.runtime.atomic_get(reads),
     mutations: harness.runtime.atomic_get(writes),
