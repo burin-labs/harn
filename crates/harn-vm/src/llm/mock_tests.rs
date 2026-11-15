@@ -52,9 +52,16 @@ fn mock_errors_retain_zero_and_simulated_billing_without_pricing_live_errors() {
                 status: provider_envelope.then_some(429),
                 kind: None,
                 reason: None,
-                retry_after_ms: None,
+                retry_after_ms: Some(2500),
             };
             let actual = mock_error_to_vm_error(&error, &fixture);
+            let VmError::Thrown(VmValue::Dict(fields)) = &actual else {
+                panic!("mock error must retain its typed envelope");
+            };
+            assert_eq!(
+                fields.get("retry_after_ms").and_then(VmValue::as_int),
+                Some(2500)
+            );
             assert_eq!(
                 crate::value::error_to_category(&actual),
                 ErrorCategory::RateLimit
