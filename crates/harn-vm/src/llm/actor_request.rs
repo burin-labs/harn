@@ -1,4 +1,4 @@
-//! The first physically dispatched actor request in one canonical agent run.
+//! The request context matched to the first successful actor response in a run.
 
 #[derive(Clone, serde::Serialize)]
 pub(crate) struct ActorRequestReceipt {

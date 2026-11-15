@@ -533,9 +533,9 @@ pub(crate) fn record_provider_dispatch(session_id: &str) {
     }
 }
 
-/// Keep the first actual actor dispatch's served context in the existing run
-/// summary. A helper request, pre-dispatch refusal, or a stale run cannot claim
-/// that the actor received this context.
+/// Keep the first successful actor response's matching request context in the
+/// existing run summary. A helper, refused request, transport failure, or stale
+/// run cannot claim that the actor received this context.
 pub(crate) fn record_actor_request(receipt: &super::actor_request::ActorRequestReceipt) {
     let _ = with_session(&receipt.session_id, "record_actor_request", |session| {
         if session.run_id == receipt.run_id && session.actor_request.is_none() {

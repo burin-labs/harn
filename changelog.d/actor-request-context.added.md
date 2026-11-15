@@ -1,2 +1,2 @@
-Agent results retain the first physically dispatched actor request's context manifest, so callers can distinguish
-delivered instructions from prepared context and helper-only inference.
+Agent results retain the request context matched to the first successful actor response, so callers can distinguish
+delivered instructions from prepared context, failed transport, and helper-only inference.

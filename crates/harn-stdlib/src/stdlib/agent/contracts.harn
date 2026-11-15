@@ -62,7 +62,7 @@ pub type AgentTerminalOutcome = {
   run_record_status: AgentTerminalLifecycleState,
 }
 
-/** Served context from the first physically dispatched actor request in this run. */
+/** Request context matched to the first successful actor response in this run. */
 pub type AgentActorRequestReceipt = {
   schema: "harn.agent.actor_request.v1",
   session_id: string,

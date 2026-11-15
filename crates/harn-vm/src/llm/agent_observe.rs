@@ -513,10 +513,16 @@ impl ObservedAttemptToken {
         if let Some(session_id) = self.session_id.as_deref() {
             super::agent_session_host::record_provider_dispatch(session_id);
         }
+        self.inference_speed.start();
+    }
+
+    /// Called only after this dispatched request returns a parsed provider
+    /// response. Cache/replay bypasses and transport errors cannot claim that
+    /// the actor received the prepared instructions.
+    pub(super) fn record_provider_response(&self) {
         if let Some(receipt) = self.actor_receipt.as_deref() {
             super::agent_session_host::record_actor_request(receipt);
         }
-        self.inference_speed.start();
     }
 }
 
