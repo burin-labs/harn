@@ -47,6 +47,13 @@ expect 1 '::error::consumer check UNMEASURED' CONSUMER_VERDICT=
 expect 1 '::error::consumer check UNMEASURED' CONSUMER_VERDICT= CONSUMER_REASONS='first=no_verdict_before_deadline retry=observation_window_elapsed'
 expect 1 '::error::consumer check UNMEASURED' CONSUMER_VERDICT= CONSUMER_RESULT=cancelled
 expect 1 'consumer_scope_unmeasured' CONSUMER_EXPECTED= CONSUMER_RESULT=skipped
-expect 0 'expected=false' CONSUMER_EXPECTED=false CONSUMER_RESULT=skipped
-expect 1 'ran without being expected' CONSUMER_EXPECTED=false CONSUMER_RESULT=failure
+expect 0 'expected=false' CONSUMER_EXPECTED=false CONSUMER_RESULT=skipped CONSUMER_VERDICT=
+expect 1 'ran without being expected' CONSUMER_EXPECTED=false CONSUMER_RESULT=failure CONSUMER_VERDICT=
+expect 1 'ran without being expected' CONSUMER_EXPECTED=false CONSUMER_RESULT=success CONSUMER_VERDICT=
+expect 1 'measured a failure' CONSUMER_EXPECTED=false CONSUMER_RESULT=success CONSUMER_VERDICT=fail
+expect 1 'measured a failure' CONSUMER_EXPECTED=false CONSUMER_RESULT=skipped CONSUMER_VERDICT=fail
+expect 1 'no successful owning workflow' CONSUMER_EXPECTED=false CONSUMER_RESULT=skipped CONSUMER_VERDICT=pass
+expect 1 'no successful owning workflow' CONSUMER_EXPECTED=false CONSUMER_RESULT=failure CONSUMER_VERDICT=pass
+expect 1 'no successful owning workflow' CONSUMER_EXPECTED=false CONSUMER_RESULT= CONSUMER_VERDICT=pass
+expect 0 'verdict=pass' CONSUMER_EXPECTED=false CONSUMER_RESULT=success CONSUMER_VERDICT=pass
 echo "consumer verdict: measured=$measured failed=0 pending=0"

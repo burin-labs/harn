@@ -29,13 +29,6 @@ case "${CONSUMER_EXPECTED:-}" in
   true | false) ;;
   *) unmeasured "consumer_scope_unmeasured" ;;
 esac
-if [ "${CONSUMER_EXPECTED:-}" != "true" ]; then
-  case "${CONSUMER_RESULT:-}" in
-    success | skipped) exit 0 ;;
-    *) block "Downstream consumer check ran without being expected and did not pass." ;;
-  esac
-fi
-
 case "${CONSUMER_VERDICT:-}" in
   pass)
     if [ "${CONSUMER_RESULT:-}" != success ]; then
@@ -44,5 +37,14 @@ case "${CONSUMER_VERDICT:-}" in
     exit 0 ;;
   fail)
     block "Downstream consumer run ${CONSUMER_RUN:-none} measured a failure. Baseline job/step matches are incomparable without source-bound case evidence and cannot excuse it." ;;
-  *) unmeasured "consumer_unmeasured (${CONSUMER_REASONS:-})" ;;
+  "") ;;
+  *) unmeasured "consumer_verdict_invalid" ;;
 esac
+
+if [ "${CONSUMER_EXPECTED:-}" = false ]; then
+  case "${CONSUMER_RESULT:-}" in
+    skipped) exit 0 ;;
+    *) block "Downstream consumer check ran without being expected and did not publish a measured pass." ;;
+  esac
+fi
+unmeasured "consumer_unmeasured (${CONSUMER_REASONS:-})"
