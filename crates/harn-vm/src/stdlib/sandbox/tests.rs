@@ -9,6 +9,7 @@ mod read_only_root_commands;
 mod runtime_roots;
 mod rustc_wrapper_policy;
 mod scope_memo;
+mod write_root_links;
 
 #[test]
 fn missing_create_path_normalizes_against_existing_parent() {
