@@ -741,6 +741,7 @@ fn assemble(
         total_cost: known_cost_usd,
         cache_read_tokens: fold.cache.reported_read_tokens(),
         cache_write_tokens: fold.cache.reported_write_tokens(),
+        reported_cache: Some(Box::new(fold.cache)),
         ..fold.usage
     };
     let (execution_id, mut evidence_gaps) = match fold.execution_id.as_deref() {
@@ -1006,6 +1007,15 @@ impl SessionFold {
             cache_write_tokens: cache.and_then(|cache| cache.reported_write_tokens()),
             cost_usd: cost_usd.filter(|_| unpriced_calls == 0),
         });
+        let physical_calls = integer(&metadata.provider_call_count).filter(|count| *count >= 0);
+        self.usage.provider_call_count = if self.usage.call_count == 0 {
+            physical_calls
+        } else {
+            self.usage
+                .provider_call_count
+                .zip(physical_calls)
+                .and_then(|(total, more)| total.checked_add(more))
+        };
         self.usage.call_count += 1;
         self.usage.unpriced_calls += unpriced_calls;
         self.usage.usage_unknown_calls += usage_unknown_calls;

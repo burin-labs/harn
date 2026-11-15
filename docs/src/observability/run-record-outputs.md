@@ -4,6 +4,22 @@ Harn persists the projections it computes while an agent runs. Observability
 consumers should read these fields instead of parsing assistant text or
 reconstructing spans from cumulative usage totals.
 
+## Cache usage coverage
+
+`usage.cache_read_tokens` and `usage.cache_write_tokens` contain known subtotals.
+They remain null when no call reported that category. A reported zero stays zero.
+
+`usage.reported_cache` preserves the provider ledger's category coverage:
+`read_reported_calls`, `write_reported_calls`, `read_tokens`, `write_tokens`, and
+`reported_calls`. Compare each category's reported calls with
+`usage.provider_call_count` to determine whether its subtotal covers every
+physical provider call. Retries count separately; `usage.call_count` counts
+logical calls and cannot supply that denominator.
+
+Older records can omit either coverage field. Missing coverage means unknown
+completeness, even when the known subtotal is zero. A present category count of
+zero means no physical call reported that category, rather than zero cache tokens.
+
 ## Session completion receipt
 
 Session-backed run records always carry `metadata.completion_receipt`. A host
