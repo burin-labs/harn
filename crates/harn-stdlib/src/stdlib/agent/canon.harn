@@ -15,6 +15,55 @@ pub type CanonManifestPack = {
 
 pub type CanonManifest = {schema_version: 1, packs: list<CanonManifestPack>}
 
+type CanonRawCarrier = {
+  changed_paths?: unknown,
+  changedPaths?: unknown,
+  files_written?: unknown,
+  filesWritten?: unknown,
+  observed_symbols?: unknown,
+  observedSymbols?: unknown,
+  ...dict,
+}
+
+type CanonRawFunction = {arguments?: unknown, ...dict}
+
+type CanonRawSlice = {files?: unknown, ...dict}
+
+type CanonRawReminder = {
+  tags?: unknown,
+  dedupe_key?: unknown,
+  ttl_turns?: unknown,
+  preserve_on_compact?: unknown,
+  ...dict,
+}
+
+fn __canon_optional_record(value: unknown) -> dict? {
+  if type_of(value) != "dict" {
+    return nil
+  }
+  return value
+}
+
+fn __canon_raw_carrier(value: unknown) -> CanonRawCarrier? {
+  const record = __canon_optional_record(value)
+  return record == nil ? nil : schema_expect(record, schema_of(CanonRawCarrier))
+}
+
+fn __canon_raw_function(value: unknown) -> CanonRawFunction? {
+  const record = __canon_optional_record(value)
+  return record == nil ? nil : schema_expect(record, schema_of(CanonRawFunction))
+}
+
+fn __canon_raw_slice(value: unknown) -> CanonRawSlice? {
+  const record = __canon_optional_record(value)
+  return record == nil ? nil : schema_expect(record, schema_of(CanonRawSlice))
+}
+
+fn __canon_raw_reminder(value: unknown) -> CanonRawReminder? {
+  const record = __canon_optional_record(value)
+  return record == nil ? nil : schema_expect(record, schema_of(CanonRawReminder))
+}
+
 fn __canon_manifest_schema() -> Schema<CanonManifest> {
   const optional_string = schema_field(schema_string(), false)
   return schema_refine(
@@ -487,6 +536,8 @@ fn __canon_pack_from_item(item: unknown, manifest: dict?, canon_root: any) {
  * Default project-local roots are merged with installed package-generation
  * contributions of kind `harn.canon`. Explicit `canon_root`, `HARN_CANON_ROOT`,
  * and `manifest` values stay authoritative.
+ * When `files` is absent, `slice.files` supplies file records. A non-record
+ * slice behaves as absent; an invalid files value still fails list validation.
  *
  * @effects: [fs.read]
  * @errors: [runtime]
@@ -533,7 +584,8 @@ pub fn canon_resolve_packs(env: HarnessEnv, fs: HarnessFs, options: dict? = nil)
       nil
     }
   if len(requested) == 0 {
-    requested = canon_pack_ids_for_files(opts?.files ?? opts?.slice?.files ?? [], manifest)
+    const slice = __canon_raw_slice(opts?.slice)
+    requested = canon_pack_ids_for_files(opts?.files ?? slice?.files ?? [], manifest)
   }
   let resolved = []
   for item in requested {
@@ -622,6 +674,8 @@ pub fn canon_feedback_text(result: dict, options: dict? = nil) -> string {
  *   inject: "feedback" | "reminder" | "none" (default "feedback")
  *   feedback_kind: feedback kind when `inject == "feedback"` (default "harn_canon")
  *   reminder: reminder options merged with the generated body when `inject == "reminder"`
+ * Present empty tags and false flags override defaults. Additional reminder
+ * options pass through to the session host, which owns their validation.
  *
  * @effects: [fs.read, host]
  * @errors: [runtime]
@@ -646,14 +700,15 @@ pub fn canon_inject_feedback(
       feedback,
     )
   } else if feedback != "" && mode == "reminder" {
+    const reminder_options = __canon_raw_reminder(opts?.reminder)
     const reminder = (opts?.reminder ?? {})
       + {
         body: feedback,
-        tags: opts?.reminder?.tags ?? ["harn-canon"],
-        dedupe_key: opts?.reminder?.dedupe_key
+        tags: reminder_options?.tags ?? ["harn-canon"],
+        dedupe_key: reminder_options?.dedupe_key
           ?? "harn-canon/" + join(result.selected_pack_ids, ","),
-        ttl_turns: opts?.reminder?.ttl_turns ?? 1,
-        preserve_on_compact: opts?.reminder?.preserve_on_compact ?? true,
+        ttl_turns: reminder_options?.ttl_turns ?? 1,
+        preserve_on_compact: reminder_options?.preserve_on_compact ?? true,
       }
     reminder_id = agent_session_inject_reminder(harness.agent, session_id, reminder)
   } else if mode != "none" && mode != "feedback" && mode != "reminder" {
@@ -765,6 +820,7 @@ pub fn canon_event_write_path_from_result(result: dict) -> string {
   if type_of(result) != "dict" {
     return ""
   }
+  const function = __canon_raw_function(result?.function)
   for carrier in [
     result?.params,
     result?.args,
@@ -772,7 +828,7 @@ pub fn canon_event_write_path_from_result(result: dict) -> string {
     result?.tool_args,
     result?.input,
     result?.raw_input,
-    result?.function?.arguments,
+    function?.arguments,
   ] {
     if type_of(carrier) == "dict" {
       const path = __canon_text(
@@ -825,14 +881,16 @@ fn __canon_event_push_tool_result_paths(items: list, result: unknown) {
   if type_of(result) != "dict" {
     return items
   }
+  const nested_result = __canon_raw_carrier(result?.result)
+  const raw_output = __canon_raw_carrier(result?.raw_output)
   let out = items
   for bucket in [
     result?.changed_paths ?? result?.changedPaths,
     result?.files_written ?? result?.filesWritten,
-    result?.result?.changed_paths ?? result?.result?.changedPaths,
-    result?.result?.files_written ?? result?.result?.filesWritten,
-    result?.raw_output?.changed_paths ?? result?.raw_output?.changedPaths,
-    result?.raw_output?.files_written ?? result?.raw_output?.filesWritten,
+    nested_result?.changed_paths ?? nested_result?.changedPaths,
+    nested_result?.files_written ?? nested_result?.filesWritten,
+    raw_output?.changed_paths ?? raw_output?.changedPaths,
+    raw_output?.files_written ?? raw_output?.filesWritten,
   ] {
     out = __canon_event_push_path_bucket(out, bucket)
   }
@@ -937,17 +995,19 @@ fn __canon_event_push_tool_result_symbols(items: list, bucket: unknown) {
   }
   let out = items
   for result in bucket ?? [] {
+    const nested_result = __canon_raw_carrier(result?.result)
+    const raw_output = __canon_raw_carrier(result?.raw_output)
     out = __canon_event_push_symbol(out, result)
     out = __canon_event_push_symbol(out, result?.result)
     out = __canon_event_push_symbol(out, result?.raw_output)
     out = __canon_event_push_symbol_bucket(out, result?.observed_symbols ?? result?.observedSymbols)
     out = __canon_event_push_symbol_bucket(
       out,
-      result?.result?.observed_symbols ?? result?.result?.observedSymbols,
+      nested_result?.observed_symbols ?? nested_result?.observedSymbols,
     )
     out = __canon_event_push_symbol_bucket(
       out,
-      result?.raw_output?.observed_symbols ?? result?.raw_output?.observedSymbols,
+      raw_output?.observed_symbols ?? raw_output?.observedSymbols,
     )
   }
   return out
@@ -959,12 +1019,16 @@ fn __canon_event_push_tool_result_symbols(items: list, bucket: unknown) {
  * This is intentionally host-neutral: it reads event payloads and tool-result
  * records only. Callers that need a host fallback should pass one to
  * `canon_event_router`.
+ * Legacy nested carriers accept extension fields and ignore non-record
+ * containers. Path buckets retain their existing ordering and scalar coercions.
  *
  * @effects: []
  * @errors: []
  * @api_stability: experimental
  */
 pub fn canon_event_paths(event: dict) -> list<string> {
+  const iteration = __canon_raw_carrier(event?.iteration_info)
+  const camel_iteration = __canon_raw_carrier(event?.iterationInfo)
   let paths = []
   for bucket in [
     event?.changed_paths ?? [],
@@ -972,14 +1036,14 @@ pub fn canon_event_paths(event: dict) -> list<string> {
     event?.files_written ?? [],
     event?.filesWritten ?? [],
     event?.paths ?? [],
-    event?.iteration_info?.changed_paths ?? [],
-    event?.iteration_info?.changedPaths ?? [],
-    event?.iteration_info?.files_written ?? [],
-    event?.iteration_info?.filesWritten ?? [],
-    event?.iterationInfo?.changed_paths ?? [],
-    event?.iterationInfo?.changedPaths ?? [],
-    event?.iterationInfo?.files_written ?? [],
-    event?.iterationInfo?.filesWritten ?? [],
+    iteration?.changed_paths ?? [],
+    iteration?.changedPaths ?? [],
+    iteration?.files_written ?? [],
+    iteration?.filesWritten ?? [],
+    camel_iteration?.changed_paths ?? [],
+    camel_iteration?.changedPaths ?? [],
+    camel_iteration?.files_written ?? [],
+    camel_iteration?.filesWritten ?? [],
   ] {
     paths = __canon_event_push_path_bucket(paths, bucket)
   }
@@ -991,12 +1055,15 @@ pub fn canon_event_paths(event: dict) -> list<string> {
  *
  * harn-canon predicates can consume these under `ctx.observed_symbols` to
  * distinguish assertions grounded in observed output from guessed literals.
+ * String tool results remain accepted as legacy symbol observations.
  *
  * @effects: []
  * @errors: []
  * @api_stability: experimental
  */
 pub fn canon_event_observed_symbols(event: dict) -> list<string> {
+  const iteration = __canon_raw_carrier(event?.iteration_info)
+  const camel_iteration = __canon_raw_carrier(event?.iterationInfo)
   let symbols = []
   for bucket in [
     event?.observed_symbols ?? event?.observedSymbols,
@@ -1005,8 +1072,8 @@ pub fn canon_event_observed_symbols(event: dict) -> list<string> {
     event?.observations,
     event?.probe,
     event?.probes,
-    event?.iteration_info?.observed_symbols ?? event?.iteration_info?.observedSymbols,
-    event?.iterationInfo?.observed_symbols ?? event?.iterationInfo?.observedSymbols,
+    iteration?.observed_symbols ?? iteration?.observedSymbols,
+    camel_iteration?.observed_symbols ?? camel_iteration?.observedSymbols,
   ] {
     symbols = __canon_event_push_symbol_bucket(symbols, bucket)
   }

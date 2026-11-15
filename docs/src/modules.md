@@ -1566,6 +1566,17 @@ from the agent-message lifecycle helpers.
 | `transcript_records(fs, path)` | Strict JSONL read followed by normalization; unreadable files and malformed JSON throw |
 | `provider_call_census(records, transcript_present)` | Physical dispatch count, prepared request count, outcomes, pending identities and invalid or duplicate records |
 | `provider_response_content_shape(record)` | Visible text, distinct reasoning blocks, canonical parsed tool calls and completion flags |
+| `agent_transcript_normalize(records)` | Agent message rows retaining their raw source records |
+| `agent_transcript_normalize_report(records)` | Normalized agent rows and diagnostics for unrecognized records, invalid tool arguments and row schema failures |
+| `agent_transcript_tool_call_args(call)` | `dict<string, unknown>` arguments; unparsed JSON and non-object values remain under `_raw` |
+
+Agent message readers preserve extension fields in `raw`. Legacy message,
+function, usage and storage values that are not records behave as absent optional fields;
+field normalizers still decide which scalar values are accepted. Decode tool
+arguments against the caller's schema before relying on their field types.
+Argument parse state is separate from those values: an object may contain its
+own `_raw` key, while a JSON string containing `null` reports
+`tool_call_args_not_object` and retains `{_raw: nil}` for inspection.
 
 Normalize raw records once, then pass the typed list to `provider_call_census`.
 The runtime writes a `provider_call_measurement` after each provider attempt

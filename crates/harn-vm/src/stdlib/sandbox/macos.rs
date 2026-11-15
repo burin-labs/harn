@@ -17,7 +17,7 @@ use std::process::{Command, Output};
 #[cfg(test)]
 use self::swiftpm::compatible_args as macos_sandbox_compatible_args;
 use super::{
-    normalized_process_roots, policy_allows_child_writes, policy_allows_network,
+    policy_allows_child_writes, policy_allows_network,
     process_sandbox_developer_toolchain_read_roots,
     process_sandbox_package_manager_config_read_roots, process_sandbox_policy_read_roots,
     process_sandbox_policy_write_roots, process_sandbox_presets, process_sandbox_readonly_roots,
@@ -756,17 +756,22 @@ fn user_temp_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
 /// host decision; a host running JVM tests (whose attach socket binds there)
 /// grants a socket root.
 fn unix_socket_profile_roots(policy: &CapabilityPolicy) -> Vec<std::path::PathBuf> {
-    let mut roots = policy.process_sandbox.unix_socket_roots.clone();
+    let mut roots: Vec<std::path::PathBuf> = policy
+        .process_sandbox
+        .unix_socket_roots
+        .iter()
+        .map(std::path::PathBuf::from)
+        .collect();
     if !roots.is_empty()
         && process_sandbox_presets(policy).contains(&ProcessSandboxPreset::UserTemp)
     {
-        roots.extend(
-            user_temp_roots(policy)
-                .iter()
-                .map(|root| root.display().to_string()),
-        );
+        roots.extend(user_temp_roots(policy));
     }
-    normalized_process_roots(&roots)
+    super::policy_projection::host_resolved_roots(
+        policy,
+        roots,
+        super::policy_projection::RootUse::Write,
+    )
 }
 
 fn sandbox_profile_escape(value: &str) -> String {
