@@ -465,14 +465,17 @@ pub fn search(request: Request) -> Response {{
     let catalog: JsonValue = serde_json::from_slice(&first.stdout).expect("catalog JSON");
     assert_eq!(catalog["schema_version"], "harn-tools/2.0");
     assert_eq!(catalog["tools"][0]["name"], "search");
-    assert_eq!(
-        catalog["tools"][0]["inputSchema"]["properties"]["request"]["properties"]["options"]
-            ["properties"]["limit"]["type"],
-        "integer"
+    let input = jsonschema::validator_for(&catalog["tools"][0]["inputSchema"]).unwrap();
+    assert!(
+        input.is_valid(&serde_json::json!({"request":{"query":"known", "options":{"limit":3}}}))
     );
-    assert_eq!(
-        catalog["tools"][0]["outputSchema"]["properties"]["value"]["properties"]["score"]["type"],
-        "number"
+    assert!(!input
+        .is_valid(&serde_json::json!({"request":{"query":"known", "options":{"limit":"three"}}})));
+    assert!(!input.is_valid(&serde_json::json!({"request":{"query":"known", "options":{}}})));
+    let output = jsonschema::validator_for(&catalog["tools"][0]["outputSchema"]).unwrap();
+    assert!(output.is_valid(&serde_json::json!({"value":{"id":"known", "score":1.0}, "tags":[]})));
+    assert!(
+        !output.is_valid(&serde_json::json!({"value":{"id":"known", "score":"wrong"}, "tags":[]}))
     );
     assert_eq!(catalog["tools"][0]["cli"]["hidden"], false);
     assert_eq!(catalog["tools"][0]["deferLoading"], false);

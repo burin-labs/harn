@@ -24,15 +24,111 @@ pub fn type_expr_accepts_json_object(type_expr: &TypeExpr) -> bool {
     }
 }
 
-pub(super) fn resolver_for_module(path: &Path, program: &[SNode]) -> harn_vm::TypeSchemaResolver {
-    let module_graph = harn_modules::build(&[path.to_path_buf()]);
-    let mut schema_program = module_graph
-        .imported_type_declarations_for_file(path)
-        .unwrap_or_default();
-    // Local declarations come last because the resolver uses declaration
-    // order for shadowing, matching the module checker's visible scope.
-    schema_program.extend_from_slice(program);
-    harn_vm::TypeSchemaResolver::from_program(&schema_program)
+pub(super) fn resolver_for_module(
+    path: &Path,
+    program: &[SNode],
+    source_len: usize,
+) -> Result<(harn_vm::TypeSchemaResolver, harn_modules::SourceDocuments), crate::DispatchError> {
+    use harn_vm::wire::{
+        declaration_name, ResolvedWireDeclaration, ResolvedWireScope, WireSourceRef,
+    };
+    use std::collections::BTreeMap;
+    let path = std::fs::canonicalize(path).map_err(|_| {
+        crate::DispatchError::Validation("export source identity is unavailable".into())
+    })?;
+    let module_graph = harn_modules::build(std::slice::from_ref(&path));
+    if let Some(failure) = module_graph.import_compile_failures(&path).first() {
+        return Err(crate::DispatchError::Validation(format!(
+            "export import could not be parsed: {}",
+            failure.module_path.display()
+        )));
+    }
+    let documents = module_graph.source_documents(&path).map_err(|_| {
+        crate::DispatchError::Validation("export source identity is unavailable".into())
+    })?;
+    let mut sites = module_graph
+        .imported_type_declaration_sites_for_file(&path)
+        .ok_or_else(|| {
+            crate::DispatchError::Validation("export type imports could not be resolved".into())
+        })?;
+    sites.extend(
+        program
+            .iter()
+            .filter(|node| declaration_name(node).is_some())
+            .map(|declaration| harn_modules::LocatedTypeDeclaration {
+                file: path.clone(),
+                declaration: declaration.clone(),
+            }),
+    );
+    let identity = |file: &Path, name: &str| {
+        let module = documents
+            .document_for(file)
+            .expect("resolved graph declaration");
+        format!("{module}::{name}")
+    };
+    let mut root_bindings = BTreeMap::new();
+    let mut declarations = BTreeMap::new();
+    for site in &sites {
+        let Some(name) = declaration_name(&site.declaration) else {
+            continue;
+        };
+        if let Some(visible) = module_graph.type_declaration_visible_from(&path, name) {
+            root_bindings.insert(name.to_owned(), identity(&visible.file, name));
+        }
+        let id = identity(&site.file, name);
+        let (_, node) = harn_parser::peel_attributes(&site.declaration);
+        let source = if site.file.is_absolute() {
+            WireSourceRef::TextSpan {
+                document: documents
+                    .document_for(&site.file)
+                    .expect("graph source")
+                    .into(),
+                start: node.span.start.try_into().map_err(|_| {
+                    crate::DispatchError::Validation("export source extent is too large".into())
+                })?,
+                end: node.span.end.try_into().map_err(|_| {
+                    crate::DispatchError::Validation("export source extent is too large".into())
+                })?,
+            }
+        } else {
+            WireSourceRef::Synthetic {
+                owner: documents
+                    .document_for(&site.file)
+                    .expect("graph source")
+                    .into(),
+            }
+        };
+        let bindings = module_graph
+            .type_declaration_bindings(site)
+            .into_iter()
+            .map(|(name, file)| {
+                let id = identity(&file, &name);
+                (name, id)
+            })
+            .collect();
+        declarations.insert(
+            id.clone(),
+            ResolvedWireDeclaration {
+                id,
+                source,
+                declaration: site.declaration.clone(),
+                bindings,
+            },
+        );
+    }
+    let resolver = harn_vm::TypeSchemaResolver::from_resolved_wire_scope(ResolvedWireScope {
+        source: WireSourceRef::TextSpan {
+            document: documents.document_for(&path).expect("entry source").into(),
+            start: 0,
+            end: source_len.try_into().map_err(|_| {
+                crate::DispatchError::Validation("export source extent is too large".into())
+            })?,
+        },
+        declarations: declarations.into_values().collect(),
+        bindings: root_bindings,
+    })
+    .map_err(|error| crate::DispatchError::Validation(error.to_string()))?;
+    Ok((resolver, documents))
 }
 
 pub(super) fn public_params(params: &[TypedParam]) -> &[TypedParam] {
@@ -125,14 +221,16 @@ pub fn inspect(harness: Harness, request: Request) -> Request { return request }
 
         let catalog = ExportCatalog::from_path(&server).expect("catalog");
         let inspect = catalog.function("inspect").expect("inspect export");
-        assert_eq!(
-            inspect.input_schema["properties"]["request"]["properties"]["hypothesis_id"]["type"],
-            "string"
+        let input = jsonschema::validator_for(&inspect.input_schema).unwrap();
+        let value = serde_json::json!({"kind":"inspect", "hypothesis_id":"known"});
+        assert!(input.is_valid(&serde_json::json!({"request":value})));
+        assert!(
+            !input.is_valid(&serde_json::json!({"request":{"kind":"inspect", "hypothesis_id":17}}))
         );
-        assert_eq!(
-            inspect.output_schema.as_ref().expect("output")["properties"]["kind"]["const"],
-            "inspect"
-        );
+        let output =
+            jsonschema::validator_for(inspect.output_schema.as_ref().expect("output")).unwrap();
+        assert!(output.is_valid(&value));
+        assert!(!output.is_valid(&serde_json::json!({"kind":"other", "hypothesis_id":"known"})));
     }
 
     #[test]
@@ -172,16 +270,23 @@ pub fn inspect() -> Result { return nil }
             .output_schema
             .as_ref()
             .expect("output schema");
-        let outcome = &schema["anyOf"][0];
-        let success = &outcome["oneOf"][0];
-        let envelope = &success["properties"]["fields"]["prefixItems"][0];
-        assert_eq!(success["properties"]["variant"]["const"], "Success");
-        assert_eq!(envelope["properties"]["value"]["type"], "string");
-        assert_eq!(envelope["properties"]["labels"]["items"]["type"], "string");
-        assert_eq!(
-            envelope["properties"]["scores"]["anyOf"][0]["additionalProperties"]["type"],
-            "integer"
-        );
-        assert_eq!(schema["anyOf"][1]["type"], "null");
+        let validator = jsonschema::validator_for(schema).unwrap();
+        let success = serde_json::json!({"enum":"Outcome", "variant":"Success", "fields":[{
+            "value":"known", "labels":["one"], "scores":{"score":3}
+        }]});
+        assert!(validator.is_valid(&success));
+        assert!(validator.is_valid(&serde_json::Value::Null));
+        for (field, wrong) in [
+            ("value", serde_json::json!(17)),
+            ("labels", serde_json::json!([17])),
+            ("scores", serde_json::json!({"score":"wrong"})),
+        ] {
+            let mut invalid = success.clone();
+            invalid["fields"][0][field] = wrong;
+            assert!(!validator.is_valid(&invalid), "{field}");
+        }
+        let mut invalid = success;
+        invalid["variant"] = serde_json::json!("Unknown");
+        assert!(!validator.is_valid(&invalid));
     }
 }

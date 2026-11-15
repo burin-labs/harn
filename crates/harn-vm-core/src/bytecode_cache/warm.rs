@@ -103,7 +103,7 @@ impl CachePrecompiler {
                 // old typed projection with a new graph identity.
                 let manifest = match manifest.check(&manifest.entry) {
                     ManifestCheck::Valid => manifest,
-                    ManifestCheck::ValidAfterRecheck { refreshed } => refreshed,
+                    ManifestCheck::ValidAfterRecheck { refreshed } => *refreshed,
                     ManifestCheck::Stale => return None,
                 };
                 result.manifest = Some(manifest);

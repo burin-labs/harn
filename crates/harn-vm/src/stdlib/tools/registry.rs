@@ -7,6 +7,30 @@ pub(super) fn register(vm: &mut crate::vm::Vm) {
 
 #[harn_builtin(
     exposure = "pure",
+    sig = "tool_registry_bind(catalog: ToolCatalog, handlers: dict) -> ToolRegistry",
+    category = "tools"
+)]
+fn tool_registry_bind_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let refused =
+        || VmError::Runtime("tool_registry_bind requires a catalog and exact closure map".into());
+    let json = crate::tool_registry::result_to_json(args.first().ok_or_else(refused)?)
+        .map_err(|_| refused())?;
+    let catalog = serde_json::from_value(json).map_err(|_| refused())?;
+    let handlers = args.get(1).and_then(VmValue::as_dict).ok_or_else(refused)?;
+    let handlers = handlers
+        .iter()
+        .map(|(name, handler)| {
+            let VmValue::Closure(handler) = handler else {
+                return Err(refused());
+            };
+            Ok((name.to_string(), handler.as_ref().clone()))
+        })
+        .collect::<Result<_, VmError>>()?;
+    crate::tool_registry::bind_catalog_handlers(catalog, handlers)
+}
+
+#[harn_builtin(
+    exposure = "pure",
     sig = "tool_invocation_binding() -> dict?",
     category = "tools"
 )]

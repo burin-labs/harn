@@ -38,7 +38,8 @@ pub fn tagged_bytes_json(bytes: &[u8]) -> serde_json::Value {
     })
 }
 
-pub(crate) fn bytes_json_schema(openapi_style: bool) -> serde_json::Map<String, serde_json::Value> {
+/// Schema for the canonical tagged byte value in the selected schema dialect.
+pub fn bytes_json_schema(openapi_style: bool) -> serde_json::Map<String, serde_json::Value> {
     let encoded = if openapi_style {
         serde_json::json!({"type": "string", "format": "byte"})
     } else {
@@ -59,8 +60,6 @@ pub(crate) fn bytes_json_schema(openapi_style: bool) -> serde_json::Map<String, 
 }
 
 pub(crate) fn decode_tagged_bytes(value: &VmValue) -> Option<VmValue> {
-    use base64::Engine;
-
     let fields = value.as_dict()?;
     if fields.len() != 1 {
         return None;
@@ -68,10 +67,17 @@ pub(crate) fn decode_tagged_bytes(value: &VmValue) -> Option<VmValue> {
     let VmValue::String(encoded) = fields.get(BYTES_B64_TAG)? else {
         return None;
     };
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(encoded.as_bytes())
-        .ok()?;
+    let bytes = decode_canonical_base64(encoded)?;
     Some(VmValue::Bytes(std::sync::Arc::new(bytes)))
+}
+
+/// Decode the exact padded base64 spelling emitted by tagged_bytes_json.
+pub fn decode_canonical_base64(encoded: &str) -> Option<Vec<u8>> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()?;
+    (base64::engine::general_purpose::STANDARD.encode(&bytes) == encoded).then_some(bytes)
 }
 
 pub fn json_to_vm_value(jv: &serde_json::Value) -> VmValue {

@@ -367,17 +367,22 @@ impl McpSource {
     pub(super) async fn call_tool(&self, invocation: ToolInvocation) -> ToolCallOutcome {
         match self {
             Self::Exports(exports) => exports.call_tool(invocation).await,
-            Self::Script(script) => ToolCallOutcome {
-                response: script
+            Self::Script(script) => {
+                let cancel = invocation.cancel_token;
+                let response = script
                     .call_tool(
                         invocation.request_id,
                         invocation.params,
                         invocation.progress,
                         invocation.as_task,
+                        cancel.clone(),
                     )
-                    .await,
-                cancelled: false,
-            },
+                    .await;
+                ToolCallOutcome {
+                    response,
+                    cancelled: cancel.load(Ordering::SeqCst),
+                }
+            }
         }
     }
 }

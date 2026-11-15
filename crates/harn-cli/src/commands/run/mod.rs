@@ -61,8 +61,9 @@ use self::lifecycle::{RunExecution, TerminalRun};
 pub use self::llm_mock::*;
 pub(crate) use self::manifest_runtime::connect_mcp_servers;
 pub(crate) use self::mcp_serve::{
-    load_file_tool_registry, resolve_card_source, run_file_mcp_serve, LoadedToolRegistry,
-    RunFileAppServe, RunFileMcpServeHttp, RunFileMcpServeMode,
+    load_file_tool_registry, load_file_tool_registry_with_sources, resolve_card_source,
+    run_file_mcp_serve, LoadedToolRegistry, RunFileAppServe, RunFileMcpServeHttp,
+    RunFileMcpServeMode,
 };
 use self::reporting::{
     append_run_provenance_event, emit_run_attestation, emit_run_aux_for_exit,
@@ -878,6 +879,7 @@ async fn execute_run_inner_scoped(
             source,
             chunk,
             link_table: None,
+            source_context: None,
         })
     } else {
         compile_or_load_chunk_with_timing(
@@ -891,6 +893,7 @@ async fn execute_run_inner_scoped(
         source,
         chunk,
         link_table,
+        source_context: _,
     } = match loaded {
         Ok(loaded) => loaded,
         Err(failure) => {

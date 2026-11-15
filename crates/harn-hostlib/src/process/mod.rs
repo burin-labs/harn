@@ -8,6 +8,7 @@
 
 pub(crate) mod call_scope;
 pub mod handle;
+mod mcp;
 pub mod mock;
 pub mod owner_death;
 mod program_lookup;
@@ -22,6 +23,8 @@ pub use handle::{
     OwnerDeathPolicy, ProcessCleanupChild, ProcessCleanupReport, ProcessError, ProcessHandle,
     ProcessKiller, ProcessSpawner, SpawnSpec, SpawnerGuard, WaitOutcome,
 };
+pub(crate) use mcp::register as register_native_mcp;
+pub use mcp::{connect_guarded_mcp_stdio, McpProcessSpec};
 pub use mock::{MockHandleController, MockProcess, MockProcessConfig, MockSpawner};
 pub use program_lookup::{
     observe_program_lookup, ProgramLookupObservation, ProgramLookupUnmeasured,

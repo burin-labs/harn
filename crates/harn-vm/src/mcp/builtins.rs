@@ -290,7 +290,7 @@ pub(crate) async fn resolve_input_required_result(
 
 /// The MCP client in `args[0]`, or a thrown `"{builtin}: ... must be an MCP
 /// client"` error naming the argument the way the builtin's docs do.
-fn client_arg(
+pub(super) fn client_arg(
     args: &[VmValue],
     builtin: &str,
     position: &str,
@@ -313,6 +313,7 @@ fn required_display_arg(args: &[VmValue], message: &str) -> Result<String, VmErr
 }
 
 pub fn register_mcp_builtins(vm: &mut Vm) {
+    super::native_binding::register(vm);
     vm.register_capability_method(
         harn_builtin_meta::CapabilityId::Tools,
         "mcp_roots",
