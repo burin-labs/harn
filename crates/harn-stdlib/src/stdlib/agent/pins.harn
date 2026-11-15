@@ -335,11 +335,11 @@ fn __pin_reminder_validate(options: dict) {
   return options
 }
 
-fn __pin_reminder_body(agent: HarnessAgent, content: string?, options: dict) {
+fn __pin_reminder_body(agent: HarnessAgent, content: string?, options: dict) -> string {
   const limit = options?.max_body
   const text = to_string(content ?? "")
   if type_of(limit) != "int" || limit <= 0 || len(text) <= limit {
-    return content
+    return text
   }
   const retained = text.substring(0, limit)
   let _ = agent_report_truncation(
