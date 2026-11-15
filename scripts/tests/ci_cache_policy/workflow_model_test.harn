@@ -1,11 +1,22 @@
 import { read_yaml_typed } from "std/fs"
 import { assert_error_contains } from "std/testing"
+import { make_target_path_gate_errors } from "../../ci_cache_policy/make_target_paths.harn"
 import {
   CiAction,
   CiWorkflow,
+  action_post_condition,
   ci_text,
+  concurrency_cancel,
+  job_continue_on_error,
   job_needs,
+  job_runner,
+  job_timeout,
   matrix_include_rows,
+  step_continue_on_error,
+  step_timeout,
+  strategy_fail_fast,
+  strategy_max_parallel,
+  trigger_ignored_paths,
 } from "../../ci_cache_policy/workflow_model.harn"
 
 pipeline test_current_workflow_decodes_once(harness: Harness) {
@@ -46,6 +57,85 @@ pipeline test_workflow_decode_rejects_wrong_owned_shapes() {
     assert(is_err(schema_parse(source, schema_of(CiWorkflow))), "wrong owned shapes must refuse")
   }
   assert(is_err(schema_parse({runs: {steps: "not steps"}}, schema_of(CiAction))))
+  assert(is_err(schema_parse({runs: {main: {unexpected: "object"}}}, schema_of(CiAction))))
+  assert(is_err(schema_parse({runs: {post: ["not a path"]}}, schema_of(CiAction))))
+}
+
+pipeline test_hyphenated_workflow_fields_preserve_typed_values() {
+  for runner in ["ubuntu-24.04", ["self-hosted", "Linux"], {group: "build", labels: "Linux"}] {
+    assert_eq(job_runner({"runs-on": runner}), runner)
+  }
+  assert_eq(job_runner(nil), nil)
+  assert_eq(job_timeout({"timeout-minutes": 5}), 5)
+  const timeout_expression = "$" + "{{ inputs.timeout }}"
+  assert_eq(step_timeout({"timeout-minutes": timeout_expression}), timeout_expression)
+  assert_eq(step_continue_on_error({"continue-on-error": false}), false)
+  const optional_expression = "$" + "{{ matrix.optional }}"
+  assert_eq(job_continue_on_error({"continue-on-error": optional_expression}), optional_expression)
+  assert_eq(strategy_fail_fast({strategy: {"fail-fast": false}}), false)
+  assert_eq(strategy_max_parallel({strategy: {"max-parallel": 2}}), 2)
+  assert_eq(concurrency_cancel({"cancel-in-progress": true}), true)
+  assert_eq(concurrency_cancel("group shorthand"), nil)
+  assert_eq(trigger_ignored_paths({"paths-ignore": ["docs/**"]}), ["docs/**"])
+  assert_eq(action_post_condition({runs: {"post-if": "success()"}}), "success()")
+}
+
+pipeline test_hyphenated_workflow_fields_refuse_malformed_owned_values() {
+  assert_error_contains(fn() { return job_runner({"runs-on": 12}) }, "at root")
+  assert_error_contains(fn() { return job_timeout({"timeout-minutes": false}) }, "at root")
+  assert_error_contains(fn() { return step_timeout({"timeout-minutes": []}) }, "at root")
+  assert_error_contains(
+    fn() { return step_continue_on_error({"continue-on-error": {}}) },
+    "at root",
+  )
+  assert_error_contains(fn() { return job_continue_on_error({"continue-on-error": 1}) }, "at root")
+  assert_error_contains(
+    fn() { return strategy_fail_fast({strategy: {"fail-fast": []}}) },
+    "at root",
+  )
+  assert_error_contains(
+    fn() { return strategy_max_parallel({strategy: {"max-parallel": false}}) },
+    "at root",
+  )
+  assert_error_contains(fn() { return concurrency_cancel({"cancel-in-progress": 1}) }, "at root")
+  assert_error_contains(
+    fn() { return trigger_ignored_paths({"paths-ignore": "docs/**"}) },
+    "at root",
+  )
+  assert_error_contains(fn() { return action_post_condition({runs: {"post-if": true}}) }, "at root")
+}
+
+pipeline test_path_filter_decode_refuses_scalar_coercion() {
+  const gates = [{job: "proof", filter: "proof", target: "proof"}]
+  const makefile = "proof:\n\tbash scripts/tool.sh\n"
+  const steps = [{run: "make proof"}]
+  const filters = "proof: [.github/workflows/ci.yml, Makefile, scripts/tool.sh]"
+  assert_eq(
+    make_target_path_gate_errors(
+      {
+        jobs: {
+          changes: {steps: [{id: "surface_filter", with: {filters: filters}}]},
+          proof: {steps: steps},
+        },
+      },
+      makefile,
+      gates,
+    ),
+    [],
+  )
+  assert_error_contains(
+    fn() { return make_target_path_gate_errors(
+      {
+        jobs: {
+          changes: {steps: [{id: "surface_filter", with: {filters: "proof: [12]"}}]},
+          proof: {steps: steps},
+        },
+      },
+      makefile,
+      gates,
+    ) },
+    "must declare string-list path filters",
+  )
 }
 
 pipeline test_job_needs_preserves_names_and_missing_jobs() {

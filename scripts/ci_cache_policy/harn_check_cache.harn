@@ -7,6 +7,7 @@ import {
   UPSTREAM_CACHE_RESTORE_PREFIX,
   UPSTREAM_CACHE_SAVE_PREFIX,
   UPSTREAM_GENERIC_CACHE_PREFIX,
+  step_continue_on_error,
   step_uses,
   workflow_events,
 } from "./policy_core.harn"
@@ -45,7 +46,7 @@ fn steps_with_prefix(action: CiAction?, prefix: string) -> list<CiStep> {
 }
 
 fn non_fatal(step: CiStep?) -> bool {
-  return lowercase(trim(to_string(step?.["continue-on-error"] ?? "false"))) == "true"
+  return lowercase(trim(to_string(step_continue_on_error(step) ?? "false"))) == "true"
 }
 
 /**

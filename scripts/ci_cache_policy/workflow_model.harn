@@ -29,6 +29,7 @@ pub type CiMatrix = {
 }
 
 pub type CiJob = {
+  name?: string,
   steps?: list<CiStep>,
   env?: dict<string, CiScalar>,
   needs?: string | list<string>,
@@ -63,18 +64,89 @@ pub type CiEvents = {
 }
 
 pub type CiWorkflow = {
+  name?: string,
   jobs?: dict<string, CiJob>,
   env?: dict<string, CiScalar>,
+  permissions?: string | dict<string, string>,
   on?: string | list<string> | CiEvents,
   concurrency?: string | CiConcurrency,
+  ...dict,
+}
+
+pub type CiActionRuns = {
+  using?: string,
+  main?: string,
+  pre?: string,
+  post?: string,
+  steps?: list<CiStep>,
   ...dict,
 }
 
 pub type CiAction = {
   inputs?: dict<string, CiInput>,
   outputs?: dict<string, {value?: string, ...dict}>,
-  runs?: {using?: string, steps?: list<CiStep>, ...dict},
+  runs?: CiActionRuns,
   ...dict,
+}
+
+pub type CiRunner = string \
+  | list<string> \
+  | {group?: string, labels?: string | list<string>, ...dict}
+
+type CiOptionalRunner = CiRunner?
+
+type CiTimeout = string | int | float | nil
+
+type CiBooleanExpression = string | bool | nil
+
+type CiCountExpression = string | int | nil
+
+type CiPaths = list<string>?
+
+type CiText = string?
+
+/** GitHub's hyphenated keys are decoded here because record fields are identifiers. */
+pub fn job_runner(job: CiJob?) -> CiRunner? {
+  return schema_expect(job?.["runs-on"], schema_of(CiOptionalRunner))
+}
+
+pub fn job_timeout(job: CiJob?) -> string | int | float | nil {
+  return schema_expect(job?.["timeout-minutes"], schema_of(CiTimeout))
+}
+
+pub fn step_timeout(step: CiStep?) -> string | int | float | nil {
+  return schema_expect(step?.["timeout-minutes"], schema_of(CiTimeout))
+}
+
+pub fn step_continue_on_error(step: CiStep?) -> string | bool | nil {
+  return schema_expect(step?.["continue-on-error"], schema_of(CiBooleanExpression))
+}
+
+pub fn job_continue_on_error(job: CiJob?) -> string | bool | nil {
+  return schema_expect(job?.["continue-on-error"], schema_of(CiBooleanExpression))
+}
+
+pub fn strategy_fail_fast(job: CiJob?) -> string | bool | nil {
+  return schema_expect(job?.strategy?.["fail-fast"], schema_of(CiBooleanExpression))
+}
+
+pub fn strategy_max_parallel(job: CiJob?) -> string | int | nil {
+  return schema_expect(job?.strategy?.["max-parallel"], schema_of(CiCountExpression))
+}
+
+pub fn concurrency_cancel(concurrency: string | CiConcurrency | nil) -> string | bool | nil {
+  if type_of(concurrency) == "string" {
+    return nil
+  }
+  return schema_expect(concurrency?.["cancel-in-progress"], schema_of(CiBooleanExpression))
+}
+
+pub fn trigger_ignored_paths(trigger: CiTrigger?) -> list<string>? {
+  return schema_expect(trigger?.["paths-ignore"], schema_of(CiPaths))
+}
+
+pub fn action_post_condition(action: CiAction?) -> string? {
+  return schema_expect(action?.runs?.["post-if"], schema_of(CiText))
 }
 
 /** Policy checks that enumerate legs require a statically declared matrix. */
