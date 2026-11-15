@@ -214,7 +214,7 @@ impl harn_vm::agent_events::AgentEventSink for StopAtReadCompletion {
 
 fn confirmed_read_pipeline(session_id: &str, retain_first: bool) -> String {
     format!(
-        r###"
+        r#"
 import {{ llm_text, with_llm_script }} from "std/testing"
 import {{ agent_tool_handler_result }} from "std/agent/tool_lifecycle"
 
@@ -283,7 +283,7 @@ pipeline main(harness: Harness) {{
     pending: pending.pendingCount,
   }}))
 }}
-"###
+"#
     )
 }
 
