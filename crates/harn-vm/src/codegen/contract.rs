@@ -243,7 +243,7 @@ pub struct CodegenDiagnostic {
     pub code: CodegenDiagnosticCode,
     pub operation: Option<String>,
     pub type_id: Option<WireTypeId>,
-    pub source: Option<WireSourceRef>,
+    pub source: Option<Box<WireSourceRef>>,
     pub structural_path: String,
 }
 

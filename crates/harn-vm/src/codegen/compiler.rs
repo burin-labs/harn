@@ -251,7 +251,7 @@ fn wire_error(operation: &str, failure: WireFailure) -> CodegenDiagnostic {
             Some(operation.into())
         },
         type_id: failure.type_id,
-        source: Some(failure.source),
+        source: Some(Box::new(failure.source)),
         structural_path: failure.structural_path,
     }
 }

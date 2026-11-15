@@ -18,10 +18,10 @@ pub fn compile_codegen_ir_with_sources(
     operations: &[String],
 ) -> Result<(ValidatedCodegenIr, harn_modules::SourceDocuments), CodegenDiagnostic> {
     let exports = crate::ExportCatalog::from_path(path).map_err(|_| CodegenDiagnostic {
-        source: Some(WireSourceRef::DocumentPointer {
+        source: Some(Box::new(WireSourceRef::DocumentPointer {
             document: path.to_string_lossy().into_owned(),
             pointer: String::new(),
-        }),
+        })),
         ..CodegenDiagnostic::new(CodegenDiagnosticCode::SourceUnavailable)
     })?;
     let catalog = exports

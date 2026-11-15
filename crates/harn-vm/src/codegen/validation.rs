@@ -54,7 +54,7 @@ fn validate_structure(ir: &CodegenIr) -> Result<(), CodegenDiagnostic> {
             code: CodegenDiagnosticCode::UnsupportedWireType,
             operation: None,
             type_id: error.type_id,
-            source: Some(error.source),
+            source: Some(Box::new(error.source)),
             structural_path: error.structural_path,
         })?;
     let mut ids = BTreeSet::new();
@@ -93,7 +93,7 @@ fn validate_structure(ir: &CodegenIr) -> Result<(), CodegenDiagnostic> {
         let CodegenOutput::Value { type_id, .. } = &operation.output else {
             return Err(CodegenDiagnostic {
                 operation: Some(operation.id.clone()),
-                source: Some(operation.source.clone()),
+                source: Some(Box::new(operation.source.clone())),
                 ..diagnostic(CodegenDiagnosticCode::MissingOutput, "/operations/output")
             });
         };
