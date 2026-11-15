@@ -1007,7 +1007,7 @@ fn mock_error_to_vm_error(err: &MockError, mock: &LlmMock) -> VmError {
     let mut dict = BTreeMap::new();
     dict.put_str("category", err.category.as_str());
     dict.insert(
-        crate::value::intern_key("provider_usage"),
+        "provider_usage".to_string(),
         super::usage::ProviderUsageReceipt::new(
             Some(mock.input_tokens.unwrap_or(0)),
             Some(mock.output_tokens.unwrap_or(0)),
