@@ -299,6 +299,8 @@ jobs:
       - name: Verify foreground-only Rust embedding
         # Qualification can select a main ancestor without this example.
         if: ${{ github.event_name != 'workflow_dispatch' }}
+        env:
+          CARGO_BUILD_JOBS: ${{ steps.resource-budget.outputs.build_jobs }}
         run: make test-hostlib-embedding
       - name: Stress hostlib under the original concurrency and deadline policy
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.hostlib_stress }}
