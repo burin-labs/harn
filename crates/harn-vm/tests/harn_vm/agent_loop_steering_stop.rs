@@ -163,3 +163,191 @@ fn a_run_with_no_control_row_renders_no_stop_block() {
          reading rather than claim the run was not stopped; lines: {lines:?}"
     );
 }
+
+struct StopAtReadCompletion {
+    session_id: String,
+    tool_call_id: &'static str,
+    accept_stop: bool,
+    steer: bool,
+    observed_read: AtomicBool,
+    recorded_stop: AtomicBool,
+}
+
+impl harn_vm::agent_events::AgentEventSink for StopAtReadCompletion {
+    fn handle_event(&self, event: &harn_vm::agent_events::AgentEvent) {
+        use harn_vm::agent_events::{AgentEvent, ToolCallStatus};
+
+        if let AgentEvent::ToolCallUpdate {
+            session_id,
+            tool_call_id,
+            status: ToolCallStatus::Completed,
+            ..
+        } = event
+        {
+            if session_id == &self.session_id
+                && tool_call_id == self.tool_call_id
+                && !self.observed_read.swap(true, Ordering::SeqCst)
+                && self.accept_stop
+            {
+                let control = if self.steer {
+                    harn_session_store::ControlEvent::injection(
+                        "session/inject",
+                        "ctl-steer-at-read",
+                        "accepted",
+                        "finish_step",
+                        "finish_step",
+                        "message-steer-at-read",
+                        "Use a new task instead.",
+                    )
+                } else {
+                    accepted_stop_row()
+                };
+                self.recorded_stop.store(
+                    harn_vm::agent_sessions::record_control_event(session_id, &control)
+                        .is_recorded(),
+                    Ordering::SeqCst,
+                );
+            }
+        }
+    }
+}
+
+fn confirmed_read_pipeline(session_id: &str, retain_first: bool) -> String {
+    format!(
+        r#"
+import {{ llm_text, with_llm_script }} from "std/testing"
+import {{ agent_tool_handler_result }} from "std/agent/tool_lifecycle"
+
+pipeline main(harness: Harness) {{
+  const sid = "{session_id}"
+  const reads = harness.runtime.atomic(0)
+  const edits = harness.runtime.atomic(0)
+  let tools = tool_define(tool_registry(), "read_evidence", "Read current evidence.", {{
+    parameters: {{}},
+    annotations: {{kind: "read", side_effect_level: "read_only"}},
+    handler: {{ _args ->
+      harness.runtime.atomic_add(reads, 1)
+      if {retain_first} && harness.runtime.atomic_get(reads) == 1 {{
+        return agent_tool_handler_result("Read failed.", {{error: "unavailable"}}, "error")
+      }}
+      return "Evidence ready."
+    }},
+  }})
+  tools = tool_define(tools, "edit_value", "Apply the confirmed edit.", {{
+    parameters: {{}},
+    annotations: {{kind: "edit", side_effect_level: "workspace_write"}},
+    handler: {{ _args ->
+      harness.runtime.atomic_add(edits, 1)
+      return agent_tool_handler_result(
+        "applied", {{mutation_status: "applied", requires_repair_before_verify: false}},
+      )
+    }},
+  }})
+  let turn = 0
+  with_llm_script(harness.llm, [{{tool_calls: [
+    {{id: "original-edit", name: "edit_value", arguments: {{}}}},
+    {{id: "observe", name: "read_evidence", arguments: {{}}}},
+  ]}}], {{ ->
+    agent_loop(harness, "Observe, then confirm the edit.", nil, {{
+      provider: "mock", session_id: sid,
+      root: "__HARN_TEST_SESSION_STORE_ROOT__",
+      tools: tools, tool_format: "native", loop_until_done: true,
+      max_iterations: 3, final_wrapup: false, auto_compact: false,
+      verify_completion: {{ _info -> true }},
+      post_turn_callback: {{ info ->
+        turn = turn + 1
+        if turn == 1 && {retain_first} {{
+          assert_eq(harness.runtime.atomic_get(reads), 1)
+          assert_eq(harness.runtime.atomic_get(edits), 0)
+          const retained = info.dispatch.find({{ item -> item?.status == "deferred" }})
+          assert(retained != nil, "the original edit must really be retained")
+          const id = retained.dispatch_receipt.retained_proposal_id
+          assert(type_of(id) == "string" && id != "", "confirmation needs a real handle")
+          harness.llm.mock_enqueue({{tool_calls: [
+            {{id: "confirm", name: "__harn_resolve_tool_call", arguments: {{proposal_id: id, action: "resume"}}}},
+            {{id: "reread", name: "read_evidence", arguments: {{}}}},
+          ]}})
+        }} else {{
+          harness.llm.mock_enqueue(llm_text("Finished. ##DONE##"))
+        }}
+        return nil
+      }},
+    }})
+  }})
+  const pending = harness.agent.session_pending_injections(sid)
+  assert(type_of(pending?.pendingCount) == "int", "the bridge queue read must be measured")
+  harness.stdio.log(json_stringify({{
+    reads: harness.runtime.atomic_get(reads),
+    edits: harness.runtime.atomic_get(edits),
+    controls: len(harness.agent.session_control_events(sid)),
+    pending: pending.pendingCount,
+  }}))
+}}
+"#
+    )
+}
+
+fn assert_control_at_read(accept_stop: bool, retain_first: bool, steer: bool) {
+    let session_id = fresh_session_id("confirmed-read-control");
+    let sink = Arc::new(StopAtReadCompletion {
+        session_id: session_id.clone(),
+        tool_call_id: if retain_first { "reread" } else { "observe" },
+        accept_stop,
+        steer,
+        observed_read: AtomicBool::new(false),
+        recorded_stop: AtomicBool::new(false),
+    });
+    let registered = sink.clone();
+    let raw = run_with_bridge_after(&confirmed_read_pipeline(&session_id, retain_first), || {
+        harn_vm::agent_events::register_sink(session_id, registered);
+    })
+    .expect("the real bridge-backed confirmation loop must run");
+    assert!(
+        sink.observed_read.load(Ordering::SeqCst),
+        "the selected read must reach its actual completion event"
+    );
+    assert_eq!(sink.recorded_stop.load(Ordering::SeqCst), accept_stop);
+    let lines = out_lines(&raw);
+    let facts: serde_json::Value = serde_json::from_str(lines.last().expect("measured loop facts"))
+        .expect("structured loop facts");
+    assert_eq!(facts["reads"], if retain_first { 2 } else { 1 }, "{facts}");
+    assert_eq!(
+        facts["pending"], 0,
+        "no queued control may explain the refusal: {facts}"
+    );
+    assert_eq!(
+        facts["controls"],
+        u64::from(accept_stop),
+        "typed acceptance: {facts}"
+    );
+    assert_eq!(
+        facts["edits"],
+        u64::from(!accept_stop),
+        "current confirmation: {facts}"
+    );
+}
+
+#[test]
+fn an_accepted_control_during_a_read_blocks_the_confirmed_edit() {
+    assert_control_at_read(true, true, false);
+}
+
+#[test]
+fn a_confirmed_edit_after_a_read_runs_without_an_accepted_control() {
+    assert_control_at_read(false, true, false);
+}
+
+#[test]
+fn an_accepted_stop_during_a_read_blocks_the_fresh_edit() {
+    assert_control_at_read(true, false, false);
+}
+
+#[test]
+fn an_accepted_steer_during_a_read_blocks_the_fresh_edit() {
+    assert_control_at_read(true, false, true);
+}
+
+#[test]
+fn a_fresh_edit_after_a_read_runs_without_an_accepted_control() {
+    assert_control_at_read(false, false, false);
+}

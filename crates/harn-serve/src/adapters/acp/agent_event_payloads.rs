@@ -627,6 +627,13 @@ pub struct ToolBatchDisposition {
     pub receipt: Value,
 }
 
+/// Typed retained-proposal authority projected directly from its runtime owner.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolBatchProposalResolutionEvent {
+    pub resolution: harn_vm::agent_events::ToolBatchProposalResolution,
+}
+
 /// `audit` is the middleware's script-authored record; `receipt` follows the
 /// published tool-call receipt schema.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
@@ -774,6 +781,7 @@ agent_event_registry! {
     "subagent_join" => SubagentJoin,
     "subagent_stop" => SubagentStop,
     "tool_batch_disposition" => ToolBatchDisposition,
+    "tool_batch_proposal_resolution" => ToolBatchProposalResolutionEvent,
     "tool_call_audit" => ToolCallAudit,
     "tool_format_override" => ToolFormatOverride,
     "turn_phase_changed" => TurnPhaseChanged,

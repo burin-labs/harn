@@ -315,7 +315,10 @@ fn demand_resolution_rejects_remote_path_dependencies_before_enqueuing() {
         dependency,
         manifest_dir: context.dir.clone(),
     }];
-    let error = dependency_closure_lock(workspace.env(), &context, &lock, pending).unwrap_err();
+    let error = dependency_closure_lock(workspace.env(), &context, &lock, pending, |entry| {
+        locked_package_source_dir(workspace.env(), None, entry, None, false).map(Some)
+    })
+    .unwrap_err();
     assert!(
         error
             .to_string()

@@ -141,6 +141,9 @@ pub fn __dispatch_call_tally(dispatch: AgentToolDispatch) -> dict {
     if type_of(result) != "dict" {
       continue
     }
+    if result?.dispatch_receipt != nil && result.dispatch_receipt.disposition != "executed" {
+      continue
+    }
     const category = __tool_result_failure_category(result)
     if category != nil && contains(__AGENT_TOOL_NOT_THE_AGENTS_OUTCOME, category) {
       continue
@@ -165,6 +168,9 @@ pub fn __dispatch_call_tally(dispatch: AgentToolDispatch) -> dict {
 pub fn __dispatch_last_rejection_category(dispatch: AgentToolDispatch) -> string? {
   let category = nil
   for result in __dispatch_results_list(dispatch) {
+    if result?.dispatch_receipt != nil && result.dispatch_receipt.disposition != "executed" {
+      continue
+    }
     const resolved = __tool_result_failure_category(result)
     if resolved != nil && !contains(__AGENT_TOOL_NOT_THE_AGENTS_OUTCOME, resolved) {
       category = resolved
@@ -181,6 +187,9 @@ pub fn __tool_names_by_status(dispatch: AgentToolDispatch, want_ok: bool) -> lis
   const results = __dispatch_results_list(dispatch)
   let names = []
   for result in results {
+    if result?.dispatch_receipt != nil && result.dispatch_receipt.disposition != "executed" {
+      continue
+    }
     const name = __tool_result_name(result)
     if name != "" && __tool_result_ok(result) == want_ok {
       names.push(name)

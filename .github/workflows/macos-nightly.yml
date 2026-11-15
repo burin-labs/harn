@@ -186,6 +186,19 @@ jobs:
         env:
           SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
         run: git checkout --detach "$SOURCE_SHA"
+      - name: Install Go formatter
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26.6"
+          cache: false
+      - name: Install Node for language-server fixtures
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - name: Install rename language-server fixtures
+        id: rename-language-servers
+        background: true
+        run: bash scripts/ci/install_rename_language_servers.sh
       # PRs need the workspace units the Actions cache strips. A main producer
       # also uses this fallback when its exact Actions generation is absent.
       - name: Restore macOS workspace warm artifact
@@ -226,21 +239,12 @@ jobs:
       - name: Reuse unchanged workspace crates
         if: ${{ github.event_name == 'pull_request' && steps.macos-warm-restore.outputs.macos_warm_restore == 'hit' }}
         run: ./scripts/ci/reuse_workspace_crates.sh restore
-      - name: Install Go formatter
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.26.6"
-          cache: false
       - name: Install cargo-nextest
         uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
         with:
           tool: nextest@0.9.132
-      - name: Install Node for language-server fixtures
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "24"
-      - name: Install rename language-server fixtures
-        run: bash scripts/ci/install_rename_language_servers.sh
+      - name: Wait for language-server fixtures
+        wait: rename-language-servers
       # The hosted runner is two machines under one label. Most runs land on a
       # 3-core, 7 GiB M1; a few land on a 14 GiB host. Cargo's default of one
       # compiler per core runs two or three at once on the small one, which

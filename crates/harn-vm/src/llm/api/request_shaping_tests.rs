@@ -22,6 +22,7 @@ fn harn_message_metadata_stays_in_transcript_but_is_removed_from_provider_payloa
         }),
         serde_json::json!({
             "role": "tool",
+            "name": "inspect",
             "tool_call_id": "call_1",
             "content": "inspected",
             "_harn": {"result_source": "host_tool"}
@@ -44,12 +45,13 @@ fn harn_message_metadata_stays_in_transcript_but_is_removed_from_provider_payloa
         .all(|message| message.get("_harn").is_none()));
     assert_eq!(payload.messages[0]["tool_calls"][0]["id"], "call_1");
     assert_eq!(payload.messages[1]["tool_call_id"], "call_1");
+    assert_eq!(payload.messages[1]["name"], "inspect");
     assert!(payload.messages.iter().all(|message| {
         message.as_object().is_some_and(|fields| {
             fields.keys().all(|key| {
                 matches!(
                     key.as_str(),
-                    "role" | "content" | "tool_calls" | "tool_call_id"
+                    "role" | "content" | "tool_calls" | "tool_call_id" | "name"
                 )
             })
         })

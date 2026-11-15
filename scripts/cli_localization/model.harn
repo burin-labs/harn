@@ -56,8 +56,6 @@ pub fn message_plan(template: string, arity: int) -> MessagePlan {
 
 type AstNode = {kind: string, fields: unknown, ...dict<string, unknown>}
 
-type AstObject = dict<string, unknown>
-
 type AstList = list<unknown>
 
 type AstString = string
@@ -75,11 +73,11 @@ type ParsedProgram = {
 
 fn localization_calls(value: unknown) -> list<CallFields> {
   let calls: list<CallFields> = []
-  if schema_is(value, schema_of(AstList)) {
+  if type_of(value) == "list" {
     for item in value {
       calls.extend(localization_calls(item))
     }
-  } else if schema_is(value, schema_of(AstObject)) {
+  } else if type_of(value) == "dict" {
     if value.keys().contains("kind") && value.keys().contains("fields") {
       const node: AstNode = schema_expect(value, schema_of(AstNode))
       if node.kind == "FunctionCall" {

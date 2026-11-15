@@ -17,6 +17,18 @@
       "AgentObservabilitySpec"
     ],
     "parameters": [
+      {"function": "stored_state", "name": "options"},
+      {"function": "current_scope", "name": "options"},
+      {"function": "tool_batch_scope_is_current", "name": "options"},
+      {"function": "tool_batch_prepare", "name": "options"},
+      {"function": "tool_batch_inject_resolution_tool", "name": "options"},
+      {"function": "tool_batch_pending_count", "name": "options"},
+      {"function": "tool_batch_retire", "name": "options"},
+      {"function": "tool_batch_resolve_calls", "name": "options"},
+      {"function": "tool_batch_retain", "name": "options"},
+      {"function": "__tool_batch_resolution_result", "name": "options"},
+      {"function": "__tool_batch_blocked_result", "name": "options"},
+      {"function": "__tool_batch_deferred_result", "name": "options"},
       {
         "function": "__collect_unread_keys",
         "name": "value"
@@ -882,7 +894,7 @@
         "name": "opts"
       },
       {
-        "function": "__tool_batch_call_classification",
+        "function": "__tool_batch_dispatch",
         "name": "options"
       },
       {

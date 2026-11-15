@@ -78,11 +78,24 @@ pub(super) fn generate_swift(schema: &Value) -> Result<String, String> {
             out.push_str(&super::swift::swift_enum(&format!("Harn{name}"), &values));
         }
     }
+    let protocol_records = super::provider_usage::records();
     for (native, public) in &names {
         let record = records
             .iter()
             .find(|record| &record.name == public)
             .unwrap();
+        if let Some(shared) = protocol_records
+            .iter()
+            .find(|shared| shared.name == record.name)
+        {
+            if record != shared || record.fields.iter().any(|field| !field.required) {
+                return Err(format!(
+                    "native view record {} conflicts with its protocol record",
+                    record.name
+                ));
+            }
+            continue;
+        }
         append_defaulted_record(&mut out, record, &definitions[*native]["properties"])?;
     }
     for (name, definition) in [
@@ -99,6 +112,49 @@ pub(super) fn generate_swift(schema: &Value) -> Result<String, String> {
         ));
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_view_reuses_the_canonical_required_provider_record() {
+        let swift = generate_swift(&schema()).unwrap();
+        assert!(swift.contains("public var reportedCache: HarnReportedCacheTotals? = nil"));
+        assert!(!swift.contains("public struct HarnReportedCacheTotals"));
+        let mut protocol = String::new();
+        super::super::provider_usage::append(&mut protocol, Target::Swift);
+        assert_eq!(
+            protocol
+                .matches("public struct HarnReportedCacheTotals:")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn native_view_refuses_incompatible_shared_provider_records() {
+        let source = schema();
+        let mut changed_type = source.clone();
+        changed_type["$defs"]["ReportedCacheTotals"]["properties"]["read_tokens"] =
+            serde_json::json!({"type": "string"});
+        assert!(generate_swift(&changed_type)
+            .unwrap_err()
+            .contains("conflicts with its protocol record"));
+        let mut changed_presence = source;
+        changed_presence["$defs"]["ReportedCacheTotals"]["required"] = serde_json::json!([
+            "reported_calls",
+            "read_reported_calls",
+            "write_reported_calls",
+            "write_tokens"
+        ]);
+        changed_presence["$defs"]["ReportedCacheTotals"]["properties"]["read_tokens"]["default"] =
+            serde_json::json!(0);
+        assert!(generate_swift(&changed_presence)
+            .unwrap_err()
+            .contains("conflicts with its protocol record"));
+    }
 }
 
 fn append_defaulted_record(

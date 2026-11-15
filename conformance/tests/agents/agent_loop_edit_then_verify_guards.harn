@@ -111,7 +111,8 @@ fn run_case(harness: Harness, variant: string) {
     },
   )
   const handle = variant == "handle"
-  require harness.runtime.atomic_get(edits) == (handle ? 0 : 1), "the selected phase must run"
+  require harness.runtime.atomic_get(edits) == 1,
+    "the edit must run, including after a successful read-only handle observation"
   require harness.runtime.atomic_get(checks) == (handle ? 1 : 0),
     "the check must fire only for the read-only handle observation"
   const deferred = captured.events.filter(
@@ -121,7 +122,8 @@ fn run_case(harness: Harness, variant: string) {
         && event?.receipt?.disposition == "deferred"
     },
   )
-  require len(deferred) == 1, "the deferred check must leave an observable receipt"
+  require len(deferred) == (handle ? 0 : 1),
+    "blocked verification must remain observable while a successful observation releases the edit"
 }
 
 pipeline main(harness: Harness) {

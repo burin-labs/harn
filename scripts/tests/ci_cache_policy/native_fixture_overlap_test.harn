@@ -1,0 +1,70 @@
+import { read_yaml_typed } from "std/fs"
+import { macos_fixture_overlap_errors } from "../../ci_cache_policy/native_checks.harn"
+import { CiWorkflow } from "../../ci_cache_policy/workflow_model.harn"
+
+pipeline test_native_fixture_overlap_preserves_the_test_prerequisite(harness: Harness) {
+  const path = path_join(harness.fs.source_dir(), "../../../.github/workflows/macos-nightly.yml")
+  const workflow = read_yaml_typed(harness.fs, path, schema_of(CiWorkflow))
+  assert_eq(macos_fixture_overlap_errors(workflow), [])
+  for mutation in [
+    "serial",
+    "missing-wait",
+    "early-wait",
+    "early-budget",
+    "optional-installer",
+    "optional-wait",
+    "optional-expression",
+    "conditional-installer",
+    "skippable-fixtures",
+    "misleading-wait-name",
+  ] {
+    let broken = json_decode(json_stringify(workflow), schema_of(CiWorkflow))?
+    let steps = broken.jobs.nextest.steps
+    const install_index = steps.index_of(
+      steps.filter(fn(step) { step.name == "Install rename language-server fixtures" })[0],
+    )
+    const wait_index = steps.index_of(
+      steps.filter(fn(step) { step.wait == "rename-language-servers" })[0],
+    )
+    if mutation == "serial" {
+      steps[install_index].background = false
+    } else if mutation == "missing-wait" {
+      steps[wait_index].wait = "another-step"
+    } else if mutation == "early-wait" {
+      const wait = steps[wait_index]
+      steps[wait_index] = steps[install_index]
+      steps[install_index] = wait
+    } else if mutation == "early-budget" {
+      const budget_index = steps.index_of(
+        steps.filter(fn(step) { step.name == "Measure the build budget" })[0],
+      )
+      const wait = steps[wait_index]
+      steps[wait_index] = steps[budget_index]
+      steps[budget_index] = wait
+    } else if mutation == "optional-installer" {
+      steps[install_index]["continue-on-error"] = true
+    } else if mutation == "optional-wait" {
+      steps[wait_index]["continue-on-error"] = true
+    } else if mutation == "optional-expression" {
+      steps[wait_index]["continue-on-error"] = "$" + "{{ true }}"
+    } else if mutation == "conditional-installer" {
+      steps[install_index].if = "false"
+    } else if mutation == "misleading-wait-name" {
+      const setup_index = steps.index_of(
+        steps.filter(fn(step) { step.name == "Install cargo-nextest" })[0],
+      )
+      const wait = steps[wait_index]
+      steps[setup_index].name = wait.name
+      steps = steps.filter({ step -> step.wait != wait.wait }).to_list()
+      steps.push(wait)
+    } else {
+      const test_index = steps.index_of(
+        steps.filter(fn(step) { step.name == "Run workspace nextest" })[0],
+      )
+      steps[test_index].env.HARN_EXT_LSP_FIXTURES_REQUIRED = "0"
+    }
+    broken.jobs.nextest.steps = steps
+    assert(len(macos_fixture_overlap_errors(broken)) > 0, mutation)
+  }
+  assert(len(macos_fixture_overlap_errors(nil)) > 0, "Missing workflow cannot pass")
+}

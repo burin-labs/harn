@@ -322,6 +322,10 @@ pub(super) fn lex_powershell_words(command: &str) -> (Vec<String>, Vec<bool>, bo
                 dynamic = true;
                 word.push(ch);
             }
+            (Quote::None, '%') if word == "--" => {
+                unresolved = true;
+                word.push(ch);
+            }
             (Quote::None, '@' | '{' | '}' | '(' | ')') => {
                 unresolved = true;
                 word.push(ch);
@@ -361,7 +365,7 @@ fn collect_cmd(command: &str, depth: usize, analysis: &mut ShellAnalysis) {
         analysis.unresolved = true;
         return;
     }
-    for stage in lex_cmd_stages(command, analysis) {
+    for stage in lex_cmd_stages(command, analysis).0 {
         for word in &stage {
             record_argument_word(analysis, word, false);
         }
@@ -390,33 +394,54 @@ fn collect_cmd(command: &str, depth: usize, analysis: &mut ShellAnalysis) {
     }
 }
 
-fn lex_cmd_stages(command: &str, analysis: &mut ShellAnalysis) -> Vec<Vec<String>> {
+/// Literal CMD commands whose status can only advance through successful AND clauses.
+pub(super) fn cmd_status_chain(command: &str) -> Option<Vec<Vec<String>>> {
+    let mut analysis = ShellAnalysis::default();
+    let (stages, status_chain) = lex_cmd_stages(command, &mut analysis);
+    (status_chain && !analysis.unresolved && !stages.is_empty()).then_some(stages)
+}
+
+fn lex_cmd_stages(command: &str, analysis: &mut ShellAnalysis) -> (Vec<Vec<String>>, bool) {
     let mut stages = Vec::new();
     let mut stage = Vec::new();
     let mut word = String::new();
     let mut quoted = false;
+    let mut status_chain = true;
     let mut chars = command.chars().peekable();
     while let Some(ch) = chars.next() {
         match ch {
-            '^' => match chars.next() {
-                Some(escaped) => word.push(escaped),
-                None => analysis.unresolved = true,
-            },
-            '"' => quoted = !quoted,
+            '^' => {
+                status_chain = false;
+                match chars.next() {
+                    Some(escaped) => word.push(escaped),
+                    None => analysis.unresolved = true,
+                }
+            }
+            '"' => {
+                quoted = !quoted;
+                status_chain = false;
+            }
             '%' | '!' => {
                 analysis.unresolved = true;
                 word.push(ch);
             }
             '&' | '|' | '\n' | '\r' if !quoted => {
                 push_cmd_word(&mut stage, &mut word);
+                status_chain &= !stage.is_empty();
                 push_cmd_stage(&mut stages, &mut stage);
-                if chars.peek() == Some(&ch) {
+                let doubled = chars.peek() == Some(&ch);
+                status_chain &= ch == '&' && doubled;
+                if doubled {
                     chars.next();
                 }
             }
             '(' | ')' if !quoted => {
                 analysis.unresolved = true;
                 push_cmd_word(&mut stage, &mut word);
+            }
+            '<' | '>' | '\0' => {
+                status_chain = false;
+                word.push(ch);
             }
             ch if ch.is_whitespace() && !quoted => push_cmd_word(&mut stage, &mut word),
             _ => word.push(ch),
@@ -426,8 +451,18 @@ fn lex_cmd_stages(command: &str, analysis: &mut ShellAnalysis) -> Vec<Vec<String
         analysis.unresolved = true;
     }
     push_cmd_word(&mut stage, &mut word);
+    status_chain &= !stage.is_empty();
     push_cmd_stage(&mut stages, &mut stage);
-    stages
+    status_chain &= stages.iter().all(|stage| {
+        stage.first().is_some_and(|word| {
+            !word.starts_with('@')
+                && !matches!(
+                    word.to_ascii_lowercase().as_str(),
+                    "if" | "for" | "call" | "start" | "exit" | "goto" | "rem"
+                )
+        })
+    });
+    (stages, status_chain)
 }
 
 fn push_cmd_word(stage: &mut Vec<String>, word: &mut String) {
@@ -906,24 +941,85 @@ fn contains_dynamic_expansion(root: Node<'_>) -> bool {
     false
 }
 
-fn shell_c_script_index(args: &[String]) -> Option<usize> {
+pub(super) enum PosixShellInput {
+    Inline(usize),
+    File(usize),
+    Stdin,
+    Unresolved,
+}
+
+/// Decode the shell's input boundary before policy or exit proof reads it.
+pub(super) fn posix_shell_input(args: &[String]) -> PosixShellInput {
     let mut index = 0;
     while index < args.len() {
         let token = &args[index];
         if token == "--" {
+            return match args.get(index + 1) {
+                Some(file) if file != "-" => PosixShellInput::File(index + 1),
+                _ => PosixShellInput::Stdin,
+            };
+        }
+        if token == "-" {
+            return PosixShellInput::Stdin;
+        }
+        if matches!(
+            token.as_str(),
+            "-o" | "+o" | "-O" | "+O" | "--rcfile" | "--init-file"
+        ) {
+            if index + 1 >= args.len() {
+                return PosixShellInput::Unresolved;
+            }
+            index += 2;
+            continue;
+        }
+        if matches!(
+            token.as_str(),
+            "--noprofile"
+                | "--norc"
+                | "--posix"
+                | "--restricted"
+                | "--verbose"
+                | "--login"
+                | "--noediting"
+        ) {
             index += 1;
             continue;
         }
-        if token.starts_with('-') && token != "-" {
-            if token.chars().skip(1).any(|flag| flag == 'c') {
-                return (index + 1 < args.len()).then_some(index + 1);
+        if let Some(flags) = token
+            .strip_prefix('-')
+            .or_else(|| token.strip_prefix('+'))
+            .filter(|flags| !flags.is_empty())
+        {
+            if token.starts_with("--")
+                || !flags
+                    .chars()
+                    .all(|flag| "abcefhkmnpstuvxBCEFHPTilrD".contains(flag))
+            {
+                return PosixShellInput::Unresolved;
+            }
+            if flags.contains('c') {
+                return if token.starts_with('-') && !flags.contains('s') && index + 1 < args.len() {
+                    PosixShellInput::Inline(index + 1)
+                } else {
+                    PosixShellInput::Unresolved
+                };
+            }
+            if flags.contains('s') {
+                return PosixShellInput::Stdin;
             }
             index += 1;
             continue;
         }
-        return None;
+        return PosixShellInput::File(index);
     }
-    None
+    PosixShellInput::Stdin
+}
+
+fn shell_c_script_index(args: &[String]) -> Option<usize> {
+    match posix_shell_input(args) {
+        PosixShellInput::Inline(index) => Some(index),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -944,14 +1040,24 @@ enum ArgumentExecution {
 }
 
 fn argument_execution(command: &str) -> Option<ArgumentExecution> {
-    match command {
-        "eval" | "source" | "." => Some(ArgumentExecution::Opaque),
+    match command.to_ascii_lowercase().as_str() {
+        "eval" | "source" | "." | "&" | "invoke-expression" | "iex" | "invoke-command" | "icm"
+        | "start-process" | "saps" | "start" | "start-job" | "sajb" | "start-threadjob" => {
+            Some(ArgumentExecution::Opaque)
+        }
         "xargs" => Some(ArgumentExecution::InputArgv),
         "parallel" => Some(ArgumentExecution::InputShell),
         "trap" => Some(ArgumentExecution::ShellLiteral),
         "find" => Some(ArgumentExecution::FindExec),
         _ => None,
     }
+}
+
+/// The canonical registry of programs whose arguments carry more execution.
+/// Exit proof cannot assume those child statuses propagate to the program.
+pub(super) fn has_argument_execution(argv: &[String]) -> bool {
+    argv.first()
+        .is_some_and(|program| argument_execution(command_basename(program)).is_some())
 }
 
 fn collect_path_words(words: &[String], analysis: &mut ShellAnalysis) {

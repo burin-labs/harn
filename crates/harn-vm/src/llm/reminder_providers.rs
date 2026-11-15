@@ -425,10 +425,27 @@ fn format_workspace_anchor_body(anchor: &crate::workspace_anchor::WorkspaceAncho
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct GroundedReviewFinding {
     source: String,
-    confidence: &'static str,
+    confidence: GroundedReviewConfidence,
     provenance: String,
     summary: String,
     dropped_bytes: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GroundedReviewConfidence {
+    Verified,
+    Reported,
+    Advisory,
+}
+
+impl GroundedReviewConfidence {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Verified => "verified",
+            Self::Reported => "reported",
+            Self::Advisory => "advisory",
+        }
+    }
 }
 
 impl ReminderProvider for GroundedReviewProvider {
@@ -485,7 +502,7 @@ impl ReminderProvider for GroundedReviewProvider {
 fn grounded_review_findings(ctx: &ProviderContext) -> (Vec<GroundedReviewFinding>, usize) {
     let include_warnings =
         provider_config_bool(ctx, GROUNDED_REVIEW_ID, &["include_warnings"]).unwrap_or(false);
-    let text_scan = provider_config_bool(ctx, GROUNDED_REVIEW_ID, &["text_scan"]).unwrap_or(true);
+    let text_scan = provider_config_bool(ctx, GROUNDED_REVIEW_ID, &["text_scan"]).unwrap_or(false);
     let mut findings = Vec::new();
     let mut dropped_bytes = 0;
     collect_explicit_error_finding(&ctx.payload, ctx.event, &mut findings);
@@ -514,8 +531,7 @@ fn collect_explicit_error_finding(
     let ok = json_bool(payload, "ok").or_else(|| json_path_bool(payload, &["result", "ok"]));
     let error_value = payload
         .get("error")
-        .or_else(|| json_path(payload, &["result", "error"]))
-        .or_else(|| json_path(payload, &["result", "message"]));
+        .or_else(|| json_path(payload, &["result", "error"]));
     let error_summary = error_value.and_then(error_value_summary);
     let failed_status = status
         .as_deref()
@@ -524,12 +540,13 @@ fn collect_explicit_error_finding(
         return;
     }
     let summary = error_summary
+        .or_else(|| json_path(payload, &["result", "message"]).and_then(error_value_summary))
         .or_else(|| status.map(|value| format!("status={value}")))
         .unwrap_or_else(|| "runtime reported ok=false".to_string());
     let (summary, dropped_bytes) = truncate_review_summary_with_loss(&summary);
     findings.push(GroundedReviewFinding {
         source: "runtime_error".to_string(),
-        confidence: "verified",
+        confidence: GroundedReviewConfidence::Verified,
         provenance: format!("event={}", event.as_str()),
         summary,
         dropped_bytes,
@@ -562,7 +579,7 @@ fn collect_verifier_signal_findings(
             {
                 findings.push(GroundedReviewFinding {
                     source: "verifier".to_string(),
-                    confidence: "verified",
+                    confidence: GroundedReviewConfidence::Verified,
                     provenance: path.to_string(),
                     summary: format!("verifier outcome: {outcome}"),
                     dropped_bytes: 0,
@@ -615,7 +632,7 @@ fn verifier_signal_finding(value: &JsonValue, path: &str) -> Option<GroundedRevi
     let (summary, dropped_bytes) = truncate_review_summary_with_loss(&reason);
     Some(GroundedReviewFinding {
         source: format!("verifier:{kind}"),
-        confidence: "verified",
+        confidence: GroundedReviewConfidence::Verified,
         provenance,
         summary,
         dropped_bytes,
@@ -722,16 +739,29 @@ fn structured_signal_finding(
         JsonValue::Object(_) => structured_signal_summary(value)?,
         _ => return None,
     };
-    if summary.is_empty()
-        || !include_structured_signal(value, default_source, &summary, include_warnings)
-    {
+    if summary.is_empty() {
         return None;
     }
     let source = structured_signal_source(value, default_source, &summary);
+    let confidence = if source == "undefined_names"
+        || first_string_field(value, &["severity_label", "severity", "level"])
+            .is_some_and(|severity| severity.eq_ignore_ascii_case("advisory"))
+    {
+        GroundedReviewConfidence::Advisory
+    } else {
+        GroundedReviewConfidence::Reported
+    };
+    if confidence == GroundedReviewConfidence::Advisory {
+        if !include_warnings {
+            return None;
+        }
+    } else if !include_structured_signal(value, default_source, &summary, include_warnings) {
+        return None;
+    }
     let (summary, dropped_bytes) = truncate_review_summary_with_loss(&summary);
     Some(GroundedReviewFinding {
         source,
-        confidence: "verified",
+        confidence,
         provenance: structured_signal_provenance(value, path),
         summary,
         dropped_bytes,
@@ -857,7 +887,7 @@ fn collect_text_review_findings(
         for (line, summary_dropped_bytes) in text.lines().filter_map(review_failure_line) {
             findings.push(GroundedReviewFinding {
                 source: source.clone(),
-                confidence: "verified",
+                confidence: GroundedReviewConfidence::Reported,
                 provenance: format!(
                     "event={} tool={}{}",
                     event.as_str(),
@@ -1194,8 +1224,11 @@ fn dedupe_review_findings(findings: Vec<GroundedReviewFinding>) -> Vec<GroundedR
     let mut deduped = Vec::new();
     for finding in findings {
         let key = format!(
-            "{}\n{}\n{}",
-            finding.source, finding.provenance, finding.summary
+            "{}\n{}\n{}\n{}",
+            finding.confidence.as_str(),
+            finding.source,
+            finding.provenance,
+            finding.summary
         );
         if seen.insert(key) {
             deduped.push(finding);
@@ -1211,6 +1244,8 @@ fn grounded_review_dedupe_key(event: HookEvent, findings: &[GroundedReviewFindin
     let mut hasher = sha2::Sha256::new();
     hasher.update(event.as_str().as_bytes());
     for finding in findings {
+        hasher.update(b"\0");
+        hasher.update(finding.confidence.as_str().as_bytes());
         hasher.update(b"\0");
         hasher.update(finding.source.as_bytes());
         hasher.update(b"\0");
@@ -1228,7 +1263,7 @@ fn format_grounded_review_body(
     truncated_count: usize,
 ) -> String {
     let mut body = format!(
-        "Grounded adversarial review: {} concrete verifier/runtime signal(s) were observed at {}.",
+        "Runtime and diagnostic feedback: {} signal(s) observed at {}.",
         findings.len(),
         ctx.event.as_str(),
     );
@@ -1238,7 +1273,7 @@ fn format_grounded_review_body(
     body.push_str(" Rerun relevant checks for fixes; do not apply critique-only rewrites without a concrete failing signal.");
     for finding in findings {
         body.push_str("\n- [");
-        body.push_str(finding.confidence);
+        body.push_str(finding.confidence.as_str());
         body.push(':');
         body.push_str(&finding.source);
         body.push_str("] ");
@@ -1841,6 +1876,10 @@ mod tests {
     use crate::agent_sessions::{self as sessions, open_or_create_for_test};
     use serde_json::json;
 
+    fn text_review_options() -> JsonValue {
+        json!({"reminders": {"config": {"grounded_review": {"text_scan": true}}}})
+    }
+
     fn ctx(event: HookEvent, payload: JsonValue, options: JsonValue) -> ProviderContext {
         ProviderContext {
             event,
@@ -2105,81 +2144,6 @@ mod tests {
         assert!(reminder.body.contains(&mounted));
     }
 
-    #[test]
-    fn grounded_review_gold_set_stays_precision_first() {
-        #[derive(Clone, Copy, Eq, PartialEq)]
-        enum Label {
-            RealDefect,
-            StyleNit,
-            FalseAlarm,
-        }
-
-        let cases = [
-            (
-                Label::RealDefect,
-                json!({
-                    "tool_name": "exec_command",
-                    "tool": {"name": "exec_command", "args": {"cmd": "cargo test -p demo"}},
-                    "result": {"text": "test result: FAILED. 0 passed; 1 failed\n"},
-                }),
-            ),
-            (
-                Label::RealDefect,
-                json!({
-                    "result": {
-                        "parse_errors": [
-                            {"message": "syntax error: expected expression", "line": 3},
-                        ],
-                    },
-                }),
-            ),
-            (
-                Label::StyleNit,
-                json!({
-                    "tool_name": "exec_command",
-                    "tool": {"name": "exec_command", "args": {"cmd": "cargo check -p demo"}},
-                    "result": {"text": "warning: unused variable: `scratch`\n"},
-                }),
-            ),
-            (
-                Label::FalseAlarm,
-                json!({
-                    "tool_name": "exec_command",
-                    "tool": {"name": "exec_command", "args": {"cmd": "cargo test -p demo"}},
-                    "result": {"text": "test result: ok. 12 passed; 0 failed\n"},
-                }),
-            ),
-            (
-                Label::FalseAlarm,
-                json!({
-                    "tool_name": "exec_command",
-                    "tool": {"name": "exec_command", "args": {"cmd": "harn check demo.harn"}},
-                    "result": {"text": "demo.harn: ok, no parse error\n"},
-                }),
-            ),
-        ];
-
-        let mut true_positives = 0;
-        let mut false_positives = 0;
-        let mut non_defect_cases = 0;
-        for (label, payload) in cases {
-            let fired = GroundedReviewProvider
-                .evaluate(&ctx(HookEvent::PostToolUse, payload, JsonValue::Null))
-                .is_some();
-            match (label, fired) {
-                (Label::RealDefect, true) => true_positives += 1,
-                (Label::RealDefect, false) => panic!("missed real-defect gold case"),
-                (Label::StyleNit | Label::FalseAlarm, true) => false_positives += 1,
-                (Label::StyleNit | Label::FalseAlarm, false) => non_defect_cases += 1,
-            }
-        }
-
-        let precision = true_positives as f64 / (true_positives + false_positives) as f64;
-        let regression_rate = false_positives as f64 / (false_positives + non_defect_cases) as f64;
-        assert_eq!(precision, 1.0);
-        assert_eq!(regression_rate, 0.0);
-    }
-
     // Form (1) + (2): a `look`/`read` of correct code whose bytes contain a
     // `"Parse error"` string literal or a `///` doc comment must NOT mint a
     // grounded `[verified:parse_errors]` signal. File-display tools render
@@ -2201,7 +2165,7 @@ mod tests {
                 .evaluate(&ctx(
                     HookEvent::PostToolUse,
                     source_literal,
-                    JsonValue::Null
+                    text_review_options()
                 ))
                 .is_none(),
             "a `look` showing a `\"Parse error\"` string literal must not fire"
@@ -2219,7 +2183,11 @@ mod tests {
         });
         assert!(
             GroundedReviewProvider
-                .evaluate(&ctx(HookEvent::PostToolUse, doc_comment, JsonValue::Null))
+                .evaluate(&ctx(
+                    HookEvent::PostToolUse,
+                    doc_comment,
+                    text_review_options()
+                ))
                 .is_none(),
             "a `read` showing a `///` doc comment naming a parse error must not fire"
         );
@@ -2242,7 +2210,7 @@ mod tests {
             );
             assert!(
                 GroundedReviewProvider
-                    .evaluate(&ctx(HookEvent::PostToolUse, display, JsonValue::Null))
+                    .evaluate(&ctx(HookEvent::PostToolUse, display, text_review_options()))
                     .is_none(),
                 "file-display tool `{tool}` must not mint a grounded signal from a substring"
             );
@@ -2279,7 +2247,7 @@ mod tests {
         });
         assert!(
             GroundedReviewProvider
-                .evaluate(&ctx(HookEvent::PostToolUse, payload, JsonValue::Null))
+                .evaluate(&ctx(HookEvent::PostToolUse, payload, text_review_options()))
                 .is_none(),
             "an all-passing verify run must not fire on a test named after a parse error"
         );

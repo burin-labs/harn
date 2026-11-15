@@ -2114,7 +2114,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-    "expression": "render_agent_prompt_id(\n    fs,\n    \"agent.tool_contract_json\",\n    {\n      done_sentinel: __agent_done_sentinel(opts),\n      body_hint: agent_tool_call_paradigm(llm, opts).body_hint,\n      expanded_schemas: __agent_tool_listing_prompt(opts.tools),\n    },\n    opts,\n  )",
+    "expression": "render_agent_prompt_id(\n    fs,\n    \"agent.tool_contract_json\",\n    {\n      done_sentinel: __agent_done_sentinel(opts),\n      body_hint: agent_tool_call_paradigm(llm, opts).body_hint,\n      expanded_schemas: __agent_tool_listing_prompt(opts.tools, opts?._tool_search_client != nil),\n    },\n    opts,\n  )",
     "owner": "render_agent_prompt_id",
     "evidence": "Consumer render_agent_prompt_id.options in crates/harn-stdlib/src/stdlib/agent/prompts.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
     "consumers": [

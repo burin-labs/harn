@@ -25,8 +25,8 @@ pub struct SkillManifest {
     /// (case-sensitive) in a well-formed skill bundle.
     #[serde(default)]
     pub name: String,
-    /// Required. Compact one-line card that says what the skill does
-    /// and when to load it.
+    /// Compact card, resolved from `short`, `metadata.short-description`,
+    /// or `description`, in that order.
     #[serde(default)]
     pub short: String,
     /// One-line description surfaced to the model for auto-activation.
@@ -102,7 +102,7 @@ pub struct SkillManifest {
 }
 
 /// Outcome of parsing a SKILL.md frontmatter block.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ParsedFrontmatter {
     pub manifest: SkillManifest,
     /// Names of keys present in the YAML but not mapped onto
@@ -115,6 +115,7 @@ const KNOWN_CANONICAL_KEYS: &[&str] = &[
     "name",
     "short",
     "description",
+    "metadata",
     "when_to_use",
     "disable_model_invocation",
     "allowed_tools",
@@ -182,20 +183,14 @@ pub fn split_frontmatter(source: &str) -> (&str, &str) {
 /// manifest plus any unknown keys (reported as warnings by callers).
 pub fn parse_frontmatter(yaml: &str) -> Result<ParsedFrontmatter, String> {
     if yaml.trim().is_empty() {
-        return Ok(ParsedFrontmatter {
-            manifest: SkillManifest::default(),
-            unknown_fields: Vec::new(),
-        });
+        return Ok(ParsedFrontmatter::default());
     }
     let raw: YamlValue =
         crate::yaml::from_str(yaml).map_err(|e| format!("invalid SKILL.md YAML: {e}"))?;
     let map = match raw {
         YamlValue::Object(m) => m,
         YamlValue::Null => {
-            return Ok(ParsedFrontmatter {
-                manifest: SkillManifest::default(),
-                unknown_fields: Vec::new(),
-            });
+            return Ok(ParsedFrontmatter::default());
         }
         other => {
             return Err(format!(
@@ -215,6 +210,21 @@ pub fn parse_frontmatter(yaml: &str) -> Result<ParsedFrontmatter, String> {
             continue;
         }
         normalized.insert(canonical, v);
+    }
+
+    let metadata = normalized.remove("metadata").unwrap_or(YamlValue::Null);
+    if !metadata.is_null() && !metadata.is_object() {
+        return Err("SKILL.md metadata must be a YAML mapping".to_string());
+    }
+    if !normalized.contains_key("short") {
+        let card = metadata
+            .get("short-description")
+            .or_else(|| metadata.get("short_description"))
+            .or_else(|| normalized.get("description"))
+            .cloned();
+        if let Some(card) = card {
+            normalized.insert("short".to_string(), card);
+        }
     }
 
     // Hooks sometimes arrive as a list of `{event: "...", command: "..."}`
@@ -445,6 +455,52 @@ mod tests {
     fn rejects_missing_short_field() {
         let err = parse_frontmatter("name: hi\n").unwrap_err();
         assert!(err.contains("`short`"), "{err}");
+    }
+
+    #[test]
+    fn shared_skill_cards_resolve_at_the_frontmatter_boundary() {
+        for (fields, expected) in [
+            ("", "Description card"),
+            (
+                "metadata:\n  short-description: Metadata card\n",
+                "Metadata card",
+            ),
+            (
+                "metadata:\n  short_description: Metadata card\n",
+                "Metadata card",
+            ),
+            (
+                "short: Explicit card\nmetadata:\n  short-description: Metadata card\n",
+                "Explicit card",
+            ),
+        ] {
+            let parsed = parse_frontmatter(&format!(
+                "name: shared\ndescription: Description card\n{fields}"
+            ))
+            .expect("shared skill frontmatter");
+            assert_eq!(parsed.manifest.short, expected, "{fields}");
+            assert_eq!(parsed.manifest.description, "Description card");
+            assert!(parsed.unknown_fields.is_empty(), "{parsed:?}");
+        }
+    }
+
+    #[test]
+    fn explicit_invalid_skill_cards_do_not_borrow_a_valid_description() {
+        for (fields, expected_error) in [
+            ("short: ''\n", "`short`"),
+            ("metadata: []\n", "metadata must be a YAML mapping"),
+            (
+                "metadata:\n  short-description: 7\n",
+                "expected field shapes",
+            ),
+            ("metadata:\n  short-description: ''\n", "`short`"),
+        ] {
+            let error = parse_frontmatter(&format!(
+                "name: shared\ndescription: Description card\n{fields}"
+            ))
+            .unwrap_err();
+            assert!(error.contains(expected_error), "{fields}: {error}");
+        }
     }
 
     #[test]

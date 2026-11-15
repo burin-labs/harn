@@ -1,6 +1,27 @@
 [
   {
     "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+    "expression": "options?._tool_batch_dependency_state",
+    "owner": "__tool_batch_plan",
+    "evidence": "The already decoded retained state is carried into the planner beside options; it is run-local execution state, not a caller setting."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+    "expression": "previous.scope",
+    "owner": "__tool_batch_plan",
+    "evidence": "This is the scope field of computed ToolBatchContinuationState supplied by tool_batch_prepare, not a nested AgentSpec option. The lexical census follows its containing record conservatively."
+  },
+  {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
+    "expression": "opts?._tool_search_client",
+    "owner": "__agent_text_tool_contract_prompt",
+    "evidence": "Computed client search state is created by tool_search initialization and synchronized between turns; this read chooses the matching schema projection, not a caller setting."
+  },
+  {
+    "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/judge.harn",
     "expression": "opts?._turn_end_judge_due",
     "owner": "__completion_policy_plan",
@@ -120,10 +141,10 @@
   },
   {
     "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_batch_proposals.harn",
     "expression": "options?._tool_batch_dependency_state",
-    "owner": "__tool_batch_plan",
-    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
+    "owner": "stored_state",
+    "evidence": "Run-local retained proposals are decoded as the closed ToolBatchContinuationState before use; this is computed execution state, not caller policy."
   },
   {
     "scope": "AgentSpec",
@@ -331,13 +352,6 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
-    "expression": "batch_state?.deferred_signatures",
-    "owner": "__completion_result",
-    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "opts?._consecutive_text_only",
     "owner": "__maybe_inject_completion_confirmation",
     "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
@@ -380,13 +394,6 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
-    "expression": "opts?._tool_batch_dependency_state",
-    "owner": "__completion_result",
-    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
     "expression": "opts?._turn_progressing",
     "owner": "agent_compute_post_turn",
     "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
@@ -424,13 +431,6 @@
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "opts?._primary_system",
     "owner": "__agent_has_system_prompt_options",
-    "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
-  },
-  {
-    "scope": "AgentSpec",
-    "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
-    "expression": "opts?._progress_tool_system_prompt_nudge",
-    "owner": "agent_build_turn_system_fragments",
     "evidence": "Computed runtime state or a method on projected tool data, carried beside configuration in the legacy options record; not an independent caller setting."
   },
   {
@@ -646,8 +646,8 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_turn_setup.harn",
-    "expression": "pick(opts, [\"_tool_surface_user_boundary\", \"_tool_surface_narrowed_tools\"])",
+    "expression": "pick(\n      opts,\n      [\n        \"_tool_surface_user_boundary\",\n        \"_tool_surface_narrowed_tools\",\n        \"_tool_batch_dependency_state\",\n        \"run_id\",\n      ],\n    )",
     "owner": "agent_narrow_tool_surface_at_user_boundary",
-    "evidence": "This exact literal projection carries only the canonical user source identity and its derived selected tool names into already-resolved iteration options. It selects no caller setting and does not repeat route or narrowing policy."
+    "evidence": "This exact projection carries the canonical user boundary, derived tool names, and run-local retained proposal state into resolved iteration options; none is independently selected caller policy."
   }
 ]

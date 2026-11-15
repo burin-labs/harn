@@ -12,8 +12,7 @@ This page describes:
 
 - the **layered discovery** hierarchy (CLI > env > project > manifest >
   user > package > system > host),
-- the **SKILL.md frontmatter** Harn recognizes, including the required
-  compact `short:` card,
+- the **SKILL.md frontmatter** Harn recognizes and its compact card,
 - the **body substitution** (`$ARGUMENTS`, `$N`, `${HARN_SKILL_DIR}`,
   `${HARN_SESSION_ID}`) that runs over SKILL.md before the model sees
   it,
@@ -101,8 +100,9 @@ Ship it: `$ARGUMENTS`. Skill directory: `${HARN_SKILL_DIR}`.
 | Field | Type | Purpose |
 |---|---|---|
 | `name` | string | Optional in frontmatter when the directory name already provides it; Harn falls back to the enclosing skill directory basename. |
-| `short` | string | Required. One-sentence compact card describing what the skill does and when to use it. Always loaded into the startup registry and catalogs. |
+| `short` | string | Compact card loaded into the startup registry and catalogs. When omitted, Harn uses `metadata.short-description`, then `description`. An explicitly empty or invalid card is rejected. |
 | `description` | string | Optional longer summary. Useful for richer CLI output or custom matchers, but not required for lazy discovery. |
+| `metadata` | mapping | Shared tool metadata. `short-description` (or `short_description`) supplies the compact card when `short` is omitted. |
 | `when-to-use` | string | Longer activation trigger. |
 | `disable-model-invocation` | bool | If `true`, never auto-activate — explicit use only. |
 | `allowed-tools` | list of string | Restrict tool surface while the skill is active. Entries accept three shapes: an exact tool name (`"deploy_service"`), a namespace tag (`"namespace:read"` — matches every tool declared with `namespace: "read"`), or `"*"` (escape hatch that keeps the full surface, useful for skills that only carry prompt context). |
@@ -229,7 +229,7 @@ const catalog = render_always_on_catalog(entries, 2000)
 
 `skills_catalog_entries` projects the resolved registry into compact
 `{name, description, when_to_use}` cards, with `description` sourced
-from the required `short:` frontmatter (sorted deterministically by
+from the resolved compact card (sorted deterministically by
 skill id, using `<namespace>/<name>` when present).
 `render_always_on_catalog` formats those cards into a stable prompt
 block and trims the list to the requested character budget.

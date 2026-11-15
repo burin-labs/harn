@@ -457,7 +457,6 @@ pub fn open_lock_file(path: &Path) -> Result<File, PackageSnapshotError> {
 fn open_existing_lock_file(path: &Path) -> Result<File, PackageSnapshotError> {
     OpenOptions::new()
         .read(true)
-        .write(true)
         .open(path)
         .map_err(|error| PackageSnapshotError::io("open", path, error))
 }
@@ -634,6 +633,34 @@ mod tests {
 
         drop(snapshot);
         harn_flock::assert_released(&lease);
+    }
+
+    #[test]
+    fn snapshot_shared_locks_need_only_read_access() {
+        let temp = tempfile::tempdir().unwrap();
+        publish_fixture(temp.path(), "generation_a", "version = 4\n");
+        let paths = [
+            package_publication_lock_path(temp.path()),
+            generation_root(temp.path(), "generation_a").join(GENERATION_LEASE_FILE),
+        ];
+        let original = paths.map(|path| {
+            let permissions = fs::metadata(&path).unwrap().permissions();
+            let mut readonly = permissions.clone();
+            readonly.set_readonly(true);
+            fs::set_permissions(&path, readonly).unwrap();
+            (path, permissions)
+        });
+
+        let acquired = PackageSnapshot::acquire(temp.path());
+        for (path, permissions) in original {
+            fs::set_permissions(path, permissions).unwrap();
+        }
+        let snapshot = acquired.unwrap().unwrap();
+        assert_eq!(snapshot.generation(), "generation_a");
+        assert_eq!(
+            fs::read_to_string(snapshot.lock_path()).unwrap(),
+            "version = 4\n"
+        );
     }
 
     #[test]

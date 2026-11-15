@@ -10,7 +10,7 @@ use crate::llm::pairing_receipts::ToolResultOrigin;
 use crate::value::VmDictExt;
 use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
 
-use crate::agent_events::{emit_provider_usage, AgentEvent};
+use crate::agent_events::{emit_provider_usage, AgentEvent, ToolBatchDisposition};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 use harn_builtin_macros::harn_builtin;
@@ -156,6 +156,7 @@ struct AgentHostSession {
     /// Completed physical-call ledgers, including retries and results that an
     /// agent turn later rejects. Kept separate from accepted-turn totals.
     physical_usage: Option<crate::llm::usage::LlmUsage>,
+    actor_request: Option<super::actor_request::ActorRequestReceipt>,
     cache_read_tokens: i64,
     cache_write_tokens: i64,
     /// Physical provider requests dispatched while this agent session was
@@ -359,6 +360,7 @@ pub(crate) fn seed_host_session_provider_model(session_id: &str, provider: &str,
         input_tokens: 0,
         output_tokens: 0,
         physical_usage: None,
+        actor_request: None,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
         provider_call_count: 0,
@@ -529,6 +531,18 @@ pub(crate) fn record_provider_dispatch(session_id: &str) {
             accounting.provider_call_count = accounting.provider_call_count.saturating_add(1);
         });
     }
+}
+
+/// Keep the first successful actor response's matching request context in the
+/// existing run summary. A helper, refused request, transport failure, or stale
+/// run cannot claim that the actor received this context.
+pub(crate) fn record_actor_request(receipt: &super::actor_request::ActorRequestReceipt) {
+    let _ = with_session(&receipt.session_id, "record_actor_request", |session| {
+        if session.run_id == receipt.run_id && session.actor_request.is_none() {
+            session.actor_request = Some(receipt.clone());
+        }
+        Ok(())
+    });
 }
 
 /// Record one settled physical attempt and publish the owning session ledger.
@@ -1078,10 +1092,25 @@ fn host_agent_session_record_tool_results_builtin(
                 },
             },
         };
-        if ok {
-            successful.push(name.clone());
-        } else {
-            rejected.push(name.clone());
+        let records_outcome = match dict_get(result, "dispatch_receipt") {
+            None | Some(VmValue::Nil) => true,
+            Some(receipt) => {
+                let raw = dict_get(receipt, "disposition").ok_or_else(|| {
+                    VmError::Runtime("tool dispatch receipt is missing its disposition".into())
+                })?;
+                let disposition: ToolBatchDisposition = serde_json::from_value(vm_to_json(raw))
+                    .map_err(|error| {
+                        VmError::Runtime(format!("invalid tool disposition: {error}"))
+                    })?;
+                disposition == ToolBatchDisposition::Executed
+            }
+        };
+        if records_outcome {
+            if ok {
+                successful.push(name.clone());
+            } else {
+                rejected.push(name.clone());
+            }
         }
         // Lethal-trifecta ledger (Layer 1): note that untrusted content entered
         // this session's context so the dispatch gate can require confirmation

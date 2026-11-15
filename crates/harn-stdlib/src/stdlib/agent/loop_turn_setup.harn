@@ -1,3 +1,7 @@
+import {
+  tool_batch_inject_resolution_tool,
+  tool_batch_prepare,
+} from "std/agent/loop_batch_proposals"
 import "std/agent/loop_call_budget"
 import "std/agent/loop_call_resolution"
 import "std/agent/loop_denial_cutoff"
@@ -140,8 +144,17 @@ pub fn __agent_loop_turn_setup(harness: Harness, session: dict, state: dict) -> 
     {iteration: iteration_index + 1},
   )
   opts = agent_narrow_tool_surface_at_user_boundary(harness.agent, session, opts)
+  opts = opts + tool_batch_prepare(harness.agent, session, opts)
   iteration_opts = iteration_opts
-    + pick(opts, ["_tool_surface_user_boundary", "_tool_surface_narrowed_tools"])
+    + pick(
+      opts,
+      [
+        "_tool_surface_user_boundary",
+        "_tool_surface_narrowed_tools",
+        "_tool_batch_dependency_state",
+        "run_id",
+      ],
+    )
   let turn_opts = agent_skills_match(harness.agent, session, iteration_opts, iteration_index)
   if turn_opts?._skill_activated_this_turn ?? false {
     opts = __agent_reopen_tool_surface(harness.agent, session, opts)
@@ -164,11 +177,15 @@ pub fn __agent_loop_turn_setup(harness: Harness, session: dict, state: dict) -> 
     turn_opts = turn_opts + {max_tokens: command_hold_cap_tokens}
     command_hold_cap_tokens = nil
   }
-  const turn_llm_opts = __turn_llm_opts(harness, session, turn_opts, iteration_index)
+  let turn_llm_opts = __turn_llm_opts(harness, session, turn_opts, iteration_index)
   turn_opts = turn_opts + {purpose_labels: opts?.purpose_labels}
   agent_stage(harness.agent, session.session_id, "pre_compact", {iteration: iteration_index + 1})
   agent_autocompact_if_needed(harness.agent, session, turn_llm_opts)
   agent_stage(harness.agent, session.session_id, "post_compact", {iteration: iteration_index + 1})
+  turn_opts = turn_opts + tool_batch_prepare(harness.agent, session, turn_opts)
+  turn_opts = turn_opts + tool_batch_inject_resolution_tool(turn_opts)
+  opts = __sync_tool_search_state(opts, turn_opts)
+  turn_llm_opts = __turn_llm_opts(harness, session, turn_opts, iteration_index)
   const turn_prompt = __agent_loop_build_turn_prompt(
     harness,
     session,

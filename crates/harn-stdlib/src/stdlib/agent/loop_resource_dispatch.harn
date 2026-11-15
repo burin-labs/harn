@@ -1,7 +1,15 @@
+import { tool_batch_classify, tool_batch_phase_rank } from "std/agent/loop_batch_classification"
 import {
   __batch_control_boundary_clear,
   __batch_mutation_needs_observation,
 } from "std/agent/loop_batch_continuation"
+import {
+  tool_batch_definition_hash,
+  tool_batch_pending_signatures,
+  tool_batch_resolve_calls,
+  tool_batch_retain,
+  tool_batch_scope_is_current,
+} from "std/agent/loop_batch_proposals"
 import {
   __loop_dispatch_options,
   __resolve_max_concurrent_tools,
@@ -11,149 +19,12 @@ import "std/agent/loop_result_status"
 import "std/agent/loop_support"
 import "std/agent/loop_tool_calls"
 
-const __TOOL_BATCH_OBSERVATION_KINDS = ["read", "search", "think", "fetch", "inspect", "list"]
-
-const __TOOL_BATCH_MUTATION_KINDS = [
-  "edit",
-  "write",
-  "scaffold",
-  "delete",
-  "move",
-  "mutation",
-  "mutate",
-]
-
-const __TOOL_BATCH_PROCESS_KINDS = [
-  "execute",
-  "process",
-  "verify",
-  "verification",
-  "verify_completion",
-  "test",
-  "check",
-  "command",
-]
-
-const __TOOL_BATCH_TERMINAL_KINDS = ["terminal", "done", "complete", "completion"]
-
-const __TOOL_BATCH_MUTATING_SIDE_EFFECTS = [
-  "workspace",
-  "workspace_write",
-  "network",
-  "desktop_control",
-]
-
-fn __tool_batch_entry_executor(entry: any) -> string {
-  if type_of(entry) != "dict" {
-    return ""
-  }
-  if entry?.executor != nil {
-    return lowercase(to_string(entry.executor))
-  }
-  const func = entry?.function
-  if type_of(func) == "dict" {
-    return lowercase(to_string(func?.executor ?? ""))
-  }
-  return ""
-}
-
-fn __tool_batch_call_classification(call: any, tools: any, options: any = {}) {
-  const tool_name = __tool_registry_name(call)
-  const entry = __tool_registry_entry(tools, tool_name)
-  const annotations = __tool_resource_annotations(entry, options?.policy, tool_name)
-  const kind = __intra_turn_annotation_text(
-    annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind,
-  )
-  const side_effect = __intra_turn_annotation_text(
-    annotations?.side_effect_level ?? annotations?.sideEffectLevel ?? annotations?.side_effect
-      ?? annotations?.sideEffect,
-  )
-  const mutation = __intra_turn_annotation_text(
-    annotations?.mutation_classification ?? annotations?.mutationClassification
-      ?? annotations?.mutation,
-  )
-  if __tool_batch_entry_executor(entry) == "provider_native" {
-    return {phase: "provider_native", declared_mutation: false}
-  }
-  if (annotations?.terminal ?? false)
-    || contains(__TOOL_BATCH_TERMINAL_KINDS, kind)
-    || contains(options?._stop_after_successful_tools ?? [], tool_name) {
-    return {phase: "terminal", declared_mutation: false}
-  }
-  // A verification can be read-only and still depend on an earlier edit. Its
-  // declared role takes precedence over command-level read classification.
-  if annotations?.completion_evidence_role == "verification"
-    && side_effect == "process_exec"
-    && !(annotations?.destructiveHint ?? false)
-    && !contains(__TOOL_BATCH_MUTATION_KINDS, kind)
-    && !contains(__TOOL_BATCH_MUTATING_SIDE_EFFECTS, side_effect)
-    && mutation != "workspace_write" {
-    return {phase: "process_verification", declared_mutation: false, declared_verification: true}
-  }
-  // A declared read-only tool observes even when it reaches the network: the
-  // phase follows whether a call changes state, not where it reads from.
-  if !(annotations?.destructiveHint ?? false)
-    && (annotations?.readOnlyHint ?? annotations?.read_only_hint ?? false)
-    && !contains(__TOOL_BATCH_MUTATION_KINDS, kind)
-    && mutation != "workspace_write" {
-    return {phase: "observation", declared_mutation: false}
-  }
-  if !(annotations?.destructiveHint ?? false)
-    && (contains(__TOOL_BATCH_OBSERVATION_KINDS, kind)
-      || side_effect == "none"
-      || side_effect == "read_only")
-    && !contains(__TOOL_BATCH_MUTATION_KINDS, kind)
-    && !contains(__TOOL_BATCH_MUTATING_SIDE_EFFECTS, side_effect)
-    && mutation != "workspace_write" {
-    return {phase: "observation", declared_mutation: false}
-  }
-  if contains(__TOOL_BATCH_PROCESS_KINDS, kind) || side_effect == "process_exec" {
-    if __tool_batch_process_is_read_effect(call) {
-      return {phase: "observation", declared_mutation: false}
-    }
-    return {phase: "process_verification", declared_mutation: false}
-  }
-  // Unknown and conflicting annotations fail closed into the mutation phase.
-  return {
-    phase: "mutation",
-    declared_mutation: (annotations?.destructiveHint ?? false)
-      || contains(__TOOL_BATCH_MUTATION_KINDS, kind)
-      || contains(__TOOL_BATCH_MUTATING_SIDE_EFFECTS, side_effect)
-      || mutation == "workspace_write",
-  }
-}
-
 fn __tool_batch_signature(call: any) -> string {
   return __intra_turn_call_signature(call) ?? sha256(json_stringify(call))
 }
 
 fn __tool_batch_previous_deferred_signatures(state: any) {
-  if type_of(state?.deferred_signatures) == "list" {
-    return state.deferred_signatures
-  }
-  return []
-}
-
-fn __tool_batch_phase_rank(phase: string) -> int {
-  // The rank is the dependency order, not the model's emission order. A model
-  // batch declares siblings; it does not make a later read depend on an
-  // earlier mutation merely by placing that mutation first.
-  if phase == "provider_native" {
-    return 0
-  }
-  if phase == "observation" {
-    return 1
-  }
-  if phase == "mutation" {
-    return 2
-  }
-  if phase == "process_verification" {
-    return 3
-  }
-  if phase == "terminal" {
-    return 4
-  }
-  return 5
+  return tool_batch_pending_signatures(state)
 }
 
 fn __tool_batch_plan(clock: HarnessClock, tool_calls: list, tools: any, options: dict = {}) {
@@ -165,11 +36,20 @@ fn __tool_batch_plan(clock: HarnessClock, tool_calls: list, tools: any, options:
   let selected_phase = ""
   let selected_rank = 6
   for (index, call) in iter(tool_calls).enumerate() {
-    const classification = __tool_batch_call_classification(call, tools, options)
+    const name = __tool_registry_name(call)
+    const entry = __tool_registry_entry(tools, name)
+    const annotations = __tool_resource_annotations(entry, options?.policy, name)
+    const classification = tool_batch_classify(
+      __intra_turn_call_args(call),
+      entry,
+      annotations,
+      contains(options?._stop_after_successful_tools ?? [], name),
+    )
     const phase = classification.phase
     const signature = __tool_batch_signature(call)
-    const phase_rank = __tool_batch_phase_rank(phase)
-    if phase_rank < selected_rank {
+    const phase_rank = tool_batch_phase_rank(phase)
+    const resolved = call?._tool_batch_resolution != nil
+    if !resolved && phase_rank < selected_rank {
       selected_phase = phase
       selected_rank = phase_rank
     }
@@ -181,8 +61,12 @@ fn __tool_batch_plan(clock: HarnessClock, tool_calls: list, tools: any, options:
         declared_mutation: classification.declared_mutation,
         declared_verification: classification?.declared_verification ?? false,
         signature: signature,
+        definition_hash: tool_batch_definition_hash(entry),
+        resolved: resolved,
         selected: false,
-        proposal_status: if contains(previous_deferred, signature) {
+        proposal_status: if call?._retained_tool_proposal != nil {
+          "confirmed"
+        } else if contains(previous_deferred, signature) {
           "re_proposed"
         } else {
           "new"
@@ -191,11 +75,17 @@ fn __tool_batch_plan(clock: HarnessClock, tool_calls: list, tools: any, options:
     )
     signatures.push(signature)
   }
-  entries = entries.map({ entry -> entry + {selected: entry.phase == selected_phase} })
+  if selected_phase == "" {
+    selected_phase = "observation"
+  }
+  entries = entries.map(
+    { entry -> entry + {selected: !entry.resolved && entry.phase == selected_phase} },
+  )
   const batch_id = sha256(
     json_stringify(
       {
         session_id: to_string(options?.session_id ?? ""),
+        run_id: options?.run_id,
         iteration: options?._iteration ?? 0,
         signatures: signatures,
       },
@@ -208,6 +98,7 @@ fn __tool_batch_plan(clock: HarnessClock, tool_calls: list, tools: any, options:
     selected_phase: selected_phase,
     entries: entries,
     previous: previous,
+    scope: previous.scope,
   }
 }
 
@@ -216,7 +107,7 @@ fn __tool_batch_selected_entries(plan: any) {
 }
 
 fn __tool_batch_deferred_entries(plan: any) {
-  return plan.entries.filter({ entry -> !entry.selected })
+  return plan.entries.filter({ entry -> !entry.selected && !entry.resolved }).to_list()
 }
 
 fn __tool_batch_blocking_barrier_applies(plan: any) -> bool {
@@ -233,11 +124,16 @@ fn __tool_batch_receipt(
   reason: any,
   timing: any = nil,
   blocking_result: any = nil,
+  proposal_id: string? = nil,
 ) {
+  const source_batch_id = entry.call?._retained_tool_proposal?.batch_id
+    ?? plan?.previous?.batch_id
   return {
     schema: "harn.agent_tool_batch_disposition.v1",
     batch_id: plan.batch_id,
-    source_batch_id: plan?.previous?.batch_id,
+    source_batch_id: source_batch_id == "" ? nil : source_batch_id,
+    retained_proposal_id: proposal_id ?? entry.call?._retained_tool_proposal?.proposal_id,
+    source_tool_call_id: entry.call?._retained_tool_proposal?.tool_call_id,
     call_index: entry.index,
     tool_call_id: to_string(entry.call?.id ?? entry.call?.tool_call_id ?? ""),
     tool_name: __tool_registry_name(entry.call),
@@ -270,16 +166,12 @@ fn __tool_batch_deferred_result(
   entry: any,
   tools: any,
   options: any,
+  proposal_id: string,
+  reason: string = "effect_phase_boundary",
 ) {
-  const receipt = __tool_batch_receipt(plan, entry, "deferred", "effect_phase_boundary")
+  const receipt = __tool_batch_receipt(plan, entry, "deferred", reason, nil, nil, proposal_id)
   const name = __tool_registry_name(entry.call)
-  // The model tends to repeat this text to the person it is helping, so it
-  // reads as plain sequencing, not as an error or internal mechanics.
-  const observation = "[`" + name + "` not run yet]\n"
-    + "This call was held back so the earlier calls in this response could finish first; "
-    + "their results are above. Nothing went wrong. If the call is still needed after reading "
-    + "those results, make it again. This is routine ordering; do not mention it in your "
-    + "reply."
+  const observation = "[`${name}` retained, not executed]\nproposal_id=${proposal_id}"
   const result = {
     ok: false,
     status: "deferred",
@@ -307,6 +199,7 @@ fn __tool_batch_blocked_result(
   tools: any,
   options: any,
   blocking_result: any,
+  proposal_id: string,
 ) {
   const receipt = __tool_batch_receipt(
     plan,
@@ -315,6 +208,7 @@ fn __tool_batch_blocked_result(
     "blocking_mutation_result",
     nil,
     blocking_result,
+    proposal_id,
   )
   const name = receipt.tool_name
   const observation = "[skipped `" + name + "` after a blocking mutation result]\n"
@@ -322,7 +216,8 @@ fn __tool_batch_blocked_result(
     + to_string(blocking_result?.tool_name ?? "")
     + "` did not establish a usable post-mutation state (mutation_status="
     + to_string(blocking_result?.mutation_status ?? "unknown")
-    + "). Observe current state or issue a corrected mutation before verification or completion."
+    + "). Observe current state or issue a corrected mutation before verification or completion. "
+    + "The original call remains stored as proposal_id=${proposal_id}; after establishing usable state, resume it with __harn_resolve_tool_call or discard it."
   const result = {
     ok: false,
     status: "skipped_after_blocking_result",
@@ -349,6 +244,51 @@ fn __tool_batch_result_blocks_later_phase(entry: any, result: any) -> bool {
   return __intra_turn_result_mutation_status(result) != "applied"
 }
 
+fn __tool_batch_resolution_result(
+  harness: Harness,
+  plan: dict,
+  entry: dict,
+  tools: dict,
+  options: dict,
+) -> dict {
+  const resolution = entry.call._tool_batch_resolution
+  const receipt = __tool_batch_receipt(
+    plan,
+    entry,
+    "resolved",
+    resolution.reason,
+    nil,
+    nil,
+    resolution.proposal_id,
+  )
+  const observation =
+    resolution.accepted ? "The retained proposal was discarded. No tool effect was executed." : "The retained proposal was not executed: ${resolution.reason}. Issue a new proposal if it is still needed."
+  const result = {
+    ok: resolution.accepted,
+    status: resolution.accepted ? "ok" : "rejected",
+    tool_name: __tool_registry_name(entry.call),
+    tool_call_id: receipt.tool_call_id,
+    arguments: entry.call?.arguments ?? {},
+    result: {message: observation, proposal_id: resolution.proposal_id},
+    dispatch_receipt: receipt,
+    rendered_result: observation,
+    observation: observation,
+    error: resolution.accepted ? nil : observation,
+    error_category: resolution.accepted ? nil : "schema_validation",
+    executor: nil,
+  }
+  __emit_synthetic_tool_lifecycle_finish(
+    harness.agent,
+    harness.random,
+    entry.call,
+    result,
+    tools,
+    options,
+  )
+  __tool_batch_emit_receipt(harness.agent, options, receipt)
+  return result
+}
+
 fn __tool_batch_blocking_result(entry: any, result: any) {
   return {
     tool_call_id: to_string(entry.call?.id ?? entry.call?.tool_call_id ?? ""),
@@ -358,86 +298,51 @@ fn __tool_batch_blocking_result(entry: any, result: any) {
   }
 }
 
-fn __tool_batch_deferred_signatures(entries: any) {
-  return entries.map({ entry -> entry.signature })
-}
-
-fn __tool_batch_merge_deferred_signatures(previous: any, newly_deferred: list, executed: list) {
-  const previous_sigs = __tool_batch_previous_deferred_signatures(previous)
-  const executed_sigs = executed.map({ entry -> entry.signature })
-  let merged = previous_sigs.filter({ sig -> !contains(executed_sigs, sig) })
-  for sig in __tool_batch_deferred_signatures(newly_deferred) {
-    if !contains(merged, sig) {
-      merged.push(sig)
-    }
-  }
-  return merged
-}
-
-fn __tool_batch_process_is_read_effect(call: dict) -> bool {
-  const args = __intra_turn_call_args(call)
-  const command = args?.command ?? args?.cmd ?? args?.script
-  const argv = args?.argv
-  const has_command = command != nil && to_string(command) != ""
-  const has_argv = type_of(argv) == "list" && len(argv) > 0
-  if !has_command && !has_argv {
-    return false
-  }
-  const request = if has_argv {
-    {mode: "argv", argv: argv, command: to_string(command ?? "")}
-  } else {
-    {mode: "shell", command: to_string(command)}
-  }
-  const classified = try {
-    command_workspace_effect({request: request})
-  }
-  if is_err(classified) {
-    return false
-  }
-  return unwrap(classified)?.effect == "read_effect"
-}
-
 fn __tool_batch_dispatch(harness: Harness, tool_calls: list, tools: any, options: dict, cap: int) {
   const plan = __tool_batch_plan(harness.clock, tool_calls, tools, options)
-  const selected = __tool_batch_selected_entries(plan)
+  let selected = __tool_batch_selected_entries(plan)
   let deferred = __tool_batch_deferred_entries(plan)
+  let ordered = []
+  for entry in plan.entries.filter({ entry -> entry.resolved }) {
+    ordered.push(
+      {
+        index: entry.index,
+        result: __tool_batch_resolution_result(harness, plan, entry, tools, options),
+      },
+    )
+  }
   if __tool_batch_blocking_barrier_applies(plan) {
-    let blocked_results = []
+    const blocked = plan.entries.filter({ entry -> !entry.resolved }).to_list()
+    const state = tool_batch_retain(harness.agent, options, plan, blocked, [], nil, false)
     for entry in plan.entries {
-      blocked_results.push(
-        __tool_batch_blocked_result(
-          harness.agent,
-          harness.random,
-          plan,
-          entry,
-          tools,
-          options,
-          plan.previous.blocking_result,
-        ),
+      if entry.resolved {
+        continue
+      }
+      ordered.push(
+        {
+          index: entry.index,
+          result: __tool_batch_blocked_result(
+            harness.agent,
+            harness.random,
+            plan,
+            entry,
+            tools,
+            options,
+            plan.previous.blocking_result,
+            "${plan.batch_id}:${entry.index}",
+          ),
+        },
       )
     }
     return {
-      results: blocked_results,
-      state: {
-        schema: "harn.agent_tool_batch_state.v1",
-        batch_id: plan.batch_id,
-        selected_phase: plan.selected_phase,
-        deferred_signatures: __tool_batch_merge_deferred_signatures(
-          plan.previous,
-          plan.entries,
-          [],
-        ),
-        // The synthetic results above are the observation boundary for this
-        // dependency. Keeping the blocker would reject every later process or
-        // terminal proposal until the model happened to emit another
-        // mutation, turning one rejected edit into a permanent barrier.
-        blocking_result: nil,
-      },
+      results: ordered.sorted_by({ item -> item.index }).map({ item -> item.result }).to_list(),
+      state: state,
+      calls: tool_calls,
     }
   }
   const selected_calls = selected.map({ entry -> entry.call })
   const selected_indices = selected.map({ entry -> entry.index })
-  const raw_selected = __dispatch_tool_calls_with_middleware(
+  let raw_selected = __dispatch_tool_calls_with_middleware(
     harness,
     selected_calls,
     tools,
@@ -445,6 +350,37 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls: list, tools: any, options
     cap,
     selected_indices,
   )
+  // Arguments authored in this response execute without another model decision.
+  // Observations finish first; controls, context and ordinary dispatch checks
+  // still apply before mutations. Verification and completion keep their boundary.
+  const mutations = deferred.filter({ entry -> entry.phase == "mutation" }).to_list()
+  let mutation_boundary_reason = "effect_phase_boundary"
+  if plan.selected_phase == "observation" && len(mutations) > 0 {
+    if !raw_selected.all({ result -> __tool_result_ok(result) }) {
+      mutation_boundary_reason = "observation_failed"
+    } else if !__batch_control_boundary_clear(harness.agent, to_string(options?.session_id ?? "")) {
+      mutation_boundary_reason = "control_pending"
+    } else if !tool_batch_scope_is_current(
+      harness.agent,
+      to_string(options?.session_id ?? ""),
+      options,
+      plan.scope,
+    ) {
+      mutation_boundary_reason = "scope_changed"
+    } else {
+      const resumed_results = __dispatch_tool_calls_with_middleware(
+        harness,
+        mutations.map({ entry -> entry.call }),
+        tools,
+        options,
+        cap,
+        mutations.map({ entry -> entry.index }),
+      )
+      selected = selected + mutations
+      raw_selected = raw_selected + resumed_results
+      deferred = deferred.filter({ entry -> entry.phase != "mutation" }).to_list()
+    }
+  }
   let explicit_terminal_succeeded = false
   if plan.selected_phase == "terminal" {
     for result in raw_selected {
@@ -459,16 +395,16 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls: list, tools: any, options
   // returned. Selected and deferred calls are now interleaved rather than
   // split at a boundary, and on the text channel a tool result carries no
   // tool_call_id — position is the only thing tying a result to its call.
-  let ordered = []
   let blocking_result = plan.previous?.blocking_result
-  if plan.selected_phase == "mutation" {
+  if selected.any({ entry -> entry.phase == "mutation" }) {
     blocking_result = nil
   }
   for (result_index, raw_result) in iter(raw_selected).enumerate() {
     const entry = selected[result_index]
     const timing = raw_result?._tool_dispatch_timing
     let disposition = "executed"
-    let reason = "selected_effect_phase"
+    let reason =
+      entry.phase == "mutation" && plan.selected_phase == "observation" ? "mutation_after_observation" : "selected_effect_phase"
     let receipt_timing = timing
     if raw_result?.status == "blocked_by_prior_same_resource_failure"
       || raw_result?.status
@@ -527,36 +463,54 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls: list, tools: any, options
     executed = executed + [entry]
     deferred = []
   }
+  const state = tool_batch_retain(
+    harness.agent,
+    options,
+    plan,
+    deferred,
+    executed,
+    blocking_result,
+    explicit_terminal_succeeded,
+  )
   for entry in deferred {
+    const retained = state.pending.find(
+      { proposal -> proposal.batch_id == plan.batch_id && proposal.call_index == entry.index },
+    )
     ordered.push(
       {
         index: entry.index,
-        result: __tool_batch_deferred_result(
+        result: retained == nil ? __tool_batch_resolution_result(
+          harness,
+          plan,
+          entry
+            + {
+              call: entry.call
+                + {
+                  _tool_batch_resolution: {
+                    accepted: false,
+                    reason:
+                      entry.phase == "mutation" && plan.selected_phase == "observation" ? mutation_boundary_reason : "control_changed",
+                    proposal_id: "",
+                  },
+                },
+            },
+          tools,
+          options,
+        ) : __tool_batch_deferred_result(
           harness.agent,
           harness.random,
           plan,
           entry,
           tools,
           options,
+          retained.proposal_id,
+          entry.phase == "mutation" ? mutation_boundary_reason : "effect_phase_boundary",
         ),
       },
     )
   }
   const results = ordered.sorted_by({ item -> item.index }).map({ item -> item.result })
-  return {
-    results: results,
-    state: {
-      schema: "harn.agent_tool_batch_state.v1",
-      batch_id: plan.batch_id,
-      selected_phase: plan.selected_phase,
-      deferred_signatures: if explicit_terminal_succeeded {
-        []
-      } else {
-        __tool_batch_merge_deferred_signatures(plan.previous, deferred, executed)
-      },
-      blocking_result: blocking_result,
-    },
-  }
+  return {results: results, state: state, calls: tool_calls}
 }
 
 /**
@@ -1257,30 +1211,39 @@ pub fn __intra_turn_resource_blocked_result(
 
 pub fn __dispatch_tool_calls(harness: Harness, session_id: any, tool_calls: any, turn_opts: any) {
   if len(tool_calls) == 0 {
-    return {dispatch: nil, turn_opts: turn_opts, audit_flushes: []}
+    return {dispatch: nil, turn_opts: turn_opts, audit_flushes: [], calls: []}
   }
-  agent_tool_search_emit_queries(harness.agent, session_id, tool_calls, turn_opts)
   const tools = turn_opts?.tools
+  const normalized = tool_batch_resolve_calls(
+    harness.agent,
+    to_string(session_id),
+    tool_calls,
+    turn_opts,
+    { name -> __tool_registry_entry(tools, name) },
+  )
+  const normalized_opts = turn_opts + {_tool_batch_dependency_state: normalized.state}
+  agent_tool_search_emit_queries(harness.agent, session_id, normalized.calls, normalized_opts)
   const cap = __resolve_max_concurrent_tools(turn_opts)
   // `_stop_reason` is the turn's provider stop reason
   // (`stop`/`length`/`tool_calls`/...). The dispatch host primitive uses it
   // to cause-name empty-args tool calls: finish_reason=length means the
   // arguments were TRUNCATED by the output cap, anything else means the
   // provider dropped them (an IDE host bug report).
-  const dispatch_options = __loop_dispatch_options(turn_opts, session_id, cap)
-  const phased = __tool_batch_dispatch(harness, tool_calls, tools, dispatch_options, cap)
+  const dispatch_options = __loop_dispatch_options(normalized_opts, session_id, cap)
+  const phased = __tool_batch_dispatch(harness, normalized.calls, tools, dispatch_options, cap)
   const raw_dispatch = phased.results
   const audit_flushes = __collect_audit_flushes(raw_dispatch)
   const dispatch = __strip_internal_dispatch(raw_dispatch)
   agent_session_record_tool_results(harness.agent, session_id, dispatch)
   return {
     dispatch: dispatch,
+    calls: phased.calls,
     turn_opts: agent_tool_search_record_results(
       harness.agent,
       session_id,
-      tool_calls,
+      phased.calls,
       dispatch,
-      turn_opts,
+      normalized_opts,
     )
       + {_tool_batch_dependency_state: phased.state},
     audit_flushes: audit_flushes,

@@ -34,6 +34,76 @@ fn valid_catalog_json() -> JsonValue {
     })
 }
 
+#[test]
+fn catalog_prepares_shared_reference_resources_once() {
+    let mut preparations = Vec::new();
+    for extra_components in [0, 64] {
+        let mut value = valid_catalog_json();
+        let template = value["tools"][0].clone();
+        value["tools"] = JsonValue::Array(
+            (0..46)
+                .map(|index| {
+                    let mut tool = template.clone();
+                    tool["name"] = json!(format!("inspect_{index}"));
+                    tool["cli"]["command"] = json!([format!("inspect_{index}")]);
+                    tool
+                })
+                .collect(),
+        );
+        for index in 0..extra_components {
+            value["components"]["schemas"][format!("Unused{index}")] =
+                json!({"type": "object", "properties": {"id": {"type": "integer"}}});
+        }
+        let catalog: ToolCatalog = serde_json::from_value(value).expect("nonempty valid catalog");
+        assert_eq!(catalog.tools.len(), 46);
+        assert_eq!(
+            catalog.components.as_ref().unwrap().schemas.len(),
+            extra_components + 1
+        );
+        OFFLINE_REGISTRY_PREPARATIONS.with(|count| count.set(0));
+        catalog
+            .validate()
+            .expect("every schema must remain validated");
+        preparations.push(OFFLINE_REGISTRY_PREPARATIONS.with(std::cell::Cell::get));
+    }
+    assert_eq!(
+        preparations,
+        [1, 1],
+        "one resource owner per catalog validation"
+    );
+}
+
+#[test]
+fn shared_resources_preserve_unused_component_and_local_root_refusals() {
+    let mut value = valid_catalog_json();
+    value["tools"][0]["inputSchema"] = json!({
+        "type": "object",
+        "$defs": {"Local": {"type": "string"}},
+        "properties": {"name": {"$ref": "#/$defs/Local"}}
+    });
+    value["tools"][0]["outputSchema"] = json!({
+        "$defs": {"Local": {"type": "integer"}},
+        "$ref": "#/$defs/Local"
+    });
+    let valid: ToolCatalog = serde_json::from_value(value.clone())
+        .expect("each schema retains its own local reference root");
+    assert_eq!(valid.tools.len(), 1);
+
+    value["tools"][0]["outputSchema"] = json!({"$ref": "#/$defs/Local"});
+    let error = serde_json::from_value::<ToolCatalog>(value)
+        .expect_err("an input's local definitions must not leak into the output root");
+    assert!(error.to_string().contains("outputSchema"), "{error}");
+
+    for invalid in [json!({"type": 7}), json!({"$ref": "#/$defs/Missing"})] {
+        let mut value = valid_catalog_json();
+        value["components"]["schemas"]["Unused"] = invalid;
+        assert!(
+            serde_json::from_value::<ToolCatalog>(value).is_err(),
+            "resource sharing must still validate components no tool references"
+        );
+    }
+}
+
 fn shared_invalid_catalogs() -> Vec<JsonValue> {
     let mut fixtures = Vec::new();
     let mut empty_name = valid_catalog_json();

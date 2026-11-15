@@ -4014,7 +4014,7 @@ strengths = [
 tier = "frontier"
 
 [models.claude-sonnet-5-5.pricing]
-cache_read_per_mtok = 0.2
+cache_read_per_mtok = 0.1
 cache_write_1h_per_mtok = 4.0
 cache_write_per_mtok = 2.5
 input_per_mtok = 2.0
