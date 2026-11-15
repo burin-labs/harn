@@ -146,11 +146,13 @@ fn exit_evidence(
             if stage.kind != "command" {
                 return false;
             }
-            let index =
-                super::shell::unwrapped_shell_command_index(&stage.words, 0, stage.words.len());
-            stage.words[..index.min(stage.words.len())]
-                .iter()
-                .any(|word| word == "exec")
+            let invocation =
+                super::shell::unwrapped_shell_command(&stage.words, 0, stage.words.len());
+            let index = invocation.command_index;
+            !invocation.resolved
+                || stage.words[..index.min(stage.words.len())]
+                    .iter()
+                    .any(|word| word == "exec")
                 || stage.words.get(index).is_none_or(|word| {
                     let shell = crate::shells::shell_dialect_for_id(word);
                     // A literal script file is an external verifier program, just
@@ -179,8 +181,8 @@ fn exit_evidence(
         if setup {
             pipefail = true;
         } else if segment.stages.iter().any(|stage| {
-            let index =
-                super::shell::unwrapped_shell_command_index(&stage.words, 0, stage.words.len());
+            let index = super::shell::unwrapped_shell_command(&stage.words, 0, stage.words.len())
+                .command_index;
             stage
                 .words
                 .get(index)

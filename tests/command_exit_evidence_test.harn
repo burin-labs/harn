@@ -15,6 +15,9 @@ pipeline test_shell_success_proof_covers_only_required_commands() {
     "(true && true) && true",
     "{ true && true; }",
     "set -o pipefail && (cargo test | cat)",
+    "env CHECK_MODE=strict cargo test",
+    "env -u CHECK_MODE cargo test",
+    "custom-test-runner --split-string ignored",
   ] {
     const proof = shell_exit_evidence(command, "bash")
     assert(proof.scope == "all_commands", command + ": " + proof.reason)
@@ -36,6 +39,11 @@ pipeline test_shell_success_proof_covers_only_required_commands() {
     "cat <(false)",
     "bash -c 'false; true'",
     "env bash -c 'false; true'",
+    "env --split-string=\"bash -c 'false; true'\"",
+    "env --split-string \"bash -c 'false; true'\"",
+    "env -S \"bash -c 'false; true'\"",
+    "env -S\"bash -c 'false; true'\"",
+    "command env --split-string=\"bash -c 'false; true'\"",
     "X=1 command bash -c 'false; true'",
     "eval 'false; true'",
     "find . -exec false \\;",
@@ -60,4 +68,24 @@ pipeline test_shell_success_proof_covers_only_required_commands() {
   assert(shell_exit_evidence("(false; true)", "bash").scope == "masked")
   assert(shell_exit_evidence("(false || true) && true", "bash").scope == "masked")
   assert(shell_exit_evidence("(false | cat) && true", "bash").scope == "masked")
+}
+
+pipeline test_request_exit_proof_retains_wrapper_resolution_in_argv_mode() {
+  for argv in [
+    ["env", "--split-string=bash -c 'false; true'"],
+    ["env", "--split-string", "bash -c 'false; true'"],
+    ["env", "-S", "bash -c 'false; true'"],
+    ["env", "-Sbash -c 'false; true'"],
+  ] {
+    const scan = command_risk_scan({request: {mode: "argv", argv: argv}})
+    assert(scan.execution_semantics.exit_evidence.scope == "unmeasured", json_stringify(argv))
+  }
+  for argv in [
+    ["env", "CHECK_MODE=strict", "cargo", "test"],
+    ["env", "-u", "CHECK_MODE", "cargo", "test"],
+    ["custom-test-runner", "--split-string", "ignored"],
+  ] {
+    const scan = command_risk_scan({request: {mode: "argv", argv: argv}})
+    assert(scan.execution_semantics.exit_evidence.scope == "all_commands", json_stringify(argv))
+  }
 }
