@@ -55,11 +55,19 @@ pub type ShellCommandStage = {kind: "command" | "compound", text: string, words:
  */
 pub type ShellCommandSegment = {operator: string, stages: list<ShellCommandStage>}
 
+/** What a zero exit proves about visible shell commands, never their individual exits. */
+pub type ShellExitEvidence = {
+  scope: "all_commands" | "masked" | "unmeasured",
+  reason: "all_commands" | "syntax" | "dialect" | "chain_status" | "pipeline_status" \
+    | "compound_command" | "nested_execution" | "shell_state",
+}
+
 /** An unmeasured line never reads as a single simple command. */
 pub type ShellCommandShape = {
   status: "measured" | "unmeasured",
   dialect: string,
   segments: list<ShellCommandSegment>,
+  exit_evidence: ShellExitEvidence,
 }
 
 /**
@@ -74,6 +82,22 @@ pub type ShellCommandShape = {
  */
 pub fn shell_command_shape(source: string, shell: string = "sh") -> ShellCommandShape {
   return __shell_command_shape(source, shell)
+}
+
+/**
+ * Analyze whether a zero shell exit proves every visible command succeeded.
+ * Plain POSIX commands and AND chains are covered. A pipeline requires an
+ * earlier `set -o pipefail` joined by AND, or a leading option setter in Bash
+ * or Zsh. Other separators, fallback chains and
+ * background commands can mask failures; compound/nested execution and other
+ * dialects remain unmeasured. This is syntax evidence, not execution or proof
+ * of a program's internal checks, imported functions, or test collection.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn shell_exit_evidence(source: string, shell: string = "sh") -> ShellExitEvidence {
+  return shell_command_shape(source, shell).exit_evidence
 }
 
 /** One output-match, exit, or timeout event for a background command. */

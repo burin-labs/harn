@@ -62,6 +62,7 @@ mod code_mode;
 pub(crate) mod computer_use;
 pub(crate) mod config_builtins;
 pub(crate) use harn_llm::content;
+pub(crate) mod actor_request;
 pub(crate) mod content_hash;
 mod context_breakdown;
 mod conversation;
@@ -921,6 +922,7 @@ async fn llm_stream_builtin_wrap(
 
 /// Register LLM builtins on a VM.
 pub fn register_llm_builtins(vm: &mut Vm) {
+    vm.register_builtin_def(&content_hash::LLM_CONTEXT_CONTENT_HASH_IMPL_DEF);
     predicate::register(vm);
     agent_config::register_agent_control_primitives(vm);
     register_builtin_defs(vm, LLM_RUNTIME_PRIMITIVE_BUILTINS);

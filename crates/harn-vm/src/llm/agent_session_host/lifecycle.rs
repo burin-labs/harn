@@ -261,6 +261,7 @@ async fn host_agent_session_init(
             input_tokens: 0,
             output_tokens: 0,
             physical_usage: initialization.physical_usage,
+            actor_request: None,
             cache_read_tokens: 0,
             cache_write_tokens: 0,
             provider_call_count: initialization.provider_call_count,
@@ -813,6 +814,7 @@ pub(super) async fn host_agent_session_finalize(
             // `total_input_tokens` — sometimes by a large factor. Naming the
             // scope is what lets a reader tell that apart from a defect.
             "token_scope": "accepted_turn_results",
+            "actor_request": session.actor_request.as_ref(),
             "iterations": iterations,
             "duration_ms": 0,
             "input_tokens": session.input_tokens,

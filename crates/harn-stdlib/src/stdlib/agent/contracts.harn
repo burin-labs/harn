@@ -1,3 +1,4 @@
+import { ContextAssemblyManifest } from "std/agent/artifacts"
 import { AgentDeclaredArtifactAudit } from "std/agent/required_artifacts"
 import { AgentStallCheckpoint } from "std/agent/stall_types"
 
@@ -61,7 +62,20 @@ pub type AgentTerminalOutcome = {
   run_record_status: AgentTerminalLifecycleState,
 }
 
+/** Served context from the first physically dispatched actor request in this run. */
+pub type AgentActorRequestReceipt = {
+  schema: "harn.agent.actor_request.v1",
+  session_id: string,
+  run_id: string,
+  call_id: string,
+  call_role: "agent.main",
+  system_prompt_content_hash: string,
+  context_manifest_content_hash: string,
+  context_manifest: ContextAssemblyManifest,
+}
+
 pub type AgentLlmSummary = {
+  actor_request?: AgentActorRequestReceipt?,
   token_scope: string,
   iterations: int,
   duration_ms: int,

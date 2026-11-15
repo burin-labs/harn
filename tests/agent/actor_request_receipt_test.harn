@@ -1,0 +1,74 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_text, with_llm_script, with_scenario } from "std/testing"
+
+pipeline test_actor_receipt_names_actual_served_primary_context(harness: Harness) {
+  const sid = harness.agent.open("actor-receipt-${harness.random.uuid()}")
+  const primary = "Exact primary context for this actor."
+  with_llm_script(
+    harness.llm,
+    [llm_text("Done.")],
+    { ->
+      const result = harness.agent.with_run(
+        sid,
+        {session_id: sid},
+        { ->
+          agent_loop(
+            harness,
+            "Answer.",
+            primary,
+            {provider: "mock", session_id: sid, max_iterations: 1},
+          )
+        },
+      )
+      const request = result.llm.actor_request
+      assert(request != nil, "an actual actor dispatch must produce a non-null receipt")
+      assert_eq(request.session_id, result.session_id)
+      assert_eq(request.run_id, result.run_id)
+      assert_eq(request.call_role, "agent.main")
+      assert_eq(request.context_manifest.boundary, "llm_request_payload_egress")
+      assert(request.call_id != "")
+      assert(
+        request.context_manifest.segments.any(
+          { segment ->
+            segment.producer == "primary" && segment.included
+              && segment.digest == llm_context_content_hash(primary)
+          },
+        ),
+        "the dispatched receipt must certify the exact primary bytes",
+      )
+      assert_eq(len(harness.llm.mock_calls()), 1)
+    },
+  )
+  harness.agent.close(sid)
+}
+
+pipeline test_helper_dispatch_does_not_create_an_actor_receipt(harness: Harness) {
+  const sid = harness.agent.open("helper-only-${harness.random.uuid()}")
+  with_scenario(
+    harness,
+    {
+      capabilities: [{capability: "agent", method: "budget_pre_call_blocked", result: true}],
+      llm: [{text: "Helper only."}],
+    },
+    { _ ->
+      const result = harness.agent.with_run(
+        sid,
+        {session_id: sid},
+        { ->
+          const _ = harness.llm.call("Classify this task.", nil, {provider: "mock"})
+          return agent_loop(
+            harness,
+            "Do not dispatch an actor.",
+            "Unserved primary.",
+            {provider: "mock", session_id: sid, max_iterations: 1, budget: {total_budget_usd: 0.0}},
+          )
+        },
+      )
+      assert_eq(len(harness.llm.mock_calls()), 1, "the helper must actually dispatch")
+    assert(result.provider_call_count > 0, "aggregate inference usage must be non-null despite no actor dispatch")
+      assert_eq(result.stop_reason, "pre_call_budget_block", "the actor must actually be blocked")
+      assert_eq(result.llm.actor_request, nil, "helper inference cannot prove actor delivery")
+    },
+  )
+  harness.agent.close(sid)
+}

@@ -40,7 +40,7 @@ fn command_sequence_plan_impl(args: &[VmValue], _out: &mut String) -> Result<VmV
 
 #[harn_builtin(
     exposure = "pure",
-    sig = "__shell_command_shape(source: string, shell: string) -> {status: \"measured\" | \"unmeasured\", dialect: string, segments: list<{operator: string, stages: list<{kind: \"command\" | \"compound\", text: string, words: list<string>}>}>}",
+    sig = "__shell_command_shape(source: string, shell: string) -> {status: \"measured\" | \"unmeasured\", dialect: string, segments: list<{operator: string, stages: list<{kind: \"command\" | \"compound\", text: string, words: list<string>}>}>, exit_evidence: {scope: \"all_commands\" | \"masked\" | \"unmeasured\", reason: \"all_commands\" | \"syntax\" | \"dialect\" | \"chain_status\" | \"pipeline_status\" | \"compound_command\" | \"nested_execution\" | \"shell_state\"}}",
     category = "runtime",
     doc = "Internal structural shell-line observation for std/command. Does not execute commands."
 )]
@@ -48,9 +48,25 @@ fn shell_command_shape_impl(args: &[VmValue], _out: &mut String) -> Result<VmVal
     let source = args.first().map(VmValue::as_str_cow).unwrap_or_default();
     let shell = args.get(1).map(VmValue::as_str_cow).unwrap_or_default();
     let dialect = crate::shells::shell_dialect_for_id(&shell);
-    let segments = dialect
-        .and_then(|dialect| crate::orchestration::shell_command_shape(dialect, &source).segments);
+    let shape = dialect.map(|dialect| {
+        crate::orchestration::shell_command_shape(dialect, &source).with_shell(&shell, &source)
+    });
+    let mut evidence = crate::value::DictMap::new();
+    evidence.put_str(
+        "scope",
+        shape
+            .as_ref()
+            .map_or("unmeasured", |shape| shape.exit_evidence.scope),
+    );
+    evidence.put_str(
+        "reason",
+        shape
+            .as_ref()
+            .map_or("dialect", |shape| shape.exit_evidence.reason),
+    );
+    let segments = shape.and_then(|shape| shape.segments);
     let mut result = crate::value::DictMap::new();
+    result.put("exit_evidence", VmValue::dict(evidence));
     result.put_str(
         "status",
         if segments.is_some() {

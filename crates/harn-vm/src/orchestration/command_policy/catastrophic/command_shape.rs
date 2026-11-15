@@ -38,6 +38,35 @@ pub(crate) struct ShellShapeSegment {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ShellCommandShape {
     pub(crate) segments: Option<Vec<ShellShapeSegment>>,
+    pub(crate) exit_evidence: ShellExitEvidence,
+}
+
+/// What a zero shell exit establishes about the commands visible in its AST.
+/// This never supplies constituent exit statuses or changes shell execution.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ShellExitEvidence {
+    pub(crate) scope: &'static str,
+    pub(crate) reason: &'static str,
+}
+
+impl ShellCommandShape {
+    pub(crate) fn with_shell(mut self, shell: &str, source: &str) -> Self {
+        let name = shell
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(shell)
+            .to_ascii_lowercase();
+        let pipefail_supported = matches!(name.as_str(), "bash" | "zsh");
+        self.exit_evidence = exit_evidence(
+            source,
+            self.segments.as_deref(),
+            crate::shells::shell_dialect_for_id(shell) == Some(ShellDialect::Posix),
+            pipefail_supported,
+            false,
+            0,
+        );
+        self
+    }
 }
 
 pub(crate) fn shell_command_shape(dialect: ShellDialect, source: &str) -> ShellCommandShape {
@@ -46,9 +75,207 @@ pub(crate) fn shell_command_shape(dialect: ShellDialect, source: &str) -> ShellC
         ShellDialect::PowerShell => powershell_shape(source),
         ShellDialect::Cmd => None,
     };
+    let segments = segments.filter(|segments| !segments.is_empty());
+    let exit_evidence = exit_evidence(
+        source,
+        segments.as_deref(),
+        dialect == ShellDialect::Posix,
+        false,
+        false,
+        0,
+    );
     ShellCommandShape {
-        segments: segments.filter(|segments| !segments.is_empty()),
+        segments,
+        exit_evidence,
     }
+}
+
+fn exit_evidence(
+    source: &str,
+    segments: Option<&[ShellShapeSegment]>,
+    posix: bool,
+    pipefail_supported: bool,
+    inherited_pipefail: bool,
+    depth: usize,
+) -> ShellExitEvidence {
+    let evidence = |scope, reason| ShellExitEvidence { scope, reason };
+    if depth > 32 || source.len() > 65_536 {
+        return evidence("unmeasured", "syntax");
+    }
+    let Some(segments) = segments else {
+        return evidence("unmeasured", "syntax");
+    };
+    // PowerShell's native-command exit status is not its pipeline success
+    // status. Never transfer POSIX implications to another dialect.
+    if !posix {
+        return evidence("unmeasured", "dialect");
+    }
+    let Some(tree) = parse(harn_grammars::bash(), source) else {
+        return evidence("unmeasured", "syntax");
+    };
+    if contains_background_operator(tree.root_node()) {
+        return evidence("masked", "chain_status");
+    }
+    if contains_nested_execution(tree.root_node()) {
+        return evidence("unmeasured", "nested_execution");
+    }
+    let dynamic_arguments = contains_expansion(tree.root_node());
+    let mut pipefail = inherited_pipefail;
+    for (index, segment) in segments.iter().enumerate() {
+        let setup =
+            segment.stages.len() == 1 && segment.stages[0].words == ["set", "-o", "pipefail"];
+        // A known supported leading option setter cannot hide a failed check.
+        // All later commands must still require the preceding check to pass.
+        let supported_prefix =
+            index == 1 && pipefail && pipefail_supported && matches!(segment.operator, ";" | "\n");
+        if index > 0 && segment.operator != "&&" && !supported_prefix {
+            return evidence("masked", "chain_status");
+        }
+        for stage in segment
+            .stages
+            .iter()
+            .filter(|stage| stage.kind != "command")
+        {
+            let nested =
+                grouped_exit_evidence(&stage.text, pipefail_supported, pipefail, depth + 1);
+            if nested.scope != "all_commands" {
+                return nested;
+            }
+        }
+        if segment.stages.iter().any(|stage| {
+            if stage.kind != "command" {
+                return false;
+            }
+            let index =
+                super::shell::unwrapped_shell_command_index(&stage.words, 0, stage.words.len());
+            stage.words[..index.min(stage.words.len())]
+                .iter()
+                .any(|word| word == "exec")
+                || stage.words.get(index).is_none_or(|word| {
+                    let shell = crate::shells::shell_dialect_for_id(word);
+                    // A literal script file is an external verifier program, just
+                    // like an executable script. Its internals remain outside this
+                    // command-line proof. Inline or dynamically chosen shell input
+                    // is not a file-program boundary.
+                    let script_file = shell == Some(ShellDialect::Posix)
+                        && !dynamic_arguments
+                        && stage
+                            .words
+                            .get(index + 1)
+                            .is_some_and(|argument| !argument.starts_with('-'));
+                    super::semantic_shell::has_argument_execution(&stage.words[index..])
+                        || matches!(
+                            word.as_str(),
+                            "exec" | "exit" | "return" | "break" | "continue"
+                        )
+                        || (shell.is_some() && !script_file)
+                })
+        }) {
+            return evidence("unmeasured", "nested_execution");
+        }
+        if segment.stages.len() > 1 && !pipefail {
+            return evidence("masked", "pipeline_status");
+        }
+        if setup {
+            pipefail = true;
+        } else if segment.stages.iter().any(|stage| {
+            let index =
+                super::shell::unwrapped_shell_command_index(&stage.words, 0, stage.words.len());
+            stage
+                .words
+                .get(index)
+                .is_some_and(|word| matches!(word.as_str(), "set" | "emulate"))
+        }) {
+            // Unknown option changes can undo pipefail or terminate the shell.
+            return evidence("unmeasured", "shell_state");
+        }
+    }
+    evidence("all_commands", "all_commands")
+}
+
+fn grouped_exit_evidence(
+    source: &str,
+    pipefail_supported: bool,
+    pipefail: bool,
+    depth: usize,
+) -> ShellExitEvidence {
+    let unmeasured = || ShellExitEvidence {
+        scope: "unmeasured",
+        reason: "compound_command",
+    };
+    let Some(tree) = parse(harn_grammars::bash(), source) else {
+        return unmeasured();
+    };
+    let Some(mut group) = tree.root_node().named_child(0) else {
+        return unmeasured();
+    };
+    if group.kind() == "redirected_statement" {
+        let Some(body) = group.child_by_field_name("body") else {
+            return unmeasured();
+        };
+        group = body;
+    }
+    if !matches!(group.kind(), "subshell" | "compound_statement") {
+        return unmeasured();
+    }
+    let children = group
+        .named_children(&mut group.walk())
+        .filter(|child| child.kind() != "comment")
+        .collect::<Vec<_>>();
+    let (Some(first), Some(last)) = (children.first(), children.last()) else {
+        return unmeasured();
+    };
+    let Some(body) = source.get(first.start_byte()..last.end_byte()) else {
+        return unmeasured();
+    };
+    let segments = posix_shape(body);
+    exit_evidence(
+        body,
+        segments.as_deref(),
+        true,
+        pipefail_supported,
+        pipefail,
+        depth,
+    )
+}
+
+fn contains_nested_execution(node: Node<'_>) -> bool {
+    if matches!(node.kind(), "command_substitution" | "process_substitution") {
+        return true;
+    }
+    if node.kind() == "command"
+        && node
+            .child_by_field_name("name")
+            .is_some_and(contains_expansion)
+    {
+        return true;
+    }
+    let mut cursor = node.walk();
+    let found = node
+        .named_children(&mut cursor)
+        .any(contains_nested_execution);
+    found
+}
+
+fn contains_expansion(node: Node<'_>) -> bool {
+    if matches!(
+        node.kind(),
+        "expansion" | "simple_expansion" | "arithmetic_expansion"
+    ) {
+        return true;
+    }
+    let mut cursor = node.walk();
+    let found = node.named_children(&mut cursor).any(contains_expansion);
+    found
+}
+
+fn contains_background_operator(node: Node<'_>) -> bool {
+    if node.kind() == "&" {
+        return true;
+    }
+    let mut cursor = node.walk();
+    let found = node.children(&mut cursor).any(contains_background_operator);
+    found
 }
 
 fn parse(language: tree_sitter::Language, source: &str) -> Option<tree_sitter::Tree> {

@@ -13,8 +13,9 @@ pub(super) fn scan_command_risk_scan_json(
 ) -> JsonValue {
     let command_text = command_text(ctx);
     let lower = command_text.to_ascii_lowercase();
-    let (command_analysis, execution_semantics, shell_dialect) =
+    let (command_analysis, mut execution_semantics, shell_dialect) =
         security_command_analysis_with_metadata(ctx);
+    execution_semantics["exit_evidence"] = process_exit_evidence(ctx);
     let filesystem_local = ctx
         .get("executor_filesystem_local")
         .and_then(JsonValue::as_bool)
@@ -228,6 +229,45 @@ pub(super) fn scan_command_risk_scan_json(
         scan["catastrophic_category"] = JsonValue::String("universal".to_string());
     }
     scan
+}
+
+/// Project exit proof from the same request resolver that owns execution mode
+/// and shell identity. Display text is never reparsed as an argv request.
+fn process_exit_evidence(ctx: &JsonValue) -> JsonValue {
+    let unmeasured = || serde_json::json!({"scope": "unmeasured", "reason": "syntax"});
+    match request_mode(ctx) {
+        Some("argv") => {
+            let Ok(Some(argv)) = request_argv(ctx) else {
+                return unmeasured();
+            };
+            // Use the canonical wrapper decoder, then keep explicit shells
+            // unmeasured rather than infer their child statuses from argv.
+            let source = argv
+                .iter()
+                .map(|word| shell_words::quote(word))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let shape = super::catastrophic::shell_command_shape(
+                crate::shells::ShellDialect::Posix,
+                &source,
+            );
+            serde_json::json!({"scope": shape.exit_evidence.scope, "reason": shape.exit_evidence.reason})
+        }
+        Some("shell" | "auto") => {
+            let resolution = request_shell_dialect(ctx);
+            let (Some(dialect), Some(shell)) = (resolution.dialect, resolution.shell_id) else {
+                return unmeasured();
+            };
+            let source = ctx
+                .pointer("/request/command")
+                .and_then(JsonValue::as_str)
+                .unwrap_or_default();
+            let shape = super::catastrophic::shell_command_shape(dialect, source)
+                .with_shell(&shell, source);
+            serde_json::json!({"scope": shape.exit_evidence.scope, "reason": shape.exit_evidence.reason})
+        }
+        _ => unmeasured(),
+    }
 }
 
 /// Workspace roots the catastrophic floor uses to judge whether an `rm -rf`

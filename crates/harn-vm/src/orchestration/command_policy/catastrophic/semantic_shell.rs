@@ -954,6 +954,13 @@ fn argument_execution(command: &str) -> Option<ArgumentExecution> {
     }
 }
 
+/// The canonical registry of programs whose arguments carry more execution.
+/// Exit proof cannot assume those child statuses propagate to the program.
+pub(super) fn has_argument_execution(argv: &[String]) -> bool {
+    argv.first()
+        .is_some_and(|program| argument_execution(command_basename(program)).is_some())
+}
+
 fn collect_path_words(words: &[String], analysis: &mut ShellAnalysis) {
     for word in words {
         record_argument_word(analysis, word, true);
