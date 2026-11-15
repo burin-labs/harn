@@ -291,7 +291,7 @@ fn a_write_root_flipped_during_resolution_never_resolves_outside() {
     let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let flipper = {
         let stop = stop.clone();
-        std::thread::spawn(move || {
+        crate::runtime_stack::spawn(move || {
             while !stop.load(std::sync::atomic::Ordering::Relaxed) {
                 let _ = std::fs::rename(&target, &real);
                 let _ = std::fs::rename(&link, &target);
