@@ -171,8 +171,9 @@ fn assert_mutation_outcome(
   )
   assert_eq(
     outcome.succeeded,
-    variant == "reread" ? 3 : should_write
-      || ["reread_denied", "reread_injected", "reread_inbox"].contains(variant) ? 2 : 1,
+    (variant == "reread" ? 3 : should_write
+        || ["reread_denied", "reread_injected", "reread_inbox"].contains(variant) ? 2 : 1) \
+      - 1,
   )
   if should_write {
     assert_eq(fs.read_text(path), variant == "revise" ? "revised" : body)
@@ -284,12 +285,19 @@ pub fn retained_proposal_trial(harness: Harness, variant: string) -> RetainedPro
   tools = tool_define(
     tools,
     "read_evidence",
-    "Read evidence before deciding on the edit.",
+    "Read the prerequisite evidence.",
     {
       parameters: {},
       annotations: {kind: "read", side_effect_level: "read_only"},
       handler: { _args ->
         harness.runtime.atomic_add(reads, 1)
+        if harness.runtime.atomic_get(reads) == 1 {
+          return agent_tool_handler_result(
+            "The prerequisite read failed; inspect its failure before choosing whether to retry the edit.",
+            {error: "unavailable"},
+            "error",
+          )
+        }
         if harness.runtime.atomic_get(reads) == 2 {
           if variant == "reread_failed" {
             return agent_tool_handler_result("Read failed.", {error: "unavailable"}, "error")
@@ -330,7 +338,7 @@ pub fn retained_proposal_trial(harness: Harness, variant: string) -> RetainedPro
         { ->
           const result = agent_loop(
             harness,
-            "Inspect evidence, then decide whether to write.",
+            "Recover from a failed prerequisite read, then choose whether to write.",
             nil,
             {
               provider: "mock",
@@ -364,7 +372,7 @@ pub fn retained_proposal_trial(harness: Harness, variant: string) -> RetainedPro
                   assert_eq(
                     harness.runtime.atomic_get(writes),
                     0,
-                    "the model must reconsider before any edit",
+                    "a failed prerequisite observation must prevent the edit",
                   )
                   assert_eq(
                     tally.attempted,
@@ -372,7 +380,8 @@ pub fn retained_proposal_trial(harness: Harness, variant: string) -> RetainedPro
                     "retaining a proposal is not a failed execution attempt",
                   )
                   const retained = info.dispatch.find({ result -> result?.status == "deferred" })
-                  assert(retained != nil, "the actual loop must defer the authored edit")
+                  assert(retained != nil, "the actual failed read must retain the authored edit")
+                  assert_eq(retained.dispatch_receipt.reason, "observation_failed")
                   proposal_id = retained.dispatch_receipt.retained_proposal_id
                   assert(
                     type_of(proposal_id) == "string" && proposal_id != "",

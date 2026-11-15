@@ -13,7 +13,9 @@ pipeline main(harness: Harness) {
     {
       parameters: {},
       annotations: {kind: "read", side_effect_level: "read_only"},
-      handler: { _args -> return "Evidence ready." },
+      handler: { _args ->
+        return agent_tool_handler_result("Read failed.", {error: "unavailable"}, "error")
+      },
     },
   )
   tools = tool_define(
@@ -45,7 +47,7 @@ pipeline main(harness: Harness) {
     final_wrapup: false,
     auto_compact: false,
   }
-  const outcome = agent_loop(harness, "Read before confirming the edit.", nil, options)
+  const outcome = agent_loop(harness, "Recover the held edit after the failed read.", nil, options)
   const stored = harness.agent.snapshot(sid).messages.find(
     { message -> message?.tool_call_id == "confirm" },
   )

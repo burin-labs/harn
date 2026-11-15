@@ -483,16 +483,21 @@ observation, mutation, process/verification, and terminal phases. A process-exec
 call whose resolved command is provably workspace read-only (`git status`,
 `git diff`, or a recognized file-inspection command) joins the observation
 phase. Build, test, lint, and unrecognized commands remain in the process phase.
-A response that mixes phases selects the earliest semantic phase (provider
-native, observation, mutation, process/verification, then terminal), executes
-every call in that phase, and returns synthetic deferred results for the others.
-Model emission order cannot move a mutation ahead of a sibling read. The next
-inference sees those results before it can re-propose later work.
+A response that mixes phases starts with the earliest semantic phase (provider
+native, observation, mutation, process/verification, then terminal). After
+successful observations, authored mutations execute in the same response through
+ordinary policy, approval, middleware and resource checks, provided both control
+queues are clear and the original run, control revision and context remain
+current. Model emission order cannot move a mutation ahead of a sibling read.
+These reads do not inform the already-authored arguments: request any evidence
+needed to decide an edit in an earlier response. Verification and completion
+keep their phase boundaries. Failed observations retain mutations with reason
+`observation_failed`; a pending control prevents continuation.
 Calls inside an independent read-only set still fan out up to
 `max_concurrent_tools`, and one tool call containing several atomic
-same-resource operations remains one call. Deferred call signatures survive
-turns that produce no deferrals, so a verbatim re-proposal is marked
-`re_proposed`.
+same-resource operations remains one call. Actually deferred calls retain their
+arguments until explicitly resumed, discarded or invalidated; see
+[Retained tool proposals](../agent/retained-tool-proposals.md).
 
 Every proposed call emits a `tool_batch_disposition` event with a typed
 `harn.agent_tool_batch_disposition.v1` receipt. The receipt records its phase,

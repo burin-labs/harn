@@ -166,7 +166,9 @@ fn a_run_with_no_control_row_renders_no_stop_block() {
 
 struct StopAtReadCompletion {
     session_id: String,
+    tool_call_id: &'static str,
     accept_stop: bool,
+    steer: bool,
     observed_read: AtomicBool,
     recorded_stop: AtomicBool,
 }
@@ -183,12 +185,25 @@ impl harn_vm::agent_events::AgentEventSink for StopAtReadCompletion {
         } = event
         {
             if session_id == &self.session_id
-                && tool_call_id == "reread"
+                && tool_call_id == self.tool_call_id
                 && !self.observed_read.swap(true, Ordering::SeqCst)
                 && self.accept_stop
             {
+                let control = if self.steer {
+                    harn_session_store::ControlEvent::injection(
+                        "session/inject",
+                        "ctl-steer-at-read",
+                        "accepted",
+                        "finish_step",
+                        "finish_step",
+                        "message-steer-at-read",
+                        "Use a new task instead.",
+                    )
+                } else {
+                    accepted_stop_row()
+                };
                 self.recorded_stop.store(
-                    harn_vm::agent_sessions::record_control_event(session_id, &accepted_stop_row())
+                    harn_vm::agent_sessions::record_control_event(session_id, &control)
                         .is_recorded(),
                     Ordering::SeqCst,
                 );
@@ -197,7 +212,7 @@ impl harn_vm::agent_events::AgentEventSink for StopAtReadCompletion {
     }
 }
 
-fn confirmed_read_pipeline(session_id: &str) -> String {
+fn confirmed_read_pipeline(session_id: &str, retain_first: bool) -> String {
     format!(
         r###"
 import {{ llm_text, with_llm_script }} from "std/testing"
@@ -212,6 +227,9 @@ pipeline main(harness: Harness) {{
     annotations: {{kind: "read", side_effect_level: "read_only"}},
     handler: {{ _args ->
       harness.runtime.atomic_add(reads, 1)
+      if {retain_first} && harness.runtime.atomic_get(reads) == 1 {{
+        return agent_tool_handler_result("Read failed.", {{error: "unavailable"}}, "error")
+      }}
       return "Evidence ready."
     }},
   }})
@@ -238,7 +256,7 @@ pipeline main(harness: Harness) {{
       verify_completion: {{ _info -> true }},
       post_turn_callback: {{ info ->
         turn = turn + 1
-        if turn == 1 {{
+        if turn == 1 && {retain_first} {{
           assert_eq(harness.runtime.atomic_get(reads), 1)
           assert_eq(harness.runtime.atomic_get(edits), 0)
           const retained = info.dispatch.find({{ item -> item?.status == "deferred" }})
@@ -249,7 +267,7 @@ pipeline main(harness: Harness) {{
             {{id: "confirm", name: "__harn_resolve_tool_call", arguments: {{proposal_id: id, action: "resume"}}}},
             {{id: "reread", name: "read_evidence", arguments: {{}}}},
           ]}})
-        }} else if turn == 2 {{
+        }} else {{
           harness.llm.mock_enqueue(llm_text("Finished. ##DONE##"))
         }}
         return nil
@@ -269,28 +287,30 @@ pipeline main(harness: Harness) {{
     )
 }
 
-fn assert_control_at_confirmed_read(accept_stop: bool) {
+fn assert_control_at_read(accept_stop: bool, retain_first: bool, steer: bool) {
     let session_id = fresh_session_id("confirmed-read-control");
     let sink = Arc::new(StopAtReadCompletion {
         session_id: session_id.clone(),
+        tool_call_id: if retain_first { "reread" } else { "observe" },
         accept_stop,
+        steer,
         observed_read: AtomicBool::new(false),
         recorded_stop: AtomicBool::new(false),
     });
     let registered = sink.clone();
-    let raw = run_with_bridge_after(&confirmed_read_pipeline(&session_id), || {
+    let raw = run_with_bridge_after(&confirmed_read_pipeline(&session_id, retain_first), || {
         harn_vm::agent_events::register_sink(session_id, registered);
     })
     .expect("the real bridge-backed confirmation loop must run");
     assert!(
         sink.observed_read.load(Ordering::SeqCst),
-        "the second read must reach its actual completion event"
+        "the selected read must reach its actual completion event"
     );
     assert_eq!(sink.recorded_stop.load(Ordering::SeqCst), accept_stop);
     let lines = out_lines(&raw);
     let facts: serde_json::Value = serde_json::from_str(lines.last().expect("measured loop facts"))
         .expect("structured loop facts");
-    assert_eq!(facts["reads"], 2, "both read handlers must fire: {facts}");
+    assert_eq!(facts["reads"], if retain_first { 2 } else { 1 }, "{facts}");
     assert_eq!(
         facts["pending"], 0,
         "no queued control may explain the refusal: {facts}"
@@ -309,10 +329,25 @@ fn assert_control_at_confirmed_read(accept_stop: bool) {
 
 #[test]
 fn an_accepted_control_during_a_read_blocks_the_confirmed_edit() {
-    assert_control_at_confirmed_read(true);
+    assert_control_at_read(true, true, false);
 }
 
 #[test]
 fn a_confirmed_edit_after_a_read_runs_without_an_accepted_control() {
-    assert_control_at_confirmed_read(false);
+    assert_control_at_read(false, true, false);
+}
+
+#[test]
+fn an_accepted_stop_during_a_read_blocks_the_fresh_edit() {
+    assert_control_at_read(true, false, false);
+}
+
+#[test]
+fn an_accepted_steer_during_a_read_blocks_the_fresh_edit() {
+    assert_control_at_read(true, false, true);
+}
+
+#[test]
+fn a_fresh_edit_after_a_read_runs_without_an_accepted_control() {
+    assert_control_at_read(false, false, false);
 }

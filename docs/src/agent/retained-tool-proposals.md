@@ -1,8 +1,17 @@
 # Retained tool proposals
 
-An agent response can propose a read and an edit together. The dispatcher runs
-the read first so the model can reconsider the edit using the result. It stores
-the edit's arguments and returns a proposal identifier in the deferred result.
+An agent response can propose observations and mutations together. The
+dispatcher finishes observations first, then executes the authored mutations
+through ordinary dispatch if observations succeeded and controls and context
+remain current. No extra confirmation turn is required. If a read is needed to
+decide what to change, request that read in an earlier response before authoring
+the mutation. Successful reads do not prove that an edit is semantically correct.
+
+Calls held by a failed observation or a later verification or completion phase
+remain explicit proposals. The dispatcher stores their arguments and returns a
+proposal identifier in the deferred result. A failed observation reports
+`reason: "observation_failed"`; a pending control reports `control_pending`, and
+a changed run, accepted control revision or context reports `scope_changed`.
 
 The agent receives a stable
 `__harn_resolve_tool_call({proposal_id, action})` definition on every turn. Pending
@@ -17,13 +26,13 @@ at the existing dispatch boundary. The confirmation call supplies the new
 native tool-call identifier. Current schema validation, policy, approval,
 middleware, resource guards and failed-mutation barriers still apply.
 
-A current response may resume an edit and request additional reads together.
-After those reads succeed, the dispatcher executes the confirmed edit without
-requesting another confirmation. It rechecks pending controls and the original
-run, accepted control revision and context first. A failed read or changed
-control/context prevents continuation. Fresh edits remain retained, and resumed
-verification or completion calls keep their phase barriers. Confirmation grants
-no authority to execute automatically in a later response.
+A current response may resume an edit and request additional observations
+together. Both fresh and resumed edits use the same continuation checks:
+successful observations, both pending-control queues clear, and the original
+run, accepted control revision and context unchanged. A failed read or changed
+control/context prevents continuation. Verification or completion calls keep
+their phase barriers. Authoring or confirming a call grants no authority to
+execute it automatically in a later response.
 
 Pending proposals belong to one run, public user-message boundary and accepted
 control revision. Compaction invalidates them because the source proposal may

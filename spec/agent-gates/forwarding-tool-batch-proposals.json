@@ -10,7 +10,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-    "expression": "__dispatch_tool_calls_with_middleware(\n      harness,\n      confirmed.map({ entry -> entry.call }),\n      tools,\n      options,\n      cap,\n      confirmed.map({ entry -> entry.index }),\n    )",
+    "expression": "__dispatch_tool_calls_with_middleware(\n        harness,\n        mutations.map({ entry -> entry.call }),\n        tools,\n        options,\n        cap,\n        mutations.map({ entry -> entry.index }),\n      )",
     "owner": "__dispatch_tool_calls_with_middleware",
     "evidence": "Continued mutations use the same independently audited middleware option consumer and preserve their original call indices; confirmation bypasses no policy boundary.",
     "consumers": [{"scope": "AgentSpec", "function": "__dispatch_tool_calls_with_middleware", "parameter": "options"}]
@@ -162,7 +162,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-    "expression": "__tool_batch_resolution_result(\n          harness,\n          plan,\n          entry\n            + {\n              call: entry.call\n                + {\n                  _tool_batch_resolution: {\n                    accepted: false,\n                    reason: \"control_changed\",\n                    proposal_id: \"\",\n                  },\n                },\n            },\n          tools,\n          options,\n        )",
+    "expression": "__tool_batch_resolution_result(\n          harness,\n          plan,\n          entry\n            + {\n              call: entry.call\n                + {\n                  _tool_batch_resolution: {\n                    accepted: false,\n                    reason:\n                      entry.phase == \"mutation\" && plan.selected_phase == \"observation\" ? mutation_boundary_reason : \"control_changed\",\n                    proposal_id: \"\",\n                  },\n                },\n            },\n          tools,\n          options,\n        )",
     "owner": "__tool_batch_resolution_result",
     "evidence": "A changed-control rejection uses the same independently audited feedback owner, with computed rejection facts.",
     "consumers": [{"scope": "AgentSpec", "function": "__tool_batch_resolution_result", "parameter": "options"}]
@@ -170,7 +170,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-    "expression": "__tool_batch_deferred_result(\n          harness.agent,\n          harness.random,\n          plan,\n          entry,\n          tools,\n          options,\n          retained.proposal_id,\n        )",
+    "expression": "__tool_batch_deferred_result(\n          harness.agent,\n          harness.random,\n          plan,\n          entry,\n          tools,\n          options,\n          retained.proposal_id,\n          entry.phase == \"mutation\" ? mutation_boundary_reason : \"effect_phase_boundary\",\n        )",
     "owner": "__tool_batch_deferred_result",
     "evidence": "Deferred-call feedback independently audits options; the retained proposal identifier comes from the canonical state owner.",
     "consumers": [{"scope": "AgentSpec", "function": "__tool_batch_deferred_result", "parameter": "options"}]

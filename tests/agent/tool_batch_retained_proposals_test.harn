@@ -1,5 +1,6 @@
 import { tool_batch_inject_resolution_tool } from "std/agent/loop_batch_proposals"
 import { agent_lifecycle_tools } from "std/agent/workers"
+import { assert_direct_mutation_batch } from "./fixtures/direct_mutation_batches"
 import {
   assert_retained_mutation_barrier,
   retained_proposal_trial,
@@ -73,4 +74,9 @@ pipeline test_retained_proposals_require_current_explicit_confirmation(
   variant: string,
 ) {
   retained_proposal_trial(harness, variant)
+}
+
+@test(cases: [{name: "success", args: ["success"]}, {name: "read_failed", args: ["read_failed"]}, {name: "denied", args: ["denied"]}, {name: "injected", args: ["injected"]}, {name: "inbox", args: ["inbox"]}, {name: "later_phases", args: ["later_phases"]}, {name: "mutation_failed", args: ["mutation_failed"]}])
+pipeline test_fresh_mutations_follow_successful_observations(harness: Harness, variant: string) {
+  assert_direct_mutation_batch(harness, variant)
 }

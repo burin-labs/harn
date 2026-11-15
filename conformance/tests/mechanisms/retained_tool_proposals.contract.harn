@@ -1,4 +1,4 @@
-// Trigger: one response proposes an edit beside an observation.
+// Trigger: one response proposes an edit beside a failed prerequisite observation.
 // Effect: explicit confirmation executes the original body through ordinary dispatch.
 // Negative: discard or a failed observation cannot execute the proposal.
 import { retained_proposal_trial } from "../../../tests/agent/fixtures/retained_tool_proposals"
@@ -8,7 +8,7 @@ pipeline default(harness: Harness) {
   const confirmed = retained_proposal_trial(harness, "resume")
   contract_effect(
     harness.stdio,
-    "trigger_mixed_batch_retains_edit_after_observation",
+    "trigger_failed_observation_retains_edit",
     confirmed.observations == 1 && confirmed.deferred == 1,
   )
   contract_effect(
@@ -17,7 +17,7 @@ pipeline default(harness: Harness) {
     confirmed.confirmed == 1 && confirmed.mutations == 1 && confirmed.requests == 3
       && confirmed.body_copies == 1
       && confirmed.attempted == 2
-      && confirmed.succeeded == 2,
+      && confirmed.succeeded == 1,
   )
   contract_effect(
     harness.stdio,

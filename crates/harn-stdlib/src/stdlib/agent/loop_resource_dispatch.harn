@@ -167,16 +167,9 @@ fn __tool_batch_deferred_result(
   tools: any,
   options: any,
   proposal_id: string,
+  reason: string = "effect_phase_boundary",
 ) {
-  const receipt = __tool_batch_receipt(
-    plan,
-    entry,
-    "deferred",
-    "effect_phase_boundary",
-    nil,
-    nil,
-    proposal_id,
-  )
+  const receipt = __tool_batch_receipt(plan, entry, "deferred", reason, nil, nil, proposal_id)
   const name = __tool_registry_name(entry.call)
   const observation = "[`${name}` retained, not executed]\nproposal_id=${proposal_id}"
   const result = {
@@ -357,37 +350,36 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls: list, tools: any, options
     cap,
     selected_indices,
   )
-  // A current explicit resume already decides to execute stored arguments.
-  // Coissued successful observations do not revoke that decision. Keep the
-  // authorization within this dispatch: new edits and later phases still need
-  // their normal boundary, and controls/context changes prevent continuation.
-  const confirmed = deferred.filter(
-    { entry -> entry.phase == "mutation" && entry.proposal_status == "confirmed" },
-  )
-    .to_list()
-  if plan.selected_phase == "observation" && len(confirmed) > 0
-    && raw_selected.all({ result -> __tool_result_ok(result) })
-    && __batch_control_boundary_clear(harness.agent, to_string(options?.session_id ?? ""))
-    && tool_batch_scope_is_current(
+  // Arguments authored in this response execute without another model decision.
+  // Observations finish first; controls, context and ordinary dispatch checks
+  // still apply before mutations. Verification and completion keep their boundary.
+  const mutations = deferred.filter({ entry -> entry.phase == "mutation" }).to_list()
+  let mutation_boundary_reason = "effect_phase_boundary"
+  if plan.selected_phase == "observation" && len(mutations) > 0 {
+    if !raw_selected.all({ result -> __tool_result_ok(result) }) {
+      mutation_boundary_reason = "observation_failed"
+    } else if !__batch_control_boundary_clear(harness.agent, to_string(options?.session_id ?? "")) {
+      mutation_boundary_reason = "control_pending"
+    } else if !tool_batch_scope_is_current(
       harness.agent,
       to_string(options?.session_id ?? ""),
       options,
       plan.scope,
     ) {
-    const resumed_results = __dispatch_tool_calls_with_middleware(
-      harness,
-      confirmed.map({ entry -> entry.call }),
-      tools,
-      options,
-      cap,
-      confirmed.map({ entry -> entry.index }),
-    )
-    selected = selected + confirmed
-    raw_selected = raw_selected + resumed_results
-    deferred = deferred.filter(
-      { entry -> entry.phase != "mutation" || entry.proposal_status != "confirmed" },
-    )
-      .to_list()
+      mutation_boundary_reason = "scope_changed"
+    } else {
+      const resumed_results = __dispatch_tool_calls_with_middleware(
+        harness,
+        mutations.map({ entry -> entry.call }),
+        tools,
+        options,
+        cap,
+        mutations.map({ entry -> entry.index }),
+      )
+      selected = selected + mutations
+      raw_selected = raw_selected + resumed_results
+      deferred = deferred.filter({ entry -> entry.phase != "mutation" }).to_list()
+    }
   }
   let explicit_terminal_succeeded = false
   if plan.selected_phase == "terminal" {
@@ -412,7 +404,7 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls: list, tools: any, options
     const timing = raw_result?._tool_dispatch_timing
     let disposition = "executed"
     let reason =
-      entry.phase == "mutation" && plan.selected_phase == "observation" ? "confirmed_after_observation" : "selected_effect_phase"
+      entry.phase == "mutation" && plan.selected_phase == "observation" ? "mutation_after_observation" : "selected_effect_phase"
     let receipt_timing = timing
     if raw_result?.status == "blocked_by_prior_same_resource_failure"
       || raw_result?.status
@@ -496,7 +488,8 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls: list, tools: any, options
                 + {
                   _tool_batch_resolution: {
                     accepted: false,
-                    reason: "control_changed",
+                    reason:
+                      entry.phase == "mutation" && plan.selected_phase == "observation" ? mutation_boundary_reason : "control_changed",
                     proposal_id: "",
                   },
                 },
@@ -511,6 +504,7 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls: list, tools: any, options
           tools,
           options,
           retained.proposal_id,
+          entry.phase == "mutation" ? mutation_boundary_reason : "effect_phase_boundary",
         ),
       },
     )
