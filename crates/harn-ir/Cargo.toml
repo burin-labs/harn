@@ -9,11 +9,11 @@ homepage.workspace = true
 description = "CFG and invariant analysis for the Harn programming language"
 
 [dependencies]
-harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.200" }
-harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.200" }
-harn-glob = { path = "../harn-glob", version = "=0.10.200" }
-harn-lexer = { path = "../harn-lexer", version = "=0.10.200" }
-harn-parser = { path = "../harn-parser", version = "=0.10.200" }
+harn-builtin-meta = { path = "../harn-builtin-meta", version = "=0.10.201" }
+harn-builtin-registry = { path = "../harn-builtin-registry", version = "=0.10.201" }
+harn-glob = { path = "../harn-glob", version = "=0.10.201" }
+harn-lexer = { path = "../harn-lexer", version = "=0.10.201" }
+harn-parser = { path = "../harn-parser", version = "=0.10.201" }
 
 [lints]
 workspace = true
