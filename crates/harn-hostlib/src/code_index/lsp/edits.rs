@@ -336,7 +336,9 @@ pub(crate) fn identifier_replacements(
         for span in identifiers.iter().filter(|span| {
             edit.span.start_byte <= span.start_byte && span.end_byte <= edit.span.end_byte
         }) {
-            let prefix = &source[before..span.start_byte];
+            let prefix = source
+                .get(before..span.start_byte)
+                .ok_or("invalid source edit boundary")?;
             let remaining = edit
                 .after
                 .get(after..)
@@ -345,7 +347,10 @@ pub(crate) fn identifier_replacements(
                 return Err("the server changed non-identifier source text".into());
             }
             after += prefix.len();
-            let remaining = &edit.after[after..];
+            let remaining = edit
+                .after
+                .get(after..)
+                .ok_or("invalid replacement boundary")?;
             // Longest matching spelling distinguishes prefix-related names
             // without interpreting Java bindings or tokenizing new source.
             if remaining.starts_with(new_name)
@@ -364,7 +369,14 @@ pub(crate) fn identifier_replacements(
             }
             before = span.end_byte;
         }
-        if edit.after.get(after..) != source.get(before..edit.span.end_byte) {
+        let remaining = edit
+            .after
+            .get(after..)
+            .ok_or("invalid replacement boundary")?;
+        let original = source
+            .get(before..edit.span.end_byte)
+            .ok_or("invalid source edit boundary")?;
+        if remaining != original {
             return Err("the server changed non-identifier source text".into());
         }
     }

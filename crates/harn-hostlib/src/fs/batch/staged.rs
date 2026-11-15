@@ -183,7 +183,7 @@ pub(in crate::fs) fn commit(
                 },
             );
             match effects::apply(&mut state, &id, FsMode::Staged) {
-                Ok(()) => committed.extend(regular.iter().map(|path| to_agent_path(path))),
+                Ok(()) => committed.extend(regular.iter().map(to_agent_path)),
                 Err(reason) => {
                     if !state
                         .atomic_groups

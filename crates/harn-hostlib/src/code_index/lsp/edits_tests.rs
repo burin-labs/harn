@@ -217,7 +217,10 @@ fn java_identifier_projection_reaches_type_references_but_refuses_literal_edits(
     let index = LineIndex::new(source);
     let make_edit = |start: usize, end: usize, after: &str| EditSpan {
         span: index.span(start, end),
-        before: source[start..end].into(),
+        before: source
+            .get(start..end)
+            .expect("fixture UTF-8 boundary")
+            .into(),
         after: after.into(),
     };
     let all = [make_edit(
@@ -246,6 +249,48 @@ fn java_identifier_projection_reaches_type_references_but_refuses_literal_edits(
         )
         .is_err());
     }
+}
+
+#[test]
+fn java_coalesced_edit_projection_preserves_unicode_and_refuses_invalid_boundaries() {
+    let source = "class Before { String note = \"🦀\"; Before value; }";
+    let mut edit = EditSpan {
+        span: LineIndex::new(source).span(0, source.len()),
+        before: source.into(),
+        after: source.replace("Before", "After"),
+    };
+    let projected = identifier_replacements(
+        source,
+        &[edit.clone()],
+        crate::ast::Language::Java,
+        "Before",
+        "After",
+    )
+    .unwrap();
+    assert_eq!(projected.len(), 2);
+    assert_eq!(
+        super::super::super::refactor_core::splice(source, &projected),
+        edit.after
+    );
+    edit.span.start_byte = source.find('🦀').unwrap() + 1;
+    assert!(identifier_replacements(
+        source,
+        &[edit.clone()],
+        crate::ast::Language::Java,
+        "Before",
+        "After",
+    )
+    .is_err());
+    edit.span.start_byte = 0;
+    edit.span.end_byte = source.len() + 1;
+    assert!(identifier_replacements(
+        source,
+        &[edit],
+        crate::ast::Language::Java,
+        "Before",
+        "After",
+    )
+    .is_err());
 }
 
 #[test]

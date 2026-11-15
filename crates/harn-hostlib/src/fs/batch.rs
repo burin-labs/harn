@@ -284,14 +284,14 @@ pub(crate) fn apply_changes(
             Ok(())
         })();
         cache.insert(session.clone(), state);
-        recovered.map_err(&reject)?;
+        recovered.map_err(reject)?;
         if !pending.is_empty() {
             return Err(reject(
                 "recovered an incomplete file transaction; rebuild the refactoring plan".into(),
             ));
         }
     }
-    input_images(&snapshot, &root, changes, false).map_err(&reject)?;
+    input_images(&snapshot, &root, changes, false).map_err(reject)?;
     before_effects(snapshot.mode)?;
     let (mut cache, state, _manifest_locks) =
         mutation_state(&session, Some(root.clone()), builtin)?;
@@ -309,7 +309,7 @@ pub(crate) fn apply_changes(
             "commit or discard the existing file group before changing its paths".into(),
         ));
     }
-    let original = input_images(&state, &root, changes, true).map_err(&reject)?;
+    let original = input_images(&state, &root, changes, true).map_err(reject)?;
     let mut permissions = BTreeMap::new();
     for change in changes {
         if let Some(source) = &change.permissions_from {
@@ -331,7 +331,7 @@ pub(crate) fn apply_changes(
     for change in changes {
         let entry = match &change.contents {
             Some(bytes) => StagedEntry::Write {
-                body_hash: write_body(&next, bytes).map_err(&reject)?,
+                body_hash: write_body(&next, bytes).map_err(reject)?,
                 len: bytes.len() as u64,
                 created_at_ms: super::now_ms(),
                 snapshot_id: harn_vm::agent_sessions::current_tool_call_id(),

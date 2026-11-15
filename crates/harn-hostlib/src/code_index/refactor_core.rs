@@ -843,7 +843,7 @@ pub(super) fn write_plans(
             }
             Ok(())
         });
-        return match outcome {
+        match outcome {
             Ok(()) => {
                 if immediate.get() {
                     for path in targets {
@@ -856,7 +856,7 @@ pub(super) fn write_plans(
                 .iter()
                 .map(|plan| (plan.path.clone(), error.to_string()))
                 .collect()),
-        };
+        }
     }
     #[cfg(not(unix))]
     {
