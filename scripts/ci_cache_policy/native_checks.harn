@@ -3,6 +3,60 @@ import "./policy_core.harn"
 
 const trim = ci_text
 
+/** Keep fixture installation independent of restoration and mandatory before native tests. */
+pub fn macos_fixture_overlap_errors(workflow: CiWorkflow?) -> list<string> {
+  const job = workflow?.jobs?.nextest
+  const steps = job?.steps ?? []
+  const fixture_id = "rename-language-servers"
+  const installers = steps.filter(
+    { step -> step?.name == "Install rename language-server fixtures" },
+  )
+    .to_list()
+  const waits = steps.filter({ step -> step?.wait == fixture_id || step?.wait == [fixture_id] })
+    .to_list()
+  if len(installers) != 1 || len(waits) != 1 {
+    return [
+      "macos-nightly.yml must install language-server fixtures once and explicitly wait once before testing",
+    ]
+  }
+  const installer = installers[0]
+  const wait = waits[0]
+  const installer_optional = step_continue_on_error(installer)
+  const wait_optional = step_continue_on_error(wait)
+  if installer.id != fixture_id || installer.background != true
+    || installer.run != "bash scripts/ci/install_rename_language_servers.sh"
+    || installer.if != nil
+    || (installer_optional != nil && installer_optional != false)
+    || wait.if != nil
+    || (wait_optional != nil && wait_optional != false) {
+    return ["macos-nightly.yml must fail closed when background fixture installation fails"]
+  }
+  const install_index = step_index_by_name(steps, "Install rename language-server fixtures")
+  const restore_index = step_index_by_name(steps, "Restore macOS workspace warm artifact")
+  const wait_index = step_index_by_name(steps, wait.name ?? "")
+  const budget_index = step_index_by_name(steps, "Measure the build budget")
+  const test_index = step_index_by_name(steps, "Run workspace nextest")
+  for prerequisite in [
+    "Select admitted qualification source",
+    "Install Go formatter",
+    "Install Node for language-server fixtures",
+  ] {
+    const index = step_index_by_name(steps, prerequisite)
+    if index < 0 || index >= install_index {
+      return ["macos-nightly.yml fixture installation must follow ${prerequisite}"]
+    }
+  }
+  if !(install_index < restore_index && restore_index < wait_index
+    && wait_index < budget_index
+    && budget_index < test_index)
+    || job?.steps?.[test_index]?.env?.HARN_EXT_LSP_FIXTURES_REQUIRED != "1" {
+    return [
+      "macos-nightly.yml must overlap fixture installation with restore, then join before build budgeting and required fixture tests",
+    ]
+  }
+  return []
+}
+
 fn native_shared_cache_errors(
   ci_workflow: CiWorkflow?,
   nightly_workflow: CiWorkflow?,

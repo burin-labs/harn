@@ -547,7 +547,7 @@ lint-actions-source:
 		actionlint; \
 	else \
 		echo "actionlint not installed; skipping GitHub Actions lint"; \
-		echo "hint: brew install actionlint or go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12"; \
+		echo "hint: go install actionlint.kjanat.dev/cmd/actionlint@v1.16.1"; \
 	fi
 	@if grep -R -n -E 'uses: burin-labs/\.github/\.github/workflows/runner-availability\.yml@' .github/workflows \
 		| grep -v -E '@[0-9a-f]{40}([[:space:]]|$$)'; then \

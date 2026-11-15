@@ -563,8 +563,8 @@ if [[ "${SETUP_PROFILE}" == "full" ]]; then
 
   if ! command -v actionlint >/dev/null 2>&1; then
     if command -v go >/dev/null 2>&1; then
-      echo "Installing actionlint..."
-      go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 || echo "warning: failed to install actionlint (non-fatal)"
+      echo "Installing actionlint with background/wait step support..."
+      go install actionlint.kjanat.dev/cmd/actionlint@v1.16.1 || echo "warning: failed to install actionlint (non-fatal)"
     else
       echo "warning: go not found; skipping actionlint install"
     fi
