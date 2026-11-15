@@ -1086,6 +1086,14 @@ token limits, tool schemas, message history, and reasoning fields. The provider 
 `stream_options.include_usage` extension is emitted; an absent declaration
 fails closed.
 
+When stream accounting is undeclared, Harn observes counters that arrive after
+the content finishes and waits for a usage receipt, the protocol's end marker,
+or the response body to close. A finish frame that already reports usage can
+complete immediately. Omitted counters remain unknown, including when the
+stream reports no accounting at all. Harn requests `stream_options.include_usage`
+only for routes that declare that extension; managed gateways retain their
+separate authoritative receipt.
+
 The returned `HostedOpenAiRequest` has private fields. Serialize it directly
 with Serde when sending the request. It rejects routes that use another
 provider dialect before encoding.
