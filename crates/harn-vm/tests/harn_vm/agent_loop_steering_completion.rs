@@ -34,8 +34,8 @@ pipeline default(harness: Harness, task: unknown) {{
         return nil
       }},
     }})
-    harness.stdio.log(result.terminal.kind)
-    harness.stdio.log(result?.abandonment?.attempted_tool_calls ?? 0)
+    harness.stdio.println(result.terminal.kind)
+    harness.stdio.println(result?.abandonment?.attempted_tool_calls ?? 0)
   }})
 }}
 "#
