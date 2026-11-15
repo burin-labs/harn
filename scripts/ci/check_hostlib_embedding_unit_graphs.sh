@@ -12,12 +12,13 @@ cat > "$scratch/cargo-graph" <<'SH'
 set -euo pipefail
 operation=${1:?Cargo operation required}
 shift
+args=("$@")
 case "$operation" in
-  build) extra=() ;;
-  test) extra=(--no-run) ;;
+  build) ;;
+  test) args+=(--no-run) ;;
   *) echo "Unexpected embedding operation: $operation" >&2; exit 1 ;;
 esac
-RUSTC_BOOTSTRAP=1 cargo "$operation" --unit-graph -Z unstable-options "${extra[@]}" "$@" \
+RUSTC_BOOTSTRAP=1 cargo "$operation" --unit-graph -Z unstable-options "${args[@]}" \
   > "$(dirname "${BASH_SOURCE[0]}")/$operation.json"
 SH
 chmod +x "$scratch/cargo-graph"
