@@ -7,7 +7,9 @@ pub(super) fn denied_tool_result(tool_name: &str, reason: impl Into<String>) -> 
     // Argument and resource checks can reject a name the policy permits.
     // Describe this invocation without projecting a new tool-availability policy.
     let allowed = crate::orchestration::current_allowed_tool_names();
-    let permission_hints = if allowed.is_empty() || allowed.iter().any(|name| name == tool_name) {
+    let name_allowed = crate::orchestration::current_execution_policy()
+        .is_some_and(|policy| policy.tool_pattern_allows(tool_name));
+    let permission_hints = if allowed.is_empty() || name_allowed {
         String::new()
     } else {
         format!(
@@ -64,20 +66,22 @@ mod tests {
 
     #[test]
     fn an_argument_denial_keeps_recovery_scoped_to_the_invocation() {
-        push_execution_policy(CapabilityPolicy {
-            tools: vec!["denied".into(), "usable".into()],
-            ..Default::default()
-        });
-        let result = denied_tool_result("denied", "path is outside the workspace");
-        pop_execution_policy();
+        for pattern in ["denied", "den*"] {
+            push_execution_policy(CapabilityPolicy {
+                tools: vec![pattern.into(), "usable".into()],
+                ..Default::default()
+            });
+            let result = denied_tool_result("denied", "path is outside the workspace");
+            pop_execution_policy();
 
-        let recovery = result["next_step"].as_str().unwrap();
-        assert!(!recovery.contains("Allowed tool names"));
-        assert!(recovery.contains("This `denied` invocation was denied"));
-        assert!(recovery.contains("Address the specific reason before retrying"));
-        assert!(recovery.contains("only if resolving that reason requires new permission"));
-        assert_eq!(result["reason"], "path is outside the workspace");
-        assert!(!recovery.contains("tool is not permitted"));
+            let recovery = result["next_step"].as_str().unwrap();
+            assert!(!recovery.contains("Allowed tool names"));
+            assert!(recovery.contains("This `denied` invocation was denied"));
+            assert!(recovery.contains("Address the specific reason before retrying"));
+            assert!(recovery.contains("only if resolving that reason requires new permission"));
+            assert_eq!(result["reason"], "path is outside the workspace");
+            assert!(!recovery.contains("tool is not permitted"));
+        }
     }
 
     #[test]
