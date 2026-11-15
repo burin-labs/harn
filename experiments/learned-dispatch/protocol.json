@@ -25,7 +25,7 @@
   "execution": {
     "max_concurrent": 2,
     "workspace": "One isolated workspace per trial, initialized from the frozen application. Never substitute historical receipts for execution.",
-    "independent_grader": "Run the application's real request path. Check successful creation and retrieval, every declared field and field type, rejection of invalid payloads, preservation of the original application, expected generated tests and documentation, and no unexpected source mutations. Negative cases must fall back before any learned-workflow mutation. The ordinary agent may then execute the requested task; report that work separately. Source census excludes Python caches and Harn/Burin runtime metadata, whose package and launcher identities are checked separately.",
+    "independent_grader": "Run the application's real request path. Check successful creation and retrieval, every declared field and field type, rejection of invalid payloads, preservation of the original application, expected generated tests and documentation, and no unexpected source mutations. Negative cases must fall back before any learned-workflow mutation. The ordinary agent may then execute the requested task; report that work separately. Source census excludes Python caches and Harn and host runtime metadata, whose package and launcher identities are checked separately.",
     "failure_controls": [
       "missing qualification",
       "empty or unexecuted qualification corpus",
