@@ -34,6 +34,8 @@ use crate::tools::args::to_agent_path;
 use crate::tools::response::ResponseBuilder;
 
 mod artifacts;
+#[cfg(test)]
+mod drain_tests;
 pub(crate) mod stage_output;
 mod toolchain_path;
 
@@ -628,31 +630,33 @@ struct ReadCapture {
 
 fn spawn_reader_thread(
     reader: Option<Box<dyn Read + Send>>,
-) -> (mpsc::Receiver<ReadCapture>, Option<thread::JoinHandle<()>>) {
-    let (tx, rx) = mpsc::channel();
+) -> (
+    Option<mpsc::Receiver<ReadCapture>>,
+    Option<thread::JoinHandle<()>>,
+) {
     let Some(mut reader) = reader else {
-        let _ = tx.send(ReadCapture {
-            bytes: Vec::new(),
-            failed: false,
-        });
-        return (rx, None);
+        return (None, None);
     };
+    let (tx, rx) = mpsc::channel();
     let handle = harn_parser::runtime_stack::spawn(move || {
         let mut buf = Vec::new();
         let failed = reader.read_to_end(&mut buf).is_err();
         let _ = tx.send(ReadCapture { bytes: buf, failed });
     });
-    (rx, Some(handle))
+    (Some(rx), Some(handle))
 }
 
 fn drain_output(
-    rx: mpsc::Receiver<ReadCapture>,
+    rx: Option<mpsc::Receiver<ReadCapture>>,
     deadline: Option<std::time::Instant>,
     already_killed: bool,
     killer: &Arc<dyn ProcessKiller>,
 ) -> DrainResult {
     use std::sync::mpsc::RecvTimeoutError;
 
+    let Some(rx) = rx else {
+        return DrainResult::empty();
+    };
     if already_killed {
         return DrainResult {
             bytes: collect_available_output(&rx, Duration::from_millis(100)),
@@ -1217,57 +1221,6 @@ pub(crate) fn resolve_effective_cwd(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
-
-    #[test]
-    fn output_reader_preserves_read_failure_beside_partial_bytes() {
-        struct PartialFailure(bool);
-        impl Read for PartialFailure {
-            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
-                if std::mem::replace(&mut self.0, true) {
-                    return Err(std::io::Error::other("controlled read failure"));
-                }
-                buffer[..5].copy_from_slice(b"ready");
-                Ok(5)
-            }
-        }
-        let (receiver, thread) = spawn_reader_thread(Some(Box::new(PartialFailure(false))));
-        let captured =
-            harn_clock::test_support::recv_within("partial reader terminal result", &receiver);
-        thread.unwrap().join().unwrap();
-        assert_eq!(captured.bytes, b"ready");
-        assert!(captured.failed);
-        let (receiver, thread) =
-            spawn_reader_thread(Some(Box::new(std::io::Cursor::new(b"ready"))));
-        let captured =
-            harn_clock::test_support::recv_within("successful reader terminal result", &receiver);
-        thread.unwrap().join().unwrap();
-        assert_eq!(captured.bytes, b"ready");
-        assert!(!captured.failed);
-    }
-
-    struct RecordingKiller {
-        calls: AtomicUsize,
-    }
-
-    impl RecordingKiller {
-        fn calls(&self) -> usize {
-            self.calls.load(AtomicOrdering::SeqCst)
-        }
-    }
-
-    impl ProcessKiller for RecordingKiller {
-        fn kill(&self) -> process_handle::ProcessCleanupReport {
-            self.calls.fetch_add(1, AtomicOrdering::SeqCst);
-            process_handle::ProcessCleanupReport::for_signal(Some(42), 9)
-        }
-    }
-
-    fn recording_killer() -> Arc<RecordingKiller> {
-        Arc::new(RecordingKiller {
-            calls: AtomicUsize::new(0),
-        })
-    }
 
     #[test]
     fn inline_output_does_not_split_utf8_codepoint() {
@@ -1418,50 +1371,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(parsed, temp.path().canonicalize().unwrap());
-    }
-
-    #[test]
-    fn drain_output_kills_immediately_when_deadline_already_elapsed() {
-        let (_tx, rx) = mpsc::channel::<ReadCapture>();
-        let killer = recording_killer();
-        let killer_trait: Arc<dyn ProcessKiller> = killer.clone();
-        let expired_deadline = std::time::Instant::now()
-            .checked_sub(Duration::from_millis(1))
-            .expect("subtracting one millisecond from Instant::now() should be representable");
-
-        let result = drain_output(rx, Some(expired_deadline), false, &killer_trait);
-
-        assert!(result.timed_out);
-        assert!(!result.interrupted);
-        assert_eq!(result.bytes, Vec::<u8>::new());
-        assert_eq!(killer.calls(), 1);
-        assert_eq!(result.process_cleanup.unwrap().root_pid, Some(42));
-    }
-
-    #[test]
-    fn drain_output_collects_all_available_chunks() {
-        let (tx, rx) = mpsc::channel::<ReadCapture>();
-        tx.send(ReadCapture {
-            bytes: b"alpha".to_vec(),
-            failed: false,
-        })
-        .unwrap();
-        tx.send(ReadCapture {
-            bytes: b"beta".to_vec(),
-            failed: false,
-        })
-        .unwrap();
-        drop(tx);
-        let killer = recording_killer();
-        let killer_trait: Arc<dyn ProcessKiller> = killer.clone();
-
-        let result = drain_output(rx, None, false, &killer_trait);
-
-        assert_eq!(result.bytes, b"alphabeta");
-        assert!(!result.timed_out);
-        assert!(!result.interrupted);
-        assert!(result.process_cleanup.is_none());
-        assert_eq!(killer.calls(), 0);
     }
 
     /// A missing platform mechanism must reach the script as the VM's typed
