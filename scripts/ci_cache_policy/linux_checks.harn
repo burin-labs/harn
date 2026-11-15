@@ -546,7 +546,7 @@ pub fn cache_refresh_trigger_errors(workflow: CiWorkflow?) -> list<string> {
   guard workflow != nil else {
     return ["${CACHE_REFRESH_WORKFLOW} must exist as the cache refresh owner"]
   }
-  const triggers = workflow["on"] ?? {}
+  const triggers = workflow_events(workflow)
   let errors: list<string> = []
   const push_branches = strings_of(triggers?.push?.branches)
   if !push_branches.contains(PERSISTENT_BRANCH) {
@@ -557,7 +557,7 @@ pub fn cache_refresh_trigger_errors(workflow: CiWorkflow?) -> list<string> {
   }
   let crons: list<string> = []
   for row in triggers?.schedule ?? [] {
-    crons = crons + [trim(to_string(row?.cron ?? ""))]
+    crons = crons + [trim(to_string(row.cron ?? ""))]
   }
   if len(crons.filter({ cron -> cron != "" }).to_list()) == 0 {
     errors = errors
