@@ -9,10 +9,14 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Every directory a workspace file or a confined child could occupy, made
-/// canonical: each active policy's writable roots, the package cache, the
-/// process and spawn cwd, and the host temp dir.
-pub(crate) fn untrusted_roots(spawn_cwd: &Path) -> Vec<PathBuf> {
+pub(crate) struct SpawnRoots {
+    pub(crate) writable: Vec<PathBuf>,
+    pub(crate) untrusted: Vec<PathBuf>,
+}
+
+/// Capture writable authority once. Private transfer state also cannot supply
+/// programs or configuration, but its owner must still be able to allocate it.
+pub(crate) fn spawn_roots(spawn_cwd: &Path) -> SpawnRoots {
     let mut roots = vec![
         spawn_cwd.to_path_buf(),
         std::env::temp_dir(),
@@ -33,7 +37,14 @@ pub(crate) fn untrusted_roots(spawn_cwd: &Path) -> Vec<PathBuf> {
         .collect();
     roots.sort();
     roots.dedup();
-    roots
+    let mut untrusted = roots.clone();
+    untrusted.extend(denied_read_root());
+    untrusted.sort();
+    untrusted.dedup();
+    SpawnRoots {
+        writable: roots,
+        untrusted,
+    }
 }
 
 fn is_untrusted(path: &Path, untrusted: &[PathBuf]) -> bool {
@@ -178,8 +189,15 @@ pub(crate) fn grant_spawns_root() -> PathBuf {
 }
 
 thread_local! {
-    static OWN_SPAWN_LAUNCHING: std::cell::RefCell<Option<PathBuf>> =
+    static OWN_SPAWN_LAUNCHING: std::cell::RefCell<Option<OwnSpawnAuthority>> =
         const { std::cell::RefCell::new(None) };
+}
+
+struct OwnSpawnAuthority {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    read_root: PathBuf,
+    #[cfg(target_os = "macos")]
+    write_roots: Vec<PathBuf>,
 }
 
 /// The per-spawn root every confined child is denied. A process with neither a
@@ -206,7 +224,17 @@ fn canonical_spawns_root(home: &Path) -> PathBuf {
 /// profile. Every other spawn's directory stays denied to it.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn own_spawn_read_root() -> Option<PathBuf> {
-    OWN_SPAWN_LAUNCHING.with(|own| own.borrow().clone())
+    OWN_SPAWN_LAUNCHING.with(|own| own.borrow().as_ref().map(|own| own.read_root.clone()))
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn own_spawn_write_roots() -> Vec<PathBuf> {
+    OWN_SPAWN_LAUNCHING.with(|own| {
+        own.borrow()
+            .as_ref()
+            .map(|own| own.write_roots.clone())
+            .unwrap_or_default()
+    })
 }
 
 /// Re-allows one per-spawn directory to the program launched on this thread
@@ -215,7 +243,21 @@ pub struct OwnSpawnLaunch(());
 
 impl OwnSpawnLaunch {
     pub(crate) fn begin(dir: &Path) -> Self {
-        OWN_SPAWN_LAUNCHING.with(|own| *own.borrow_mut() = Some(dir.to_path_buf()));
+        Self::begin_with_writes(dir, &[])
+    }
+
+    pub(crate) fn begin_with_writes(dir: &Path, write_roots: &[PathBuf]) -> Self {
+        assert!(write_roots
+            .iter()
+            .all(|root| root != dir && root.starts_with(dir)));
+        OWN_SPAWN_LAUNCHING.with(|own| {
+            *own.borrow_mut() = Some(OwnSpawnAuthority {
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
+                read_root: dir.to_path_buf(),
+                #[cfg(target_os = "macos")]
+                write_roots: write_roots.to_vec(),
+            });
+        });
         Self(())
     }
 }
@@ -400,6 +442,46 @@ pub(crate) fn write_private_file(path: &Path, contents: &str) -> std::io::Result
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_transfer_state_stays_outside_trusted_program_and_config_roots() {
+        let workspace = tempfile::tempdir().unwrap();
+        let configured =
+            denied_read_root().expect("grant tests require a configured Harn or user home");
+        assert!(spawn_roots(workspace.path())
+            .untrusted
+            .contains(&configured));
+
+        let fixture = tempfile::tempdir().unwrap();
+        let private = canonical_spawns_root(fixture.path());
+        let bin = private.join("pending/repository/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let planted = bin.join("git");
+        std::fs::write(&planted, b"\x7fELF\x02\x01\x01").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&planted, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let known = trusted_path_entries(bin.to_str().unwrap(), &[]);
+        assert!(
+            trusted_program("git", &known, &[]).is_some(),
+            "fixture native executable is reached"
+        );
+        let excluded = vec![private];
+        assert!(trusted_path_entries(bin.to_str().unwrap(), &excluded).is_empty());
+        assert!(trusted_program(planted.to_str().unwrap(), &[], &excluded).is_none());
+        assert!(is_untrusted(&bin.join("config"), &excluded));
+    }
+
+    #[test]
+    fn private_transfer_root_is_untrusted_input_but_its_owner_can_allocate() {
+        let workspace = tempfile::tempdir().unwrap();
+        let roots = spawn_roots(workspace.path());
+        let private = denied_read_root().expect("configured grant root");
+        assert!(roots.untrusted.contains(&private));
+        assert!(!roots.writable.contains(&private));
+        let owned = create_spawn_dir(&roots.writable, &[]).expect("owned private allocation");
+        assert!(owned.path().starts_with(private));
+        assert!(owned.path().is_dir());
+    }
 
     #[test]
     fn a_program_is_trusted_only_outside_every_untrusted_root() {

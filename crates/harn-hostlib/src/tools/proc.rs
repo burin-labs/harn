@@ -170,11 +170,12 @@ pub(crate) fn command_grant(
 /// other inherited name, so no caller or ambient variable reaches it.
 pub(crate) fn apply_command_grant(
     granted: &harn_vm::stdlib::process::GrantedSpawn,
-    env: &mut BTreeMap<String, String>,
-    env_remove: &mut Vec<String>,
+    spec: &mut SpawnSpec,
 ) {
-    *env = granted.env.iter().cloned().collect();
-    env_remove.extend(granted.remove.iter().cloned());
+    spec.program.clone_from(&granted.program);
+    spec.args = granted.args().to_vec();
+    spec.env = granted.env.iter().cloned().collect();
+    spec.env_remove.extend(granted.remove.iter().cloned());
 }
 
 /// Spawn the configured command, capture stdout + stderr in full, and
@@ -221,20 +222,13 @@ pub(crate) fn run_with_filter(
             req.env_mode,
         )?
     };
-    let mut env_remove = req.env_remove.clone();
-    if let Some(granted) = &granted {
-        apply_command_grant(granted, &mut env, &mut env_remove);
-    }
-
-    let spec = SpawnSpec {
+    let mut spec = SpawnSpec {
         builtin: req.builtin,
-        program: granted
-            .as_ref()
-            .map_or_else(|| req.program.clone(), |granted| granted.program.clone()),
+        program: req.program.clone(),
         args: req.args.clone(),
         cwd: Some(effective_cwd.clone()),
         env,
-        env_remove,
+        env_remove: req.env_remove.clone(),
         env_mode: req.env_mode,
         use_stdin: req.stdin.is_some(),
         // Foreground children get their own process group too, so the
@@ -247,6 +241,9 @@ pub(crate) fn run_with_filter(
             .map(FileCapture::output_capture)
             .unwrap_or(OutputCapture::Pipe),
     };
+    if let Some(granted) = &granted {
+        apply_command_grant(granted, &mut spec);
+    }
     let call = crate::host_call::HostCallContext::current();
     let scope = call.process_scope();
     let launch_permit = match scope {
@@ -439,6 +436,14 @@ pub(crate) fn run_with_filter(
     let artifacts = persist_artifacts(&command_id, &stdout_bytes, &stderr_bytes, None)?;
     let inline = inline_output(&stdout_bytes, &stderr_bytes, req.capture);
 
+    if let Some(granted) = granted {
+        granted
+            .complete(command_status == CommandStatus::Completed && exit_code == 0)
+            .map_err(|error| HostlibError::Backend {
+                builtin: req.builtin,
+                message: error.to_string(),
+            })?;
+    }
     Ok(SpawnOutcome {
         verifier_receipt: (!timed_out && !drain_interrupted)
             .then(|| handle.verifier_execution_receipt())

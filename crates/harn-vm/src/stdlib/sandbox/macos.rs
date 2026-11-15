@@ -628,6 +628,16 @@ fn render_profile_with_extra_read_roots(
             ));
         }
     }
+    for root in super::workspace_env::grant_spawn::own_spawn_write_roots() {
+        for path in sandbox_profile_path_aliases(&root.display().to_string()) {
+            let escaped = sandbox_profile_escape(&path);
+            profile.push_str(&format!(
+                "(allow file-read* file-write* (subpath \"{escaped}\"))\n\
+                 (allow file-write-unlink (subpath \"{escaped}\"))\n\
+                 (deny file-write-unlink (literal \"{escaped}\"))\n"
+            ));
+        }
+    }
     if let Some(socket) = &policy.process_sandbox.ssh_agent_socket {
         for path in sandbox_profile_path_aliases(socket) {
             let escaped = sandbox_profile_escape(&path);

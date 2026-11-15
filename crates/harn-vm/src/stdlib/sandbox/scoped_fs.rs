@@ -490,7 +490,10 @@ pub(super) fn open_dir_absolute(path: &Path) -> io::Result<std::os::fd::OwnedFd>
 }
 
 #[cfg(unix)]
-pub(super) fn open_dir_at(parent_fd: libc::c_int, name: &str) -> io::Result<std::os::fd::OwnedFd> {
+pub(super) fn open_dir_at(
+    parent_fd: libc::c_int,
+    name: impl AsRef<std::ffi::OsStr>,
+) -> io::Result<std::os::fd::OwnedFd> {
     use std::os::fd::{FromRawFd, OwnedFd};
 
     let c_name = c_name(name)?;
@@ -510,7 +513,7 @@ pub(super) fn open_dir_at(parent_fd: libc::c_int, name: &str) -> io::Result<std:
 #[cfg(unix)]
 pub(super) fn openat_file(
     parent_fd: libc::c_int,
-    name: &str,
+    name: impl AsRef<std::ffi::OsStr>,
     flags: libc::c_int,
     mode: libc::mode_t,
 ) -> io::Result<std::fs::File> {
@@ -525,13 +528,50 @@ pub(super) fn openat_file(
 }
 
 #[cfg(unix)]
-pub(super) fn mkdirat_name(parent_fd: libc::c_int, name: &str) -> io::Result<()> {
+pub(super) fn mkdirat_name(
+    parent_fd: libc::c_int,
+    name: impl AsRef<std::ffi::OsStr>,
+) -> io::Result<()> {
     let c_name = c_name(name)?;
     let rc = unsafe { libc::mkdirat(parent_fd, c_name.as_ptr(), 0o777) };
     if rc != 0 {
         return Err(io::Error::last_os_error());
     }
     Ok(())
+}
+
+#[cfg(unix)]
+pub(super) fn entry_exists_at(
+    parent_fd: libc::c_int,
+    name: impl AsRef<std::ffi::OsStr>,
+) -> io::Result<bool> {
+    Ok(stat_at(parent_fd, name)?.is_some())
+}
+
+#[cfg(unix)]
+fn stat_at(
+    parent_fd: libc::c_int,
+    name: impl AsRef<std::ffi::OsStr>,
+) -> io::Result<Option<libc::stat>> {
+    let name = c_name(name)?;
+    let mut metadata = std::mem::MaybeUninit::<libc::stat>::uninit();
+    let result = unsafe {
+        libc::fstatat(
+            parent_fd,
+            name.as_ptr(),
+            metadata.as_mut_ptr(),
+            libc::AT_SYMLINK_NOFOLLOW,
+        )
+    };
+    if result == 0 {
+        return Ok(Some(unsafe { metadata.assume_init() }));
+    }
+    let error = io::Error::last_os_error();
+    if error.kind() == io::ErrorKind::NotFound {
+        Ok(None)
+    } else {
+        Err(error)
+    }
 }
 
 #[cfg(unix)]
@@ -558,6 +598,54 @@ pub(super) fn renameat_name(
 }
 
 #[cfg(unix)]
+pub(super) fn renameat_name_noreplace(
+    old_parent_fd: libc::c_int,
+    old_name: &str,
+    new_parent_fd: libc::c_int,
+    new_name: &str,
+) -> io::Result<()> {
+    let old_name = c_name(old_name)?;
+    let new_name = c_name(new_name)?;
+    #[cfg(target_os = "macos")]
+    let result = unsafe {
+        libc::renameatx_np(
+            old_parent_fd,
+            old_name.as_ptr(),
+            new_parent_fd,
+            new_name.as_ptr(),
+            libc::RENAME_EXCL,
+        )
+    };
+    #[cfg(target_os = "linux")]
+    let result = unsafe {
+        libc::syscall(
+            libc::SYS_renameat2,
+            old_parent_fd,
+            old_name.as_ptr(),
+            new_parent_fd,
+            new_name.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = (old_parent_fd, old_name, new_parent_fd, new_name);
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "exclusive directory publication is unavailable",
+        ))
+    }
+}
+
+#[cfg(unix)]
 pub(super) fn unlinkat_name(
     parent_fd: libc::c_int,
     name: &str,
@@ -577,13 +665,11 @@ pub(super) fn sync_dir_fd(fd: libc::c_int) -> bool {
 }
 
 #[cfg(unix)]
-pub(super) fn c_name(name: &str) -> io::Result<std::ffi::CString> {
-    std::ffi::CString::new(name).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("path component contains NUL: {name:?}"),
-        )
-    })
+pub(super) fn c_name(name: impl AsRef<std::ffi::OsStr>) -> io::Result<std::ffi::CString> {
+    use std::os::unix::ffi::OsStrExt;
+    let name = name.as_ref();
+    std::ffi::CString::new(name.as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path component contains NUL"))
 }
 
 // ---------------------------------------------------------------------------

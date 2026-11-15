@@ -260,6 +260,11 @@ pub(super) async fn dispatch_process_exec_after_policy(
         }
     }
     drop(cleanup_registration);
+    if let Some(grant) = grant {
+        crate::task_spawn::spawn_blocking(move || grant.complete(success))
+            .await
+            .map_err(|error| VmError::Runtime(format!("finishing command grant: {error}")))??;
+    }
     let stdout = private_filter.redact_bytes(&stdout);
     let stderr = private_filter.redact_bytes(&stderr);
     if let Some(recording) = tape_recording {
@@ -468,6 +473,7 @@ pub(crate) fn build_sandboxed_command(
     };
     if let Some(grant) = &grant {
         launch.program = grant.program.clone();
+        launch.args = grant.args().to_vec();
         launch.env = grant.env.clone();
         launch.env_remove.retain(|key| {
             !grant.env.iter().any(|(owned, _)| {

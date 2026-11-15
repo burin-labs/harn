@@ -10,7 +10,7 @@
 //! runs the program without the credential instead of with an open exec path.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::security::session_environment::command_basename;
 use crate::stdlib::sandbox::workspace_env::{gh_config, git_network, grant_spawn};
@@ -60,6 +60,9 @@ pub(crate) struct SeedRequest<'a> {
 pub(crate) struct Seeded {
     pub(crate) env: Vec<(String, String)>,
     pub(crate) hold: Option<Box<dyn std::any::Any + Send>>,
+    pub(crate) args: Option<Vec<String>>,
+    pub(crate) write_roots: Vec<PathBuf>,
+    pub(crate) completion: Option<git_network::CloneCompletion>,
 }
 
 const PROFILES: &[&ExecProfile] = &[&gh_config::GH_PROFILE, &git_network::GIT_PROFILE];
@@ -138,27 +141,51 @@ fn kept_variable(key: &str) -> bool {
 }
 
 /// One spawn that receives a command-bound grant: the canonical program file
-/// to run, the whole caller-supplied environment it may set (`env`, which
+/// and argument vector to run, the whole caller-supplied environment it may set (`env`, which
 /// replaces the request's), and the inherited names to remove (`remove`).
 /// Holds the per-spawn directory, which is removed when this is dropped, so
-/// keep it alive until the child has exited.
+/// keep it alive until the child has exited, then call [`GrantedSpawn::complete`].
 pub struct GrantedSpawn {
     pub program: String,
+    args: Vec<String>,
     pub env: Vec<(String, String)>,
     pub remove: Vec<String>,
     /// Dropped before `_dir`: a server the seed started stops first. Held
     /// behind a mutex, which nothing locks, so the spawn stays `Sync` and
     /// unwind-safe whatever the server is.
     _held: Option<std::sync::Mutex<Box<dyn std::any::Any + Send>>>,
+    write_roots: Vec<PathBuf>,
+    completion: Option<git_network::CloneCompletion>,
     _dir: grant_spawn::SpawnDir,
 }
 
 impl GrantedSpawn {
+    /// The prepared argument vector that must accompany this grant's program.
+    pub fn args(&self) -> &[String] {
+        &self.args
+    }
+
     /// Hold while launching the program: its own sandbox profile may then
     /// read its private directory, which every other confined child is
     /// denied.
     pub fn launching(&self) -> grant_spawn::OwnSpawnLaunch {
-        grant_spawn::OwnSpawnLaunch::begin(self._dir.path())
+        if self.write_roots.is_empty() {
+            grant_spawn::OwnSpawnLaunch::begin(self._dir.path())
+        } else {
+            grant_spawn::OwnSpawnLaunch::begin_with_writes(self._dir.path(), &self.write_roots)
+        }
+    }
+
+    /// Finish a granted command after its child has been reaped. A clone's
+    /// private Git directory becomes its ordinary destination repository
+    /// before a successful result can be published.
+    pub fn complete(mut self, succeeded: bool) -> Result<(), VmError> {
+        if let Some(completion) = self.completion.take() {
+            completion.finish(succeeded).map_err(|error| {
+                VmError::Runtime(format!("finishing granted git clone: {error}"))
+            })?;
+        }
+        Ok(())
     }
 }
 
@@ -196,10 +223,11 @@ pub fn granted_spawn(
     let Some(session) = super::session_env_with_command_grants(program)? else {
         return Ok(None);
     };
-    let untrusted = grant_spawn::untrusted_roots(cwd);
+    let roots = grant_spawn::spawn_roots(cwd);
+    let untrusted = &roots.untrusted;
     let path = session.get("PATH").cloned().unwrap_or_default();
-    let entries = grant_spawn::trusted_path_entries(&path, &untrusted);
-    let Some(canonical) = grant_spawn::trusted_program(program, &entries, &untrusted) else {
+    let entries = grant_spawn::trusted_path_entries(&path, untrusted);
+    let Some(canonical) = grant_spawn::trusted_program(program, &entries, untrusted) else {
         return Ok(None);
     };
     let home = crate::user_dirs::home_dir()
@@ -246,7 +274,7 @@ pub fn granted_spawn(
     };
     let mut subdirs: Vec<&str> = profile.dir_env.iter().map(|(_, dir)| *dir).collect();
     subdirs.push(HOOKS_DIR);
-    let dir = grant_spawn::create_spawn_dir(&untrusted, &subdirs)
+    let dir = grant_spawn::create_spawn_dir(&roots.writable, &subdirs)
         .map_err(|error| refusal(profile, format!("preparing its private directory: {error}")))?;
     let seeded = (profile.seed)(&SeedRequest {
         dir: dir.path(),
@@ -327,9 +355,12 @@ pub fn granted_spawn(
         .collect();
     Ok(Some(GrantedSpawn {
         program: canonical.display().to_string(),
+        args: seeded.args.unwrap_or_else(|| args.to_vec()),
         env,
         remove,
         _held: held.map(std::sync::Mutex::new),
+        write_roots: seeded.write_roots,
+        completion: seeded.completion,
         _dir: dir,
     }))
 }
