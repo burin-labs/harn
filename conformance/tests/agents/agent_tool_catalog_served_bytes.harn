@@ -64,6 +64,7 @@ fn served_request(
   tool_format: string,
   provider: string,
   model: string,
+  await_resumption: bool = false,
 ) -> dict {
   const dir = path_join(
     harness.fs.workspace_temp_dir(),
@@ -77,6 +78,7 @@ fn served_request(
     loop_until_done: true,
     done_sentinel: "##DONE##",
     max_iterations: 1,
+    agent_await_resumption_enabled: await_resumption,
     session_id: "tool-catalog-bytes-" + harness.random.uuid(),
     llm_transcript_dir: dir,
   }
@@ -211,5 +213,22 @@ preferred_tool_format = "native"
   const full_breakdown = native_full.context_token_breakdown
   require full_breakdown.resident_tool_count == full_breakdown.native_tool_count,
     "with nothing deferred the two counts must agree"
+  // This receipt partitions Harn's native tool projection. Provider encoders
+  // may strip unsupported deferral flags; it does not measure billed context.
+  const native_lifecycle = served_request(
+    harness,
+    registry_with(false, false),
+    "native",
+    "testcatalog",
+    "catalog-fixture-route",
+    true,
+  )
+  const lifecycle_breakdown = native_lifecycle.context_token_breakdown
+  require lifecycle_breakdown.native_tool_count > full_breakdown.native_tool_count,
+    "enabling the lifecycle control must really add its served tool schema"
+  require lifecycle_breakdown.native_tool_count - lifecycle_breakdown.resident_tool_count == 1,
+    "the lifecycle control must stay in the declared deferred partition"
+  require segment_tokens(native_lifecycle, "deferred_tool_schemas") > 0,
+    "the lifecycle control must be counted in the deferred schema segment"
   harness.stdio.log("agent tool catalog served bytes test passed")
 }

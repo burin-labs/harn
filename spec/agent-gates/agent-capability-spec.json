@@ -118,6 +118,10 @@
         "reader": "__judge_tool_descriptor"
       },
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_batch_proposals.harn",
+        "reader": "tool_batch_inject_resolution_tool"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
         "reader": "__loop_dispatch_options"
       },

@@ -397,11 +397,14 @@ fn a_served_tool_call_injects_the_reminders_its_recording_injected() {
     let source = mark_script(&hook_marker, &exec_marker).replace(
         r#"return "marked""#,
         r#"return "thread 'main' panicked at src/lib.rs:3:5: boom""#,
+    ).replace(
+        "          provider: \"mock\",",
+        "          provider: \"mock\",\n          reminders: {config: {grounded_review: {text_scan: true}}},",
     );
     record(&source, &dirs.tapes, &dirs.workspace);
     let tape = std::fs::read_to_string(dirs.tapes.join(TAPE_FILE_NAME)).unwrap();
     assert!(
-        tape.contains("Grounded adversarial review"),
+        tape.contains("Runtime and diagnostic feedback"),
         "the recording injected the reminder"
     );
     let recording = EventTape::load(&dirs.tapes.join(TAPE_FILE_NAME)).unwrap();
@@ -413,7 +416,9 @@ fn a_served_tool_call_injects_the_reminders_its_recording_injected() {
         } => messages.iter().any(|message| {
             let bytes = recording.resolve_payload(message).unwrap();
             let text = String::from_utf8(bytes).unwrap();
-            text.contains("Grounded adversarial review")
+            text.contains("Runtime and diagnostic feedback")
+                && text.contains("reported:")
+                && !text.contains("verified:")
                 && text.contains("authority=\\\"advisory\\\"")
                 && text.contains("task scope")
         }),

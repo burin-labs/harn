@@ -1,4 +1,7 @@
 import { AgentToolBatchPhase } from "std/agent/events"
+import { agent_tool_annotations } from "std/agent/tool_annotations"
+import { __tool_registry_name } from "std/llm/call_shape"
+import { ToolRegistry } from "std/tools"
 
 const OBSERVATIONS = ["read", "search", "think", "fetch", "inspect", "list"]
 
@@ -121,4 +124,30 @@ pub fn tool_batch_phase_rank(phase: AgentToolBatchPhase) -> int {
     "process_verification" -> { return 3 }
     "terminal" -> { return 4 }
   }
+}
+
+/**
+ * A single fixed phase cannot retain a later phase. Process arguments can
+ * select observation or verification, so their registry stays resolution-capable.
+ * @effects: []
+ * @errors: []
+ */
+pub fn tool_batch_registry_can_retain(
+  tools: ToolRegistry,
+  policy: dict?,
+  terminal_tools: list<string>,
+) -> bool {
+  let phases: list<AgentToolBatchPhase> = []
+  for entry in tools.tools {
+    const name = __tool_registry_name(entry)
+    const annotations = agent_tool_annotations(entry, policy, name)
+    const classified = tool_batch_classify({}, entry, annotations, contains(terminal_tools, name))
+    if classified.phase == "process_verification" && !classified.declared_verification {
+      return true
+    }
+    if !phases.contains(classified.phase) {
+      phases.push(classified.phase)
+    }
+  }
+  return len(phases) > 1
 }

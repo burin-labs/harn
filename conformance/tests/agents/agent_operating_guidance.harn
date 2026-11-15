@@ -17,12 +17,18 @@ fn probe(harness: Harness, options: dict<string, any>, expected: string?) -> nil
             max_iterations: 1,
             done_sentinel: nil,
             turn_end_condition: nil,
-            agent_await_resumption_enabled: false,
+            agent_await_resumption_enabled: options?.agent_await_resumption_enabled ?? false,
           },
       )
       const calls = harness.llm.mock_calls()
       require len(calls) == 1, "the primary provider call must fire"
       const system = calls[0].system
+      if options?.tools == nil || len(options.tools.tools) == 0 {
+        require !contains(json_stringify(calls[0].tools ?? []), "__harn_resolve_tool_call"),
+          "an empty tool surface must not advertise a confirmation tool"
+        require !contains(system, "__harn_resolve_tool_call"),
+          "an empty tool surface must not advertise textual confirmation tooling"
+      }
       if expected == nil {
         require !contains(system, "## Operating guidance"),
           "no unsolicited guidance without a loop or tools"
@@ -47,6 +53,16 @@ fn main(harness: Harness) -> nil {
   probe(harness, {loop_until_done: false}, nil)
   for format in ["native", "text", "json"] {
     for loop_enabled in [false, true] {
+      probe(
+        harness,
+        {tool_format: format, loop_until_done: loop_enabled, agent_await_resumption_enabled: true},
+        "## Operating guidance",
+      )
+      probe(
+        harness,
+        {tools: tool_registry(), tool_format: format, loop_until_done: loop_enabled},
+        loop_enabled ? "## Operating guidance" : nil,
+      )
       probe(
         harness,
         {tools: tools, tool_format: format, loop_until_done: loop_enabled},

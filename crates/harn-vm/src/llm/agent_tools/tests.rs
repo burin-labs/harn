@@ -133,13 +133,16 @@ fn unavailable_tool_result_is_action_oriented_without_permission_framing() {
         .as_str()
         .expect("unavailable-tool result should carry a next_step string");
     assert!(
-        !next.to_lowercase().contains("permission") && !next.contains("not permitted"),
-        "name-resolution feedback must not use permission framing: {next}"
+        next.contains("does not itself require new permission") && !next.contains("not permitted"),
+        "name-resolution feedback must not demand new permission: {next}"
     );
     assert!(
-        next.contains("Available tools:") && next.contains("look"),
-        "next_step should list the callable tools: {next}"
+        next.contains("permission hints")
+            && next.contains("look")
+            && !next.contains("Available tools:"),
+        "permission patterns must not be presented as callable schemas: {next}"
     );
+    assert!(next.contains("supplied schema") && next.contains("tool search"));
     assert!(
         next.contains("re-sending this call will fail"),
         "next_step should steer off an identical re-send: {next}"

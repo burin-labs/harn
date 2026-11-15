@@ -153,10 +153,14 @@ const REDACTED_CONTENT_MEMO_BYTES: usize = 32 * 1024 * 1024;
 const VM_MESSAGE_MEMO_BYTES: usize = 32 * 1024 * 1024;
 const FINGERPRINTED_SEQUENCE_BYTES: usize = 32 * 1024 * 1024;
 
-/// The sequence [`content_fingerprints`] last hashed on this thread: each
-/// position's value, its fingerprint, and the fingerprint's weight.
+/// Authored and provider-normalized values can alternate at one position.
+/// Both variants share the sequence's existing byte budget.
+struct FingerprintedPosition {
+    variants: Vec<(serde_json::Value, ContentFingerprint, usize)>,
+}
+
 struct FingerprintedSequence {
-    entries: Vec<(serde_json::Value, ContentFingerprint, usize)>,
+    entries: Vec<FingerprintedPosition>,
     weight: usize,
 }
 
@@ -167,8 +171,8 @@ struct FingerprintedSequence {
 /// memo by message fingerprint. Hashing is a framed pass over every byte of a
 /// message, so fingerprinting the transcript per projection made each turn
 /// cost more than the last. This keeps the sequence last fingerprinted on this
-/// thread and reuses a position's fingerprint when the value there is equal to
-/// the one hashed before; equality is a comparison, not a hash. A call
+/// thread and reuses a position's fingerprint when the value equals either of
+/// its two retained variants; equality is a comparison, not a hash. A call
 /// therefore hashes only the messages that changed since the previous call,
 /// and a different sequence costs exactly what hashing it did before.
 pub(crate) fn content_fingerprints(values: &[serde_json::Value]) -> Vec<ContentFingerprint> {
@@ -187,20 +191,30 @@ fn fingerprints_and_weights(values: &[serde_json::Value]) -> Vec<(ContentFingerp
             .iter()
             .enumerate()
             .map(|(position, value)| {
-                if let Some((retained, fingerprint, weight)) = sequence.entries.get(position) {
-                    if retained == value {
+                if let Some(entry) = sequence.entries.get(position) {
+                    if let Some((_, fingerprint, weight)) = entry
+                        .variants
+                        .iter()
+                        .find(|(retained, _, _)| retained == value)
+                    {
                         return (*fingerprint, *weight);
                     }
                 }
                 let (fingerprint, weight) = fingerprint_and_weight(value);
                 if let Some(entry) = sequence.entries.get_mut(position) {
-                    sequence.weight = sequence.weight - entry.2 + weight;
-                    *entry = (value.clone(), fingerprint, weight);
+                    let evicted = if entry.variants.len() == 2 {
+                        entry.variants.remove(0).2
+                    } else {
+                        0
+                    };
+                    entry.variants.push((value.clone(), fingerprint, weight));
+                    sequence.weight = sequence.weight - evicted + weight;
                     if sequence.weight > FINGERPRINTED_SEQUENCE_BYTES {
                         let dropped: usize = sequence
                             .entries
                             .drain(position..)
-                            .map(|entry| entry.2)
+                            .flat_map(|entry| entry.variants)
+                            .map(|(_, _, weight)| weight)
                             .sum();
                         sequence.weight -= dropped;
                     }
@@ -208,7 +222,9 @@ fn fingerprints_and_weights(values: &[serde_json::Value]) -> Vec<(ContentFingerp
                     && sequence.weight.saturating_add(weight) <= FINGERPRINTED_SEQUENCE_BYTES
                 {
                     sequence.weight += weight;
-                    sequence.entries.push((value.clone(), fingerprint, weight));
+                    sequence.entries.push(FingerprintedPosition {
+                        variants: vec![(value.clone(), fingerprint, weight)],
+                    });
                 }
                 (fingerprint, weight)
             })
@@ -591,6 +607,48 @@ mod tests {
         );
         let expected = fresh(&values);
         assert_eq!(reused, expected, "a reused fingerprint is the value's own");
+    }
+
+    #[test]
+    fn sequence_fingerprints_reuse_authored_and_served_variants() {
+        let token = uuid::Uuid::now_v7().to_string();
+        let authored = vec![serde_json::json!({"role": "tool", "content": token})];
+        let mut served = authored.clone();
+        served[0]["name"] = serde_json::json!("read");
+        let expected_authored = fingerprint_and_weight(&authored[0]).0;
+        let expected_served = fingerprint_and_weight(&served[0]).0;
+        let before = fingerprint_computations();
+        for _ in 0..24 {
+            assert_eq!(content_fingerprints(&authored), vec![expected_authored]);
+            assert_eq!(content_fingerprints(&served), vec![expected_served]);
+        }
+        assert_eq!(fingerprint_computations() - before, 2);
+
+        let edited = vec![serde_json::json!({"role": "tool", "content": "edited", "nonce": token})];
+        let expected_edited = fingerprint_and_weight(&edited[0]).0;
+        assert_eq!(content_fingerprints(&edited), vec![expected_edited]);
+        let before = fingerprint_computations();
+        assert_eq!(content_fingerprints(&authored), vec![expected_authored]);
+        assert_eq!(
+            fingerprint_computations() - before,
+            1,
+            "an evicted third variant must be recomputed, never confused with retained content"
+        );
+        LAST_FINGERPRINTED_SEQUENCE.with(|sequence| {
+            let sequence = sequence.borrow();
+            assert!(sequence
+                .entries
+                .iter()
+                .all(|entry| entry.variants.len() <= 2));
+            let retained: usize = sequence
+                .entries
+                .iter()
+                .flat_map(|entry| &entry.variants)
+                .map(|(_, _, weight)| weight)
+                .sum();
+            assert_eq!(sequence.weight, retained);
+            assert!(retained <= FINGERPRINTED_SEQUENCE_BYTES);
+        });
     }
 
     #[test]

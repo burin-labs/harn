@@ -145,11 +145,10 @@ fn retained_resolution_keeps_gemini_response_names_and_semantic_audit() {
     );
     crate::llm_config::set_user_overrides(Some(providers));
 
-    let source =
-        include_str!("../../../../../../tests/agent/fixtures/gemini_retained_resolution.harn");
+    let source = include_str!("../../testdata/gemini_retained_resolution.harn");
     let path = std::path::Path::new(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../tests/agent/fixtures/gemini_retained_resolution.harn"
+        "/src/llm/testdata/gemini_retained_resolution.harn"
     ));
     let chunk = crate::compile_source_at_path(source, path, None).expect("fixture compiles");
     let runtime = tokio::runtime::Builder::new_current_thread()
