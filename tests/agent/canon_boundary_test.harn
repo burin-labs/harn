@@ -1,0 +1,96 @@
+import {
+  canon_event_observed_symbols,
+  canon_event_paths,
+  canon_event_write_path_from_result,
+  canon_pack_ids_for_files,
+} from "std/agent/canon"
+
+pipeline test_canon_event_containers_preserve_order_and_extensions() {
+  const event = {
+    changed_paths: ["top.harn"],
+    iteration_info: {changed_paths: [{path: "snake.harn"}], extension: {keep: true}},
+    iterationInfo: {filesWritten: ["camel.harn"], extension: [1, 2]},
+    tool_results: [
+      {
+        result: {changedPaths: ["result.harn"], extension: true},
+        raw_output: {files_written: ["raw.harn", "top.harn"], extension: 7},
+        extension: {keep: true},
+      },
+    ],
+    extension: "keep",
+  }
+  assert_eq(
+    canon_event_paths(event),
+    ["top.harn", "snake.harn", "camel.harn", "result.harn", "raw.harn"],
+  )
+  assert_eq(event.iteration_info.extension.keep, true)
+  const result = event.tool_results[0]
+  if result == nil {
+    throw "the event must retain its tool result"
+  }
+  assert_eq(result.extension.keep, true)
+}
+
+pipeline test_canon_non_record_carriers_keep_legacy_fallbacks() {
+  for value in [nil, false, 7, "legacy", []] {
+    const event = {
+      iteration_info: value,
+      iterationInfo: value,
+      tool_results: [{result: value, raw_output: value, function: value}],
+    }
+    assert_eq(canon_event_paths(event), [])
+    assert_eq(canon_event_observed_symbols(event), type_of(value) == "string" ? [value] : [])
+    assert_eq(
+      canon_event_write_path_from_result(
+        {function: value, observation: "updated src/fallback.harn"},
+      ),
+      "src/fallback.harn",
+    )
+  }
+}
+
+pipeline test_canon_function_arguments_keep_precedence_and_scalar_coercions() {
+  assert_eq(
+    canon_event_write_path_from_result({function: {arguments: {path: "nested.harn"}}}),
+    "nested.harn",
+  )
+  assert_eq(
+    canon_event_write_path_from_result(
+      {args: {path: 7}, function: {arguments: {path: "unused.harn"}}},
+    ),
+    "7",
+  )
+  assert_eq(canon_event_write_path_from_result({function: {arguments: "ignored"}}), "")
+  assert_eq(canon_event_write_path_from_result({function: {arguments: {path: false}}}), "false")
+}
+
+pipeline test_canon_observations_keep_explicitness_and_nested_aliases() {
+  const event = {
+    observed_symbols: ["top", {name: "not-explicit"}],
+    iteration_info: {observedSymbols: [{kind: "observe_output", name: "snake"}]},
+    iterationInfo: {observed_symbols: ["camel"]},
+    tool_results: [
+      {result: {schema: "harn.probe.v1", name: "probe", observedSymbols: ["inner"]}},
+      {raw_output: {observed_symbols: ["raw", "top"]}},
+      nil,
+      7,
+      "ignored",
+    ],
+  }
+  assert_eq(
+    canon_event_observed_symbols(event),
+    ["top", "snake", "camel", "probe", "inner", "raw", "ignored"],
+  )
+}
+
+pipeline test_canon_manifest_routing_keeps_custom_extensions() {
+  const manifest = {
+    schema_version: 1,
+    packs: [{id: "custom", invariants: "checks.harn", extensions: ["odd"], extension: true}],
+  }
+  assert_eq(
+    canon_pack_ids_for_files([{path: "src/custom.odd", extension: [1]}], manifest),
+    ["custom"],
+  )
+  assert_eq(canon_pack_ids_for_files([{path: "src/custom.harn"}], manifest), [])
+}
