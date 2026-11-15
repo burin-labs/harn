@@ -23,7 +23,7 @@ pub fn project_agent_tools(
         crate::tool_registry::ToolAudience::Agent,
     )?;
     let projected = if search.is_some() {
-        guidance_with_disclosed_schema(projected)
+        disclosed_tool_descriptors(projected)
     } else {
         projected
     };
@@ -31,11 +31,11 @@ pub fn project_agent_tools(
     Ok(search)
 }
 
-/// A deferred capability's instructions travel with its schema, never in the
-/// global system prompt. Native search keeps this descriptor stable; client
-/// search exposes the same descriptor when it promotes the tool. Consuming
-/// `guidance` makes this projection idempotent and prevents double injection.
-fn guidance_with_disclosed_schema(tools: VmValue) -> VmValue {
+/// Discovery supplies the full selected descriptor, including its instructions,
+/// rather than another compact teaser. Native search keeps this descriptor
+/// stable; client search exposes it when it promotes the tool. Consuming
+/// `guidance` prevents duplicate global injection and makes this idempotent.
+fn disclosed_tool_descriptors(tools: VmValue) -> VmValue {
     let Some(entries) = super::system_prompt::tool_entry_list(Some(&tools)) else {
         return tools;
     };
@@ -48,11 +48,11 @@ fn guidance_with_disclosed_schema(tools: VmValue) -> VmValue {
             if !matches!(dict.get("defer_loading"), Some(VmValue::Bool(true))) {
                 return entry;
             }
-            let Some(guidance) = dict.get("guidance").map(VmValue::display) else {
-                return entry;
-            };
             let mut tool = dict.clone();
-            tool.remove("guidance");
+            tool.put_bool("compact", false);
+            let Some(guidance) = tool.remove("guidance").map(|value| value.display()) else {
+                return VmValue::dict(tool);
+            };
             if !guidance.trim().is_empty() {
                 let description = dict
                     .get("description")

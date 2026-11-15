@@ -522,7 +522,8 @@ registry = tool_define(registry, "deploy", "Deploy to production", {
 With tool search active, deferred definitions are sent to the provider but
 enter the model's context only when discovery surfaces them. Their `guidance`
 travels with the discovered description instead of the global system prompt.
-Client discovery also expands selected compact tools into complete schemas.
+Discovery expands selected compact tools into complete descriptors and schemas
+on both native and client paths.
 Without tool search, guidance retains its eager system-prompt placement.
 
 Anthropic excludes deferred definitions from the cached prefix. Discovery uses
