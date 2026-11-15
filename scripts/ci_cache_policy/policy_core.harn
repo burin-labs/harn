@@ -957,7 +957,7 @@ pub fn release_aot_runner_errors(workflow: CiWorkflow?) -> list<string> {
         "${RELEASE_BINARY_WORKFLOW}:setup must project the policy-selected CLI AOT standard runner",
       ]
   }
-  const runner = trim(job_runner(workflow?.jobs?.prepare_cli_aot) ?? "")
+  const runner = trim(to_string(job_runner(workflow?.jobs?.prepare_cli_aot) ?? ""))
   if runner != "$" + "{{ ${RELEASE_AOT_STANDARD_OUTPUT} }}" {
     errors = errors
       + [
@@ -2269,11 +2269,11 @@ pub fn minimal_pr_capacity_errors(ci: CiWorkflow?, publish: CiWorkflow?) -> list
   // The Clippy and Harn proof lanes used to switch to Blacksmith Linux, which
   // cannot confine a Harn child; they run on the shared hosted runner.
   for name in [SECURITY_READY_JOB, "rust-checks", "harn-audit"] {
-    if trim(job_runner(jobs[name]) ?? "") != HOSTED_LINUX_RUNNER {
+    if trim(to_string(job_runner(jobs[name]) ?? "")) != HOSTED_LINUX_RUNNER {
       errors = errors + ["ci.yml:${name} must use GitHub-hosted ${HOSTED_LINUX_RUNNER}"]
     }
   }
-  if trim(job_runner(jobs["rust-check-inputs"]) ?? "")
+  if trim(to_string(job_runner(jobs["rust-check-inputs"]) ?? ""))
     != producer_runner_expression() {
     errors = errors
       + ["ci.yml:rust-check-inputs must use standard hosted ${PRODUCER_HOSTED_LINUX_RUNNER}"]

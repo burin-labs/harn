@@ -522,7 +522,7 @@ fn windows_nightly_producer_errors(
   producer: CiJob,
 ) -> list<string> {
   let errors: list<string> = []
-  if trim(job_runner(producer) ?? "") != HOSTED_WINDOWS_RUNNER {
+  if trim(to_string(job_runner(producer) ?? "")) != HOSTED_WINDOWS_RUNNER {
     errors = errors
       + ["${warm.workflow}:${warm.job} must use free standard ${HOSTED_WINDOWS_RUNNER}"]
   }

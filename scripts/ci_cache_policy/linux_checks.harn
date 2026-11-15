@@ -270,7 +270,7 @@ fn hosted_compile_lane_errors(
     return ["ci.yml:${job_name} must define the hosted Linux compile lane"]
   }
   let errors: list<string> = []
-  if trim(job_runner(job) ?? "") != HOSTED_LINUX_RUNNER {
+  if trim(to_string(job_runner(job) ?? "")) != HOSTED_LINUX_RUNNER {
     errors = errors + ["ci.yml:${job_name} must run on ${HOSTED_LINUX_RUNNER}"]
   }
   if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != HOSTED_RUNNER_TIER {
@@ -320,7 +320,7 @@ fn rust_lint_lane_errors(workflow: CiWorkflow?) -> list<string> {
     return ["ci.yml:${job_name} must define the strict Clippy lane"]
   }
   let errors: list<string> = []
-  if trim(job_runner(job) ?? "") != HOSTED_LINUX_RUNNER {
+  if trim(to_string(job_runner(job) ?? "")) != HOSTED_LINUX_RUNNER {
     errors = errors + ["ci.yml:${job_name} must run on GitHub-hosted ${HOSTED_LINUX_RUNNER}"]
   }
   if trim(to_string(job?.env?.[RUNNER_TIER_ENV] ?? "")) != HOSTED_RUNNER_TIER {
@@ -359,7 +359,7 @@ fn persistent_compile_lane_errors(
     errors = errors
       + ["ci.yml:${job_name} must depend only on the Rust change decision"]
   }
-  if trim(job_runner(job) ?? "") != producer_runner_expression() {
+  if trim(to_string(job_runner(job) ?? "")) != producer_runner_expression() {
     errors = errors
       + ["ci.yml:${job_name} must use standard hosted ${PRODUCER_HOSTED_LINUX_RUNNER}"]
   }
@@ -443,7 +443,7 @@ fn hosted_refresh_lane_errors(workflow: CiWorkflow?) -> list<string> {
     ]
   }
   let errors: list<string> = []
-  if trim(job_runner(job) ?? "") != HOSTED_LINUX_RUNNER {
+  if trim(to_string(job_runner(job) ?? "")) != HOSTED_LINUX_RUNNER {
     errors = errors
       + ["${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must run on ${HOSTED_LINUX_RUNNER}"]
   }
@@ -710,7 +710,7 @@ fn archived_workspace_test_consumer_errors(
     return []
   }
   let errors: list<string> = []
-  if trim(job_runner(consumer) ?? "") != HOSTED_LINUX_RUNNER {
+  if trim(to_string(job_runner(consumer) ?? "")) != HOSTED_LINUX_RUNNER {
     errors = errors
       + ["ci.yml:${job_name} must run on ${HOSTED_LINUX_RUNNER}"]
   }
@@ -812,7 +812,7 @@ fn security_ready_barrier_errors(workflow: CiWorkflow?) -> list<string> {
   // The waiter reads the producer's state, so a queued or running producer is
   // pending rather than spending the wait. Gating the barrier on producer
   // completion as well only delays the sandbox proof behind the test phase.
-  if trim(job_runner(ready_job) ?? "") != HOSTED_LINUX_RUNNER
+  if trim(to_string(job_runner(ready_job) ?? "")) != HOSTED_LINUX_RUNNER
     || trim(to_string(job_timeout(ready_job) ?? ""))
       != ARTIFACT_READY_TIMEOUT_MINUTES
     || ready_step?.env?.HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS != nil
@@ -1049,7 +1049,7 @@ fn parallel_rust_proof_errors(workflow: CiWorkflow?) -> list<string> {
   const security_job = workflow?.jobs?.["rust-security"]
   const security_step = step_by_name(security_job?.steps ?? [], "Run Linux sandbox tests")
   const security_command = trim(security_step?.run ?? "")
-  if trim(job_runner(security_job) ?? "") != HOSTED_LINUX_RUNNER
+  if trim(to_string(job_runner(security_job) ?? "")) != HOSTED_LINUX_RUNNER
     || trim(security_step?.id ?? "")
       != "release-audit-rust-security"
     || !contains(security_command, "--archive-file")
