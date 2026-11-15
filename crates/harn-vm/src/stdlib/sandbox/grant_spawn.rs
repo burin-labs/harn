@@ -21,6 +21,8 @@ pub(crate) fn untrusted_roots(spawn_cwd: &Path) -> Vec<PathBuf> {
     roots.extend(std::env::current_dir());
     roots.extend(crate::stdlib::process::project_root_path());
     roots.extend(crate::user_dirs::package_cache_dir());
+    // Private transfer state stays untrusted after its launch scope ends.
+    roots.extend(denied_read_root());
     let policies = crate::orchestration::current_execution_policy()
         .into_iter()
         .chain(super::super::active_sandbox_policy().map(|(policy, _)| policy));
@@ -429,6 +431,32 @@ pub(crate) fn write_private_file(path: &Path, contents: &str) -> std::io::Result
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_transfer_state_stays_outside_trusted_program_and_config_roots() {
+        let workspace = tempfile::tempdir().unwrap();
+        let configured =
+            denied_read_root().expect("grant tests require a configured Harn or user home");
+        assert!(untrusted_roots(workspace.path()).contains(&configured));
+
+        let fixture = tempfile::tempdir().unwrap();
+        let private = canonical_spawns_root(fixture.path());
+        let bin = private.join("pending/repository/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let planted = bin.join("git");
+        std::fs::write(&planted, b"\x7fELF\x02\x01\x01").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&planted, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let known = trusted_path_entries(bin.to_str().unwrap(), &[]);
+        assert!(
+            trusted_program("git", &known, &[]).is_some(),
+            "fixture native executable is reached"
+        );
+        let excluded = vec![private];
+        assert!(trusted_path_entries(bin.to_str().unwrap(), &excluded).is_empty());
+        assert!(trusted_program(planted.to_str().unwrap(), &[], &excluded).is_none());
+        assert!(is_untrusted(&bin.join("config"), &excluded));
+    }
 
     #[test]
     fn a_program_is_trusted_only_outside_every_untrusted_root() {

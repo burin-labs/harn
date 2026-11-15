@@ -564,6 +564,54 @@ pub(super) fn renameat_name(
 }
 
 #[cfg(unix)]
+pub(super) fn renameat_name_noreplace(
+    old_parent_fd: libc::c_int,
+    old_name: &str,
+    new_parent_fd: libc::c_int,
+    new_name: &str,
+) -> io::Result<()> {
+    let old_name = c_name(old_name)?;
+    let new_name = c_name(new_name)?;
+    #[cfg(target_os = "macos")]
+    let result = unsafe {
+        libc::renameatx_np(
+            old_parent_fd,
+            old_name.as_ptr(),
+            new_parent_fd,
+            new_name.as_ptr(),
+            libc::RENAME_EXCL,
+        )
+    };
+    #[cfg(target_os = "linux")]
+    let result = unsafe {
+        libc::syscall(
+            libc::SYS_renameat2,
+            old_parent_fd,
+            old_name.as_ptr(),
+            new_parent_fd,
+            new_name.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        let _ = (old_parent_fd, old_name, new_parent_fd, new_name);
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "exclusive directory publication is unavailable",
+        ))
+    }
+}
+
+#[cfg(unix)]
 pub(super) fn unlinkat_name(
     parent_fd: libc::c_int,
     name: &str,

@@ -177,7 +177,7 @@ impl CloneCompletion {
         }
         unchanged()?;
         scoped_fs::unlinkat_name(parent.as_raw_fd(), &name, 0)?;
-        scoped_fs::renameat_name(parent.as_raw_fd(), &stage, parent.as_raw_fd(), &name)?;
+        scoped_fs::renameat_name_noreplace(parent.as_raw_fd(), &stage, parent.as_raw_fd(), &name)?;
         scoped_fs::sync_dir_fd(parent.as_raw_fd());
         Ok(())
     }
@@ -252,6 +252,6 @@ fn copy_tree(source: &Path, destination: std::os::fd::OwnedFd) -> io::Result<()>
     Ok(())
 }
 
-#[cfg(all(test, unix))]
+#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
 #[path = "clone/tests.rs"]
 mod tests;

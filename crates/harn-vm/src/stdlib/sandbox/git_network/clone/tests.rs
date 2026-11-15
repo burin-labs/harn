@@ -169,6 +169,43 @@ fn successful_child_cannot_replace_another_git_marker() {
 }
 
 #[test]
+fn exclusive_publication_preserves_a_new_destination_and_reaches_a_free_one() {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::MetadataExt;
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("stage")).unwrap();
+    std::fs::create_dir(root.path().join("occupied")).unwrap();
+    let original = std::fs::metadata(root.path().join("occupied"))
+        .unwrap()
+        .ino();
+    let parent = scoped_fs::open_dir_absolute(root.path()).unwrap();
+    let error = scoped_fs::renameat_name_noreplace(
+        parent.as_raw_fd(),
+        "stage",
+        parent.as_raw_fd(),
+        "occupied",
+    )
+    .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
+    assert_eq!(
+        std::fs::metadata(root.path().join("occupied"))
+            .unwrap()
+            .ino(),
+        original
+    );
+    assert!(root.path().join("stage").is_dir());
+    scoped_fs::renameat_name_noreplace(
+        parent.as_raw_fd(),
+        "stage",
+        parent.as_raw_fd(),
+        "available",
+    )
+    .unwrap();
+    assert!(root.path().join("available").is_dir());
+    assert!(!root.path().join("stage").exists());
+}
+
+#[test]
 fn failed_child_removes_only_the_marker_it_created() {
     let fixture = Fixture::new();
     fixture.completion().finish(false).unwrap();
