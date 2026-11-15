@@ -32,6 +32,15 @@ pub(super) const SHARED_MEMORY_ACCESS: FsAccess = landlock_support::make_bitflag
     MakeReg | ReadFile | WriteFile | RemoveFile
 });
 
+/// The host directory [`grant_host_fallback`] may grant a child write under,
+/// when this host has one. Whether a given launch takes the fallback is
+/// decided at spawn, so a reader of the writable set counts it whenever it can.
+pub(crate) fn host_fallback_root() -> Option<PathBuf> {
+    Path::new(SHARED_MEMORY_DIR)
+        .is_dir()
+        .then(|| PathBuf::from(SHARED_MEMORY_DIR))
+}
+
 /// Grant the host `/dev/shm` to a direct Landlock child. `namespaced` is true
 /// when the helper will mount a private one instead: a host rule could not
 /// reach that mount, because Landlock skips a hidden mount point.
@@ -39,15 +48,10 @@ pub(super) fn grant_host_fallback(
     filesystem: &mut FilesystemProfile,
     namespaced: bool,
 ) -> Result<(), VmError> {
-    if namespaced || !Path::new(SHARED_MEMORY_DIR).is_dir() {
+    let Some(root) = host_fallback_root().filter(|_| !namespaced) else {
         return Ok(());
-    }
-    push_rule(
-        filesystem,
-        PathBuf::from(SHARED_MEMORY_DIR),
-        SHARED_MEMORY_ACCESS,
-        true,
-    )?;
+    };
+    push_rule(filesystem, root, SHARED_MEMORY_ACCESS, true)?;
     static REPORTED: std::sync::Once = std::sync::Once::new();
     REPORTED.call_once(|| {
         crate::events::log_debug(
