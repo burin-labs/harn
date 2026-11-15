@@ -6,6 +6,7 @@ import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {load} from 'js-yaml';
+import {Evaluator,Lexer,Parser,data} from '@actions/expressions';
 
 const root=fileURLToPath(new URL('../../',import.meta.url));
 const repository='fixture/private-consumer';
@@ -86,9 +87,47 @@ test('an unreadable default repository cannot produce a pin',t=>{
   assert.equal(pinned,'');
 });
 
-test('both candidate and baseline consume the one captured source pin',()=>{
+test('candidate attempts share one captured pin and have no automatic baseline exemption jobs',()=>{
   const workflow=load(fs.readFileSync(path.join(root,'.github/workflows/ci.yml'),'utf8'));
-  for(const name of ['consumer-check','consumer-check-retry','consumer-base-check','consumer-base-check-retry']) {
+  for(const name of ['consumer-check','consumer-check-retry']) {
     assert.equal(workflow.jobs[name].with.consumer_revision,'${{ needs.consumer-pin.outputs.sha }}');
+  }
+  for(const name of ['consumer-base-cli','consumer-base-check','consumer-base-check-retry']) {
+    assert.equal(workflow.jobs[name],undefined);
+    assert.ok(!workflow.jobs['ci-status'].needs.includes(name));
+  }
+  const env=workflow.jobs['ci-status'].steps.find(step=>step.name==='Check job results')?.env
+    ?? workflow.jobs['ci-status'].steps.find(step=>step.env?.CONSUMER_RESULT)?.env;
+  assert.equal(env.CONSUMER_RESULT,'${{ needs.consumer-check.outputs.verdict && needs.consumer-check.result || needs.consumer-check-retry.result }}');
+  assert.ok(!Object.keys(env).some(key=>key.startsWith('CONSUMER_BASE')||key==='CONSUMER_FAILURES'||key==='CONSUMER_IDENTITY'));
+});
+
+test('CI expressions bind the verdict to its actual owner before the real gate decides',()=>{
+  const workflow=load(fs.readFileSync(path.join(root,'.github/workflows/ci.yml'),'utf8'));
+  const env=workflow.jobs['ci-status'].steps.find(step=>step.env?.CONSUMER_RESULT).env;
+  const value=input=>typeof input==='string'?new data.StringData(input):new data.Dictionary(
+    ...Object.entries(input).map(([key,child])=>({key,value:value(child)})));
+  const evaluate=(source,needs)=>{
+    const tokens=new Lexer(source.replace(/^\$\{\{\s*|\s*\}\}$/g,'')).lex();
+    const tree=new Parser(tokens.tokens,['needs'],[]).parse();
+    return new Evaluator(tree,new data.Dictionary({key:'needs',value:value(needs)})).evaluate().coerceString();
+  };
+  const cases=[
+    ['success','pass','skipped','',0],
+    ['failure','','success','pass',0],
+    ['cancelled','','success','pass',0],
+    ['failure','pass','success','pass',1],
+    ['failure','fail','success','pass',1],
+    ['success','','skipped','',1],
+    ['cancelled','','cancelled','',1],
+  ];
+  for(const [first,verdict,retry,retryVerdict,status] of cases){
+    const needs={'consumer-check':{result:first,outputs:{verdict}},
+      'consumer-check-retry':{result:retry,outputs:{verdict:retryVerdict}}};
+    const observed={CONSUMER_RESULT:evaluate(env.CONSUMER_RESULT,needs),
+      CONSUMER_VERDICT:evaluate(env.CONSUMER_VERDICT,needs)};
+    const result=spawnSync('bash',['scripts/ci/consumer_verdict.sh'],{cwd:root,encoding:'utf8',
+      env:{PATH:process.env.PATH,CONSUMER_EXPECTED:'true',...observed}});
+    assert.equal(result.status,status,JSON.stringify({needs,observed,output:result.stdout+result.stderr}));
   }
 });

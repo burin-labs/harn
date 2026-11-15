@@ -41,13 +41,13 @@ on:
         description: The consumer run's numeric id, which this workflow already prints
         value: ${{ jobs.consumers.outputs.consumer_run }}
       consumer_head:
-        description: The consumer run's head commit, compared between two rehearsals and never printed
+        description: The measured consumer run's head commit, retained for source binding and never printed
         value: ${{ jobs.consumers.outputs.consumer_head }}
       consumer_jobs:
-        description: A digest of the consumer run's job names
+        description: Diagnostic digest of job names; not failed-case equivalence evidence
         value: ${{ jobs.consumers.outputs.consumer_jobs }}
       consumer_failures:
-        description: A digest of each failed consumer job with its first failed step, empty when none failed or unmeasured
+        description: Diagnostic digest of failed job and first-step names; never authorizes excusing a failure
         value: ${{ jobs.consumers.outputs.consumer_failures }}
       reason:
         description: The named reason an attempt failed or stayed unmeasured
