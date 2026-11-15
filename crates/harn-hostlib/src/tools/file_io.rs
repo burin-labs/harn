@@ -5,7 +5,7 @@
 
 use std::fs as stdfs;
 use std::io::{Read, Seek, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use base64::Engine;
 use harn_vm::process_sandbox::FsAccess;
@@ -488,7 +488,7 @@ fn reject_escaping_symlink(
 }
 
 fn read_bytes(
-    path: &PathBuf,
+    path: &Path,
     path_str: &str,
     session_id: Option<&str>,
     offset: u64,
@@ -515,24 +515,19 @@ fn read_physical_bytes(
     offset: u64,
     limit_bytes: u64,
 ) -> Result<(Vec<u8>, u64), HostlibError> {
-    let metadata = stdfs::metadata(path).map_err(|err| HostlibError::Backend {
+    let mut file =
+        crate::fs::physical_file::open_regular_file(path).map_err(|err| HostlibError::Backend {
+            builtin: READ_FILE_BUILTIN,
+            message: format!("open `{path_str}`: {err}"),
+        })?;
+    let metadata = file.metadata().map_err(|err| HostlibError::Backend {
         builtin: READ_FILE_BUILTIN,
         message: format!("stat `{path_str}`: {err}"),
     })?;
-    if !metadata.is_file() {
-        return Err(HostlibError::Backend {
-            builtin: READ_FILE_BUILTIN,
-            message: format!("`{path_str}` is not a regular file"),
-        });
-    }
     let total_size = metadata.len();
     validate_read_offset(offset, total_size)?;
     let to_read = planned_read_len(offset, limit_bytes, total_size);
 
-    let mut file = stdfs::File::open(path).map_err(|err| HostlibError::Backend {
-        builtin: READ_FILE_BUILTIN,
-        message: format!("open `{path_str}`: {err}"),
-    })?;
     if offset > 0 {
         file.seek(std::io::SeekFrom::Start(offset))
             .map_err(|err| HostlibError::Backend {

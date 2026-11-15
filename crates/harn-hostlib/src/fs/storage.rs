@@ -1,27 +1,32 @@
 //! The staged filesystem's existing manifest, audit attempts, and content bodies.
 
 use std::collections::{BTreeMap, BTreeSet};
+#[cfg(test)]
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
 use super::{
-    atomic_write, batch, default_root, manifest_path, normalize_logical, now_ms, session_dir,
-    FsMode, Manifest, SessionState, StagedEntry, MANIFEST_VERSION,
+    batch, default_root, manifest_path, normalize_logical, now_ms, session_dir, FsMode, Manifest,
+    SessionState, StagedEntry, MANIFEST_VERSION,
 };
+
+mod directory;
+use directory::SessionStorage;
 
 pub(super) fn load_state(session_id: &str, root: Option<PathBuf>) -> Result<SessionState, String> {
     let root = root.unwrap_or_else(default_root);
     let manifest_path = manifest_path(&root, session_id);
-    let text = match fs::read_to_string(&manifest_path) {
+    let storage = SessionStorage::open(&root, session_id)
+        .map_err(|error| format!("open staged workspace {}: {error}", root.display()))?;
+    let text = match storage.read(Path::new("manifest.json")) {
         Ok(text) => Some(text),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
         Err(error) => return Err(format!("read {}: {error}", manifest_path.display())),
     };
     if let Some(text) = text {
-        let manifest: Manifest = serde_json::from_str(&text)
+        let manifest: Manifest = serde_json::from_slice(&text)
             .map_err(|err| format!("parse {}: {err}", manifest_path.display()))?;
         let atomic_groups = match manifest.version {
             1 if manifest.atomic_groups.is_none() => BTreeMap::new(),
@@ -74,9 +79,8 @@ pub(super) fn persist_state(
     op: &str,
     path: Option<&Path>,
 ) -> Result<(), String> {
-    let dir = session_dir(&state.root, &state.session_id);
-    fs::create_dir_all(dir.join("bodies"))
-        .map_err(|err| format!("mkdir {}: {err}", dir.display()))?;
+    let storage = SessionStorage::open(&state.root, &state.session_id)
+        .map_err(|error| format!("open staged workspace: {error}"))?;
     let manifest = Manifest {
         version: MANIFEST_VERSION,
         session_id: state.session_id.clone(),
@@ -92,14 +96,14 @@ pub(super) fn persist_state(
     let bytes = serde_json::to_vec_pretty(&manifest)
         .map_err(|err| format!("serialize staged manifest: {err}"))?;
     append_journal(state, op, path)?;
-    atomic_write(&manifest_path(&state.root, &state.session_id), &bytes)?;
+    storage
+        .write(Path::new("manifest.json"), &bytes)
+        .map_err(|error| format!("write staged manifest: {error}"))?;
     prune_unreferenced_bodies(state);
     Ok(())
 }
 
 fn append_journal(state: &SessionState, op: &str, path: Option<&Path>) -> Result<(), String> {
-    let dir = session_dir(&state.root, &state.session_id);
-    fs::create_dir_all(&dir).map_err(|err| format!("mkdir {}: {err}", dir.display()))?;
     let line = serde_json::to_string(&serde_json::json!({
         "ts_ms": now_ms(),
         "op": op,
@@ -108,22 +112,18 @@ fn append_journal(state: &SessionState, op: &str, path: Option<&Path>) -> Result
         "pending_count": state.entries.len(),
     }))
     .map_err(|err| format!("serialize staged journal: {err}"))?;
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(dir.join("journal.jsonl"))
-        .map_err(|err| format!("open staged journal: {err}"))?;
-    writeln!(file, "{line}").map_err(|err| format!("write staged journal: {err}"))
+    SessionStorage::open(&state.root, &state.session_id)
+        .and_then(|storage| {
+            storage.append(Path::new("journal.jsonl"), format!("{line}\n").as_bytes())
+        })
+        .map_err(|error| format!("append staged journal: {error}"))
 }
 
 pub(super) fn write_body(state: &SessionState, bytes: &[u8]) -> Result<String, String> {
     let hash = hex::encode(Sha256::digest(bytes));
-    let path = session_dir(&state.root, &state.session_id)
-        .join("bodies")
-        .join(&hash);
-    if !path.exists() {
-        atomic_write(&path, bytes)?;
-    }
+    SessionStorage::open(&state.root, &state.session_id)
+        .and_then(|storage| storage.write(&Path::new("bodies").join(&hash), bytes))
+        .map_err(|error| format!("write staged body: {error}"))?;
     Ok(hash)
 }
 
@@ -134,11 +134,8 @@ pub(super) fn read_body(state: &SessionState, hash: &str) -> std::io::Result<Vec
             "invalid staged body hash",
         ));
     }
-    let bytes = fs::read(
-        session_dir(&state.root, &state.session_id)
-            .join("bodies")
-            .join(hash),
-    )?;
+    let bytes = SessionStorage::open(&state.root, &state.session_id)?
+        .read(&Path::new("bodies").join(hash))?;
     if hex::encode(Sha256::digest(&bytes)) != hash {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -164,16 +161,12 @@ fn prune_unreferenced_bodies(state: &SessionState) {
             .flat_map(batch::Group::body_hashes)
             .map(str::to_string),
     );
-    let body_dir = session_dir(&state.root, &state.session_id).join("bodies");
-    let Ok(entries) = fs::read_dir(&body_dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if !live.contains(&name) {
-            let _ = fs::remove_file(entry.path());
-        }
-    }
+    let _ = SessionStorage::open(&state.root, &state.session_id)
+        .and_then(|storage| storage.prune_bodies(&live));
+}
+
+pub(super) fn remove_state(state: &SessionState) -> std::io::Result<()> {
+    SessionStorage::open(&state.root, &state.session_id)?.remove()
 }
 
 #[cfg(test)]

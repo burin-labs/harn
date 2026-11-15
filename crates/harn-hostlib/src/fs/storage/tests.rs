@@ -121,3 +121,94 @@ fn immediate_reads_do_not_create_journals_in_read_only_workspaces() {
     fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
     result.unwrap();
 }
+
+#[cfg(unix)]
+#[test]
+fn journal_parents_cannot_redirect_group_effects_outside_the_workspace() {
+    use std::os::unix::fs::symlink;
+
+    for redirected in [
+        ".harn",
+        ".harn/state",
+        ".harn/state/staged",
+        ".harn/state/staged/file-refactor",
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let destination = root.path().join(redirected);
+        fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        symlink(outside.path(), &destination).unwrap();
+        let path = root.path().join("document");
+        fs::write(&path, b"original").unwrap();
+        let mut reached_effects = false;
+        let result = crate::fs::apply_file_changes(
+            "test",
+            root.path(),
+            &[crate::fs::FileChange {
+                path: path.clone(),
+                expected_hash: Some(hex::encode(Sha256::digest(b"original"))),
+                contents: Some(b"must not publish".to_vec()),
+                permissions_from: None,
+            }],
+            None,
+            |_| {
+                reached_effects = true;
+                Ok(())
+            },
+        );
+        assert!(result.is_err(), "{redirected}");
+        assert!(!reached_effects, "{redirected}");
+        assert_eq!(fs::read(path).unwrap(), b"original");
+        assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 0);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn journal_and_body_leaf_links_do_not_read_or_write_outside_files() {
+    use std::os::unix::fs::symlink;
+
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let target = outside.path().join("sentinel");
+    fs::write(&target, b"outside sentinel").unwrap();
+    let session = uuid::Uuid::new_v4().to_string();
+    let state = load_state(&session, Some(root.path().to_path_buf())).unwrap();
+    persist_state(&state, "test", None).unwrap();
+    let directory = session_dir(root.path(), &session);
+    let journal = directory.join("journal.jsonl");
+    fs::remove_file(&journal).unwrap();
+    symlink(&target, &journal).unwrap();
+    assert!(persist_state(&state, "must refuse", None).is_err());
+    fs::remove_file(&journal).unwrap();
+    let manifest = directory.join("manifest.json");
+    fs::remove_file(&manifest).unwrap();
+    symlink(&target, &manifest).unwrap();
+    assert!(load_state(&session, Some(root.path().to_path_buf())).is_err());
+    let hash = hex::encode(Sha256::digest(b"outside sentinel"));
+    fs::create_dir_all(directory.join("bodies")).unwrap();
+    symlink(&target, directory.join("bodies").join(&hash)).unwrap();
+    assert!(read_body(&state, &hash).is_err());
+    assert!(write_body(&state, b"outside sentinel").is_err());
+    assert_eq!(fs::read(&target).unwrap(), b"outside sentinel");
+    assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn journal_fifo_entries_are_not_opened_as_blocking_streams() {
+    let root = tempfile::tempdir().unwrap();
+    let session = uuid::Uuid::new_v4().to_string();
+    let state = load_state(&session, Some(root.path().to_path_buf())).unwrap();
+    persist_state(&state, "test", None).unwrap();
+    let manifest = manifest_path(root.path(), &session);
+    fs::remove_file(&manifest).unwrap();
+    let c_path = std::ffi::CString::new(manifest.to_str().unwrap()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0);
+    assert!(load_state(&session, Some(root.path().to_path_buf())).is_err());
+    let journal = session_dir(root.path(), &session).join("journal.jsonl");
+    fs::remove_file(&journal).unwrap();
+    let c_path = std::ffi::CString::new(journal.to_str().unwrap()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0);
+    assert!(persist_state(&state, "must refuse", None).is_err());
+}

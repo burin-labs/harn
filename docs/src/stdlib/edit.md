@@ -864,7 +864,9 @@ the complete move even when a caller selects only one of its paths. Recovery
 restores recorded before-images after an interrupted publication and preserves
 an unattributed edit for inspection instead of overwriting it.
 The transaction journal uses manifest version 2 with an explicit file-group
-census. Current readers reload it under the same lock as writers and refuse
+census. Journal reads and writes are confined to the session's workspace;
+redirecting its state directory outside that workspace refuses the operation
+before source publication. Current readers reload it under the same lock as writers and refuse
 reads while a group needs recovery. Ordinary version 1 staged sessions remain
 readable and upgrade on their next mutation. Older versions reject version 2
 when loading the journal, but legacy cached sessions and physical-read fallbacks

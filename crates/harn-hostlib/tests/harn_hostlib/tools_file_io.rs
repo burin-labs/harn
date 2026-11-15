@@ -122,23 +122,32 @@ fn session_fifo_reads_refuse_without_blocking_other_session_reads() {
     harn_hostlib::fs::configure_session_root(&session, dir.path());
     let (sender, receiver) = std::sync::mpsc::channel();
     let worker = std::thread::spawn(move || {
-        let registry = tools_registry();
-        let read = registry.find("hostlib_tools_read_file").unwrap();
-        let result = (read.handler)(&dict_arg(&[
-            ("path", vm_string(&path_str(&fifo))),
-            ("session_id", vm_string(&session)),
-        ]));
-        sender
-            .send(result.err().map(|error| error.to_string()))
-            .unwrap();
+        let registry = registry_with(&[
+            &harn_hostlib::tools::ToolsCapability,
+            &harn_hostlib::fs::FsCapability,
+        ]);
+        let mut errors = Vec::new();
+        for name in ["hostlib_tools_read_file", "hostlib_fs_read_text"] {
+            let read = registry.find(name).unwrap();
+            let result = (read.handler)(&dict_arg(&[
+                ("path", vm_string(&path_str(&fifo))),
+                ("session_id", vm_string(&session)),
+            ]));
+            errors.push(result.err().map(|error| error.to_string()));
+        }
+        sender.send(errors).unwrap();
     });
     let result = std::panic::catch_unwind(|| {
         harn_clock::test_support::recv_within("FIFO reader's regular-file refusal", &receiver)
     });
     drop(keeper);
     worker.join().unwrap();
-    let error = result.unwrap().expect("FIFO is not a regular file");
-    assert!(error.contains("not a regular file"), "{error}");
+    let errors = result.unwrap();
+    assert_eq!(errors.len(), 2);
+    for error in errors {
+        let error = error.expect("FIFO is not a regular file");
+        assert!(error.contains("not a regular file"), "{error}");
+    }
     let path = dir.path().join("other-session");
     fs::write(&path, b"other session remains usable").unwrap();
     let registry = tools_registry();

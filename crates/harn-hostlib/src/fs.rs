@@ -40,6 +40,7 @@ const STATE_REL: &[&str] = &[".harn", harn_vm::runtime_paths::HOSTLIB_STATE_DIR,
 pub(crate) mod anchored_file;
 mod batch;
 pub(crate) use batch::{apply_changes as apply_file_changes, FileChange};
+pub(crate) mod physical_file;
 mod session_cache;
 mod storage;
 use session_cache::{locked_state, SessionCache};
@@ -471,7 +472,7 @@ pub fn remove_session_state(session_id: &str, root: Option<&Path>) -> Result<(),
         });
     }
     let dir = session_dir(&state.root, &state.session_id);
-    match stdfs::remove_dir_all(&dir) {
+    match storage::remove_state(&state) {
         Ok(()) => {}
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
         Err(err) => Err(HostlibError::Backend {
@@ -493,7 +494,13 @@ pub(crate) fn read(
     explicit_session_id: Option<&str>,
 ) -> Option<std::io::Result<Vec<u8>>> {
     read_with(path, explicit_session_id, |overlay| {
-        overlay.unwrap_or_else(|| stdfs::read(path))
+        overlay.unwrap_or_else(|| {
+            use std::io::Read;
+            let mut file = physical_file::open_regular_file(path)?;
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes)?;
+            Ok(bytes)
+        })
     })
 }
 
@@ -1102,6 +1109,9 @@ fn set_mode_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let root = optional_string(SET_MODE_BUILTIN, &dict, "root")?
         .map(|path| resolve_host_path(SET_MODE_BUILTIN, &path))
         .transpose()?;
+    if let Some(root) = &root {
+        enforce_path_scope(SET_MODE_BUILTIN, root, FsAccess::Write)?;
+    }
     let result = set_mode(&session_id, mode, root.as_deref())?;
     Ok(build_dict([(
         "previous_mode",
