@@ -103,7 +103,7 @@ pub struct ToolBatchDispositionReceipt {
     pub blocking_mutation_status: Option<ToolMutationStatus>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ToolBatchProposalResolution {
     pub proposal_id: String,

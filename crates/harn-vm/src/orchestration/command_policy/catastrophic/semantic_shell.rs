@@ -985,8 +985,11 @@ pub(super) fn posix_shell_input(args: &[String]) -> PosixShellInput {
             index += 1;
             continue;
         }
-        if (token.starts_with('-') || token.starts_with('+')) && token.len() > 1 {
-            let flags = &token[1..];
+        if let Some(flags) = token
+            .strip_prefix('-')
+            .or_else(|| token.strip_prefix('+'))
+            .filter(|flags| !flags.is_empty())
+        {
             if token.starts_with("--")
                 || !flags
                     .chars()
