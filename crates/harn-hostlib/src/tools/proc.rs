@@ -34,6 +34,9 @@ use crate::tools::args::to_agent_path;
 use crate::tools::response::ResponseBuilder;
 
 mod artifacts;
+#[cfg(test)]
+mod drain_tests;
+pub(crate) mod stage_output;
 mod toolchain_path;
 
 pub(crate) use self::artifacts::{
@@ -63,6 +66,7 @@ pub(crate) struct SpawnRequest {
 /// Result of running a subprocess to completion (or to the deadline).
 #[derive(Debug, Clone)]
 pub(crate) struct SpawnOutcome {
+    pub(crate) stage_output: Option<stage_output::StageOutput>,
     pub(crate) verifier_receipt: Option<harn_vm::verifier_provenance::VerifierExecutionReceipt>,
     pub(crate) command_id: String,
     pub(crate) cwd: PathBuf,
@@ -99,6 +103,7 @@ pub(crate) struct CaptureConfig {
     pub(crate) merge_stderr: bool,
     pub(crate) max_inline_bytes: usize,
     pub(crate) transport: CaptureTransport,
+    pub(crate) final_stage: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,6 +120,7 @@ impl Default for CaptureConfig {
             merge_stderr: false,
             max_inline_bytes: DEFAULT_MAX_INLINE_BYTES,
             transport: CaptureTransport::Pipe,
+            final_stage: false,
         }
     }
 }
@@ -244,6 +250,7 @@ pub(crate) fn run_with_filter(
     if let Some(granted) = &granted {
         apply_command_grant(granted, &mut spec);
     }
+    let mut stage_capture = stage_output::StageCapture::for_spawn(&mut spec, req.capture)?;
     let call = crate::host_call::HostCallContext::current();
     let scope = call.process_scope();
     let launch_permit = match scope {
@@ -277,6 +284,14 @@ pub(crate) fn run_with_filter(
 
     let (out_rx, stdout_thread) = spawn_reader_thread(handle.take_stdout());
     let (err_rx, stderr_thread) = spawn_reader_thread(handle.take_stderr());
+    let stage_readers = stage_capture
+        .as_mut()
+        .and_then(|stage| stage.take_readers());
+    let (stage_stdout, stage_stderr) = stage_readers
+        .map(|readers| (Some(readers.stdout), Some(readers.stderr)))
+        .unwrap_or((None, None));
+    let (stage_out_rx, stage_stdout_thread) = spawn_reader_thread(stage_stdout);
+    let (stage_err_rx, stage_stderr_thread) = spawn_reader_thread(stage_stderr);
 
     // Poll `harn_vm::op_interrupt::requested` alongside the child wait so
     // scope cancellation, `deadline` expiry, and VM drop terminate the
@@ -316,11 +331,30 @@ pub(crate) fn run_with_filter(
         );
         (stdout_drain, stderr_drain)
     };
+    let stage_stdout_drain = drain_output(
+        stage_out_rx,
+        deadline,
+        wait_killed
+            || stdout_drain.process_cleanup.is_some()
+            || stderr_drain.process_cleanup.is_some(),
+        &killer,
+    );
+    let stage_stderr_drain = drain_output(
+        stage_err_rx,
+        deadline,
+        wait_killed
+            || stdout_drain.process_cleanup.is_some()
+            || stderr_drain.process_cleanup.is_some()
+            || stage_stdout_drain.process_cleanup.is_some(),
+        &killer,
+    );
     // Do not join unconditionally: a descendant that inherited stdout/stderr can
     // keep the pipe open after the direct child exits. The drain helper enforces
     // the same command deadline/interrupt and kills the cleanup-token family.
     drop(stdout_thread);
     drop(stderr_thread);
+    drop(stage_stdout_thread);
+    drop(stage_stderr_thread);
 
     let (stdout_bytes, stderr_bytes) = match file_capture.as_ref() {
         Some(files) => files.read(req.builtin)?,
@@ -328,14 +362,32 @@ pub(crate) fn run_with_filter(
     };
     let stdout_bytes = private_filter.redact_bytes(&stdout_bytes);
     let stderr_bytes = private_filter.redact_bytes(&stderr_bytes);
-    let drain_timed_out = stdout_drain.timed_out || stderr_drain.timed_out;
-    let drain_interrupted = stdout_drain.interrupted || stderr_drain.interrupted;
-    let mut drain_cleanup = stdout_drain.process_cleanup;
-    if let Some(stderr_cleanup) = stderr_drain.process_cleanup {
+    #[cfg(unix)]
+    let stage_stdout_bytes = private_filter.redact_bytes(&stage_stdout_drain.bytes);
+    #[cfg(unix)]
+    let stage_stderr_bytes = private_filter.redact_bytes(&stage_stderr_drain.bytes);
+    let drain_timed_out = stdout_drain.timed_out
+        || stderr_drain.timed_out
+        || stage_stdout_drain.timed_out
+        || stage_stderr_drain.timed_out;
+    let drain_interrupted = stdout_drain.interrupted
+        || stderr_drain.interrupted
+        || stage_stdout_drain.interrupted
+        || stage_stderr_drain.interrupted;
+    let mut drain_cleanup = None::<process_handle::ProcessCleanupReport>;
+    for cleanup in [
+        stdout_drain.process_cleanup,
+        stderr_drain.process_cleanup,
+        stage_stdout_drain.process_cleanup,
+        stage_stderr_drain.process_cleanup,
+    ]
+    .into_iter()
+    .flatten()
+    {
         if let Some(existing) = drain_cleanup.as_mut() {
-            existing.merge(stderr_cleanup);
+            existing.merge(cleanup);
         } else {
-            drain_cleanup = Some(stderr_cleanup);
+            drain_cleanup = Some(cleanup);
         }
     }
 
@@ -433,6 +485,35 @@ pub(crate) fn run_with_filter(
     if let Some(refusal) = sandbox_assessment.refusal.as_ref() {
         refusal.emit();
     }
+    let stage_output = stage_capture
+        .as_ref()
+        .map(|stage| {
+            if stdout_drain.read_failed
+                || stderr_drain.read_failed
+                || stage_stdout_drain.read_failed
+                || stage_stderr_drain.read_failed
+            {
+                return Ok(stage_output::StageOutput::Unmeasured {
+                    reason: "capture_read_failed",
+                });
+            }
+            stage.finish(
+                stage_output::StageOutputBytes {
+                    #[cfg(unix)]
+                    relay_complete: handle.stage_output_complete(),
+                    stdout: &stdout_bytes,
+                    stderr: &stderr_bytes,
+                    #[cfg(unix)]
+                    stage_stdout: &stage_stdout_bytes,
+                    #[cfg(unix)]
+                    stage_stderr: &stage_stderr_bytes,
+                },
+                command_status == CommandStatus::Completed && signal.is_none(),
+                req.capture,
+                &private_filter,
+            )
+        })
+        .transpose()?;
     let artifacts = persist_artifacts(&command_id, &stdout_bytes, &stderr_bytes, None)?;
     let inline = inline_output(&stdout_bytes, &stderr_bytes, req.capture);
 
@@ -445,6 +526,7 @@ pub(crate) fn run_with_filter(
             })?;
     }
     Ok(SpawnOutcome {
+        stage_output,
         verifier_receipt: (!timed_out && !drain_interrupted)
             .then(|| handle.verifier_execution_receipt())
             .flatten(),
@@ -478,6 +560,7 @@ pub(crate) fn run_with_filter(
 #[derive(Debug)]
 struct DrainResult {
     bytes: Vec<u8>,
+    read_failed: bool,
     timed_out: bool,
     interrupted: bool,
     process_cleanup: Option<process_handle::ProcessCleanupReport>,
@@ -487,6 +570,7 @@ impl DrainResult {
     fn empty() -> Self {
         Self {
             bytes: Vec::new(),
+            read_failed: false,
             timed_out: false,
             interrupted: false,
             process_cleanup: None,
@@ -538,33 +622,44 @@ impl FileCapture {
     }
 }
 
+struct ReadCapture {
+    bytes: Vec<u8>,
+    failed: bool,
+}
+
 fn spawn_reader_thread(
     reader: Option<Box<dyn Read + Send>>,
-) -> (mpsc::Receiver<Vec<u8>>, Option<thread::JoinHandle<()>>) {
-    let (tx, rx) = mpsc::channel::<Vec<u8>>();
+) -> (
+    Option<mpsc::Receiver<ReadCapture>>,
+    Option<thread::JoinHandle<()>>,
+) {
     let Some(mut reader) = reader else {
-        drop(tx);
-        return (rx, None);
+        return (None, None);
     };
+    let (tx, rx) = mpsc::channel();
     let handle = harn_parser::runtime_stack::spawn(move || {
         let mut buf = Vec::new();
-        let _ = reader.read_to_end(&mut buf);
-        let _ = tx.send(buf);
+        let failed = reader.read_to_end(&mut buf).is_err();
+        let _ = tx.send(ReadCapture { bytes: buf, failed });
     });
-    (rx, Some(handle))
+    (Some(rx), Some(handle))
 }
 
 fn drain_output(
-    rx: mpsc::Receiver<Vec<u8>>,
+    rx: Option<mpsc::Receiver<ReadCapture>>,
     deadline: Option<std::time::Instant>,
     already_killed: bool,
     killer: &Arc<dyn ProcessKiller>,
 ) -> DrainResult {
     use std::sync::mpsc::RecvTimeoutError;
 
+    let Some(rx) = rx else {
+        return DrainResult::empty();
+    };
     if already_killed {
         return DrainResult {
             bytes: collect_available_output(&rx, Duration::from_millis(100)),
+            read_failed: true,
             timed_out: false,
             interrupted: false,
             process_cleanup: None,
@@ -579,6 +674,7 @@ fn drain_output(
             let cleanup = killer.kill();
             return DrainResult {
                 bytes: collect_available_output(&rx, Duration::from_millis(100)),
+                read_failed: true,
                 timed_out,
                 interrupted,
                 process_cleanup: Some(cleanup),
@@ -592,13 +688,16 @@ fn drain_output(
             })
             .unwrap_or_else(|| Duration::from_millis(20));
         match rx.recv_timeout(wait) {
-            Ok(bytes) => {
-                let mut all_bytes = bytes;
+            Ok(read) => {
+                let mut all_bytes = read.bytes;
+                let mut read_failed = read.failed;
                 for next in rx.try_iter() {
-                    all_bytes.extend(next);
+                    all_bytes.extend(next.bytes);
+                    read_failed |= next.failed;
                 }
                 return DrainResult {
                     bytes: all_bytes,
+                    read_failed,
                     timed_out: false,
                     interrupted: false,
                     process_cleanup: None,
@@ -607,6 +706,7 @@ fn drain_output(
             Err(RecvTimeoutError::Disconnected) => {
                 return DrainResult {
                     bytes: Vec::new(),
+                    read_failed: true,
                     timed_out: false,
                     interrupted: false,
                     process_cleanup: None,
@@ -617,13 +717,13 @@ fn drain_output(
     }
 }
 
-fn collect_available_output(rx: &mpsc::Receiver<Vec<u8>>, first_wait: Duration) -> Vec<u8> {
+fn collect_available_output(rx: &mpsc::Receiver<ReadCapture>, first_wait: Duration) -> Vec<u8> {
     let mut bytes = match rx.recv_timeout(first_wait) {
-        Ok(bytes) => bytes,
+        Ok(read) => read.bytes,
         Err(_) => return Vec::new(),
     };
     for next in rx.try_iter() {
-        bytes.extend(next);
+        bytes.extend(next.bytes);
     }
     bytes
 }
@@ -748,6 +848,14 @@ pub(crate) fn build_response(
             "verifier_receipt",
             harn_vm::value::json::json_to_vm_value(
                 &serde_json::to_value(receipt).expect("typed verifier receipt"),
+            ),
+        );
+    }
+    if let Some(stage) = outcome.stage_output {
+        builder = builder.value(
+            "stage_output",
+            harn_vm::value::json::json_to_vm_value(
+                &serde_json::to_value(stage).expect("typed stage output"),
             ),
         );
     }
@@ -1112,30 +1220,6 @@ pub(crate) fn resolve_effective_cwd(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
-
-    struct RecordingKiller {
-        calls: AtomicUsize,
-    }
-
-    impl RecordingKiller {
-        fn calls(&self) -> usize {
-            self.calls.load(AtomicOrdering::SeqCst)
-        }
-    }
-
-    impl ProcessKiller for RecordingKiller {
-        fn kill(&self) -> process_handle::ProcessCleanupReport {
-            self.calls.fetch_add(1, AtomicOrdering::SeqCst);
-            process_handle::ProcessCleanupReport::for_signal(Some(42), 9)
-        }
-    }
-
-    fn recording_killer() -> Arc<RecordingKiller> {
-        Arc::new(RecordingKiller {
-            calls: AtomicUsize::new(0),
-        })
-    }
 
     #[test]
     fn inline_output_does_not_split_utf8_codepoint() {
@@ -1286,42 +1370,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(parsed, temp.path().canonicalize().unwrap());
-    }
-
-    #[test]
-    fn drain_output_kills_immediately_when_deadline_already_elapsed() {
-        let (_tx, rx) = mpsc::channel::<Vec<u8>>();
-        let killer = recording_killer();
-        let killer_trait: Arc<dyn ProcessKiller> = killer.clone();
-        let expired_deadline = std::time::Instant::now()
-            .checked_sub(Duration::from_millis(1))
-            .expect("subtracting one millisecond from Instant::now() should be representable");
-
-        let result = drain_output(rx, Some(expired_deadline), false, &killer_trait);
-
-        assert!(result.timed_out);
-        assert!(!result.interrupted);
-        assert_eq!(result.bytes, Vec::<u8>::new());
-        assert_eq!(killer.calls(), 1);
-        assert_eq!(result.process_cleanup.unwrap().root_pid, Some(42));
-    }
-
-    #[test]
-    fn drain_output_collects_all_available_chunks() {
-        let (tx, rx) = mpsc::channel::<Vec<u8>>();
-        tx.send(b"alpha".to_vec()).unwrap();
-        tx.send(b"beta".to_vec()).unwrap();
-        drop(tx);
-        let killer = recording_killer();
-        let killer_trait: Arc<dyn ProcessKiller> = killer.clone();
-
-        let result = drain_output(rx, None, false, &killer_trait);
-
-        assert_eq!(result.bytes, b"alphabeta");
-        assert!(!result.timed_out);
-        assert!(!result.interrupted);
-        assert!(result.process_cleanup.is_none());
-        assert_eq!(killer.calls(), 0);
     }
 
     /// A missing platform mechanism must reach the script as the VM's typed

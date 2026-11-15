@@ -25,6 +25,72 @@ use super::*;
 use crate::process::{EnvMode, OutputCapture, OwnerDeathPolicy};
 
 #[test]
+fn guardian_keeps_final_stage_output_on_its_owned_handles() {
+    use std::io::{Read, Seek};
+    use std::os::fd::AsRawFd;
+    use std::sync::Arc;
+
+    let _held_descriptors = (0..24)
+        .map(|_| tempfile::tempfile().unwrap())
+        .collect::<Vec<_>>();
+    let stdout = Arc::new(tempfile::tempfile().unwrap());
+    let stderr = Arc::new(tempfile::tempfile().unwrap());
+    let entered = Arc::new(tempfile::tempfile().unwrap());
+    assert!(stdout.as_raw_fd() > 9 && stderr.as_raw_fd() > 9 && entered.as_raw_fd() > 9);
+    let script = "printf '1 passed in 0.01s\\n' && /usr/bin/printf ready";
+    let args = vec!["-c".into(), script.into()];
+    let harn_vm::shells::OutputStageInvocation::FinalPosixStage(plan) =
+        harn_vm::shells::plan_invocation_output_stage("/bin/sh", &args)
+    else {
+        panic!("canonical final-stage plan");
+    };
+    let mut process = crate::process::default_spawner()
+        .spawn(SpawnSpec {
+            builtin: "stage_output_control",
+            program: "/bin/sh".into(),
+            args,
+            cwd: Some(std::env::current_dir().unwrap()),
+            env: BTreeMap::new(),
+            env_remove: Vec::new(),
+            env_mode: EnvMode::Replace,
+            use_stdin: false,
+            configure_process_group: true,
+            owner_death: OwnerDeathPolicy::KillContainment,
+            output_capture: OutputCapture::PipeWithStage {
+                stdout: stdout.clone(),
+                stderr: stderr.clone(),
+                entered: entered.clone(),
+                plan,
+            },
+        })
+        .unwrap();
+    assert!(
+        matches!(process.wait_with_timeout(Some(harn_clock::test_support::HANG_CEILING), &|| false).unwrap(), crate::process::WaitOutcome::Exited(status) if status.code == Some(0))
+    );
+    let mut prefix = String::new();
+    process
+        .take_stdout()
+        .unwrap()
+        .read_to_string(&mut prefix)
+        .unwrap();
+    assert_eq!(prefix, "1 passed in 0.01s\nready");
+    let read = |file: &std::fs::File| {
+        let mut file = file.try_clone().unwrap();
+        file.rewind().unwrap();
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).unwrap();
+        bytes
+    };
+    assert_eq!(read(&entered), b"1");
+    assert!(
+        process.stage_output_complete(),
+        "the guardian independently confirmed the relays"
+    );
+    assert_eq!(read(&stdout), b"ready");
+    assert!(read(&stderr).is_empty());
+}
+
+#[test]
 fn relative_file_capture_keeps_the_callers_directory_when_payload_cwd_differs() {
     let caller = std::env::current_dir().unwrap();
     let root = tempfile::tempdir_in(&caller).unwrap();
