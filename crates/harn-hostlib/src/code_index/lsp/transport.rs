@@ -202,7 +202,7 @@ impl Connection {
             env_mode: EnvMode::InheritClean,
             use_stdin: true,
             configure_process_group: true,
-            owner_death: OwnerDeathPolicy::None,
+            owner_death: OwnerDeathPolicy::KillContainment,
             output_capture: OutputCapture::Pipe,
         })
         .map_err(|err| format!("could not start `{program}`: {err}"))?;
@@ -614,6 +614,27 @@ fn answer_server_request(
 mod tests {
     use super::*;
     use crate::code_index::lsp::servers;
+
+    #[test]
+    fn cached_language_servers_use_the_embedding_process_guardian() {
+        use crate::process::{install_spawner, MockProcessConfig, MockSpawner};
+
+        let mock = Arc::new(MockSpawner::new());
+        mock.enqueue(MockProcessConfig::default());
+        let _spawner = install_spawner(mock.clone());
+        let spec = servers::for_language(crate::ast::Language::Java).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let mut connection =
+            Connection::spawn(spec, &spec.launches[0], "fixture-jdtls", root.path()).unwrap();
+        let captured = mock.captured();
+        assert_eq!(captured.len(), 1, "real spawn boundary was not reached");
+        assert_eq!(captured[0].owner_death, OwnerDeathPolicy::KillContainment);
+        assert!(captured[0].configure_process_group && captured[0].use_stdin);
+        assert!(matches!(captured[0].output_capture, OutputCapture::Pipe));
+        let reader = connection.reader.take().unwrap();
+        drop(connection);
+        reader.join().unwrap();
+    }
 
     #[test]
     fn java_server_workspace_is_private_and_removed_after_reaping() {
