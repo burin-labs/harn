@@ -1842,6 +1842,66 @@
       ],
       "type": "object"
     },
+    "ToolBatchProposalResolutionEvent": {
+      "description": "Typed retained-proposal authority projected directly from its runtime owner.",
+      "properties": {
+        "resolution": {
+          "additionalProperties": false,
+          "properties": {
+            "confirmation_call_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pending_count": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "proposal_id": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "resolution": {
+              "enum": [
+                "confirmed",
+                "discarded",
+                "invalidated",
+                "superseded"
+              ],
+              "type": "string"
+            },
+            "source_batch_id": {
+              "type": "string"
+            },
+            "source_tool_call_id": {
+              "type": "string"
+            },
+            "tool_name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "proposal_id",
+            "source_batch_id",
+            "source_tool_call_id",
+            "tool_name",
+            "resolution",
+            "reason",
+            "confirmation_call_id",
+            "pending_count"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "resolution"
+      ],
+      "type": "object"
+    },
     "ToolCallAudit": {
       "description": "`audit` is the middleware's script-authored record; `receipt` follows the\npublished tool-call receipt schema.",
       "properties": {
@@ -2744,6 +2804,21 @@
       "if": {
         "properties": {
           "kind": {
+            "const": "tool_batch_proposal_resolution"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/ToolBatchProposalResolutionEvent"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
             "const": "tool_call_audit"
           }
         },
@@ -2872,6 +2947,7 @@
     "subagent_join": "SubagentJoin",
     "subagent_stop": "SubagentStop",
     "tool_batch_disposition": "ToolBatchDisposition",
+    "tool_batch_proposal_resolution": "ToolBatchProposalResolutionEvent",
     "tool_call_audit": "ToolCallAudit",
     "tool_format_override": "ToolFormatOverride",
     "turn_phase_changed": "TurnPhaseChanged",

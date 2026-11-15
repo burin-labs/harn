@@ -276,6 +276,17 @@ pub(super) fn handle(sink: &AcpAgentEventSink, event: &AgentEvent) {
                 },
             );
         }
+        AgentEvent::ToolBatchProposalResolution {
+            session_id,
+            resolution,
+        } => {
+            sink.emit_agent_event(
+                session_id,
+                &payloads::ToolBatchProposalResolutionEvent {
+                    resolution: resolution.clone(),
+                },
+            );
+        }
         AgentEvent::CompositionStart { session_id, run } => {
             sink.emit_agent_event(
                 session_id,

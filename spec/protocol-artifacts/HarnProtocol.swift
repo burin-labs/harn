@@ -137,6 +137,7 @@ public enum HarnProtocolConstants {
         "subagent_join",
         "subagent_stop",
         "tool_batch_disposition",
+        "tool_batch_proposal_resolution",
         "tool_call_audit",
         "tool_format_override",
         "turn_phase_changed",
@@ -6888,6 +6889,56 @@ public struct HarnAgentEventToolBatchDisposition: Codable, Sendable, Equatable {
     public var receipt: HarnACPValue
 }
 
+public struct HarnAgentEventToolBatchProposalResolutionEventResolution: Codable, Sendable, Equatable {
+    public var proposalId: String
+    public var sourceBatchId: String
+    public var sourceToolCallId: String
+    public var toolName: String
+    public var resolution: String
+    public var reason: String
+    public var confirmationCallId: String?
+    public var pendingCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case proposalId = "proposal_id"
+        case sourceBatchId = "source_batch_id"
+        case sourceToolCallId = "source_tool_call_id"
+        case toolName = "tool_name"
+        case resolution
+        case reason
+        case confirmationCallId = "confirmation_call_id"
+        case pendingCount = "pending_count"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        proposalId = try values.decode(String.self, forKey: .proposalId)
+        sourceBatchId = try values.decode(String.self, forKey: .sourceBatchId)
+        sourceToolCallId = try values.decode(String.self, forKey: .sourceToolCallId)
+        toolName = try values.decode(String.self, forKey: .toolName)
+        resolution = try values.decode(String.self, forKey: .resolution)
+        reason = try values.decode(String.self, forKey: .reason)
+        confirmationCallId = try values.decode(String?.self, forKey: .confirmationCallId)
+        pendingCount = try values.decode(Int.self, forKey: .pendingCount)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(proposalId, forKey: .proposalId)
+        try values.encode(sourceBatchId, forKey: .sourceBatchId)
+        try values.encode(sourceToolCallId, forKey: .sourceToolCallId)
+        try values.encode(toolName, forKey: .toolName)
+        try values.encode(resolution, forKey: .resolution)
+        try values.encode(reason, forKey: .reason)
+        try values.encode(confirmationCallId, forKey: .confirmationCallId)
+        try values.encode(pendingCount, forKey: .pendingCount)
+    }
+}
+
+public struct HarnAgentEventToolBatchProposalResolutionEvent: Codable, Sendable, Equatable {
+    public var resolution: HarnAgentEventToolBatchProposalResolutionEventResolution
+}
+
 public struct HarnAgentEventToolCallAudit: Codable, Sendable, Equatable {
     public var toolCallId: String
     public var toolName: String
@@ -6979,6 +7030,7 @@ public enum HarnAgentEventPayload: Sendable, Equatable {
     case subagentJoin(HarnAgentEventSubagentJoin)
     case subagentStop(HarnAgentEventSubagentStop)
     case toolBatchDisposition(HarnAgentEventToolBatchDisposition)
+    case toolBatchProposalResolution(HarnAgentEventToolBatchProposalResolutionEvent)
     case toolCallAudit(HarnAgentEventToolCallAudit)
     case toolFormatOverride(HarnAgentEventToolFormatOverride)
     case turnPhaseChanged(HarnAgentEventTurnPhaseChanged)
@@ -7043,6 +7095,7 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
         case subagentJoin = "subagent_join"
         case subagentStop = "subagent_stop"
         case toolBatchDisposition = "tool_batch_disposition"
+        case toolBatchProposalResolution = "tool_batch_proposal_resolution"
         case toolCallAudit = "tool_call_audit"
         case toolFormatOverride = "tool_format_override"
         case turnPhaseChanged = "turn_phase_changed"
@@ -7102,6 +7155,7 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
             "subagent_join",
             "subagent_stop",
             "tool_batch_disposition",
+            "tool_batch_proposal_resolution",
             "tool_call_audit",
             "tool_format_override",
             "turn_phase_changed",
@@ -7180,6 +7234,7 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
         case .subagentJoin: self.payload = .subagentJoin(try container.decode(HarnAgentEventSubagentJoin.self))
         case .subagentStop: self.payload = .subagentStop(try container.decode(HarnAgentEventSubagentStop.self))
         case .toolBatchDisposition: self.payload = .toolBatchDisposition(try container.decode(HarnAgentEventToolBatchDisposition.self))
+        case .toolBatchProposalResolution: self.payload = .toolBatchProposalResolution(try container.decode(HarnAgentEventToolBatchProposalResolutionEvent.self))
         case .toolCallAudit: self.payload = .toolCallAudit(try container.decode(HarnAgentEventToolCallAudit.self))
         case .toolFormatOverride: self.payload = .toolFormatOverride(try container.decode(HarnAgentEventToolFormatOverride.self))
         case .turnPhaseChanged: self.payload = .turnPhaseChanged(try container.decode(HarnAgentEventTurnPhaseChanged.self))

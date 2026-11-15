@@ -224,6 +224,7 @@ var HarnAgentEventKinds = []HarnAgentEventKind{
 	"subagent_join",
 	"subagent_stop",
 	"tool_batch_disposition",
+	"tool_batch_proposal_resolution",
 	"tool_call_audit",
 	"tool_format_override",
 	"turn_phase_changed",
@@ -2744,6 +2745,21 @@ type HarnAgentEventSubagentStop struct {
 
 type HarnAgentEventToolBatchDisposition struct {
 	Receipt json.RawMessage `json:"receipt"`
+}
+
+type HarnAgentEventToolBatchProposalResolutionEventResolution struct {
+	ProposalID         string  `json:"proposal_id"`
+	SourceBatchID      string  `json:"source_batch_id"`
+	SourceToolCallID   string  `json:"source_tool_call_id"`
+	ToolName           string  `json:"tool_name"`
+	Resolution         string  `json:"resolution"`
+	Reason             string  `json:"reason"`
+	ConfirmationCallID *string `json:"confirmation_call_id"`
+	PendingCount       uint64  `json:"pending_count"`
+}
+
+type HarnAgentEventToolBatchProposalResolutionEvent struct {
+	Resolution HarnAgentEventToolBatchProposalResolutionEventResolution `json:"resolution"`
 }
 
 type HarnAgentEventToolCallAudit struct {

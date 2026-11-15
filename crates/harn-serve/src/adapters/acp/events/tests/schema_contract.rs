@@ -9,6 +9,53 @@ use harn_vm::agent_events::AgentEvent;
 use harn_vm::agent_events::AgentEventSink;
 
 #[tokio::test(flavor = "current_thread")]
+async fn retained_proposal_resolution_reaches_the_typed_acp_boundary() {
+    use harn_vm::agent_events::{ToolBatchProposalResolution, ToolBatchProposalResolutionKind};
+
+    let notifications = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        collect_notifications(vec![AgentEvent::ToolBatchProposalResolution {
+            session_id: "session-proposal".to_owned(),
+            resolution: ToolBatchProposalResolution {
+                proposal_id: "proposal-1".to_owned(),
+                source_batch_id: "a".repeat(64),
+                source_tool_call_id: "original-edit".to_owned(),
+                tool_name: "edit".to_owned(),
+                resolution: ToolBatchProposalResolutionKind::Confirmed,
+                reason: "model_confirmed_after_observation".to_owned(),
+                confirmation_call_id: Some("confirm-1".to_owned()),
+                pending_count: 0,
+            },
+        }]),
+    )
+    .await
+    .expect("the real ACP sink must emit the retained-proposal event");
+    assert_eq!(notifications.len(), 1);
+    let params = &notifications[0]["params"];
+    assert_eq!(params["sessionId"], "session-proposal");
+    assert_eq!(params["kind"], "tool_batch_proposal_resolution");
+    assert_eq!(params["resolution"]["source_tool_call_id"], "original-edit");
+    assert_eq!(params["resolution"]["confirmation_call_id"], "confirm-1");
+    let validator = jsonschema::draft202012::new(
+        &crate::adapters::acp::agent_event_payloads::agent_event_schema(),
+    )
+    .unwrap();
+    assert!(validator.is_valid(params));
+    let mut invalid = params.clone();
+    invalid["resolution"]["resolution"] = serde_json::json!("execute_without_confirmation");
+    assert!(
+        !validator.is_valid(&invalid),
+        "unknown authority transitions must fail schema validation"
+    );
+    invalid = params.clone();
+    invalid["resolution"]["pending_count"] = serde_json::json!("none");
+    assert!(
+        !validator.is_valid(&invalid),
+        "pending counts must retain their numeric contract"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn published_tool_names_validate_against_the_unmodified_upstream_schema() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../conformance/protocols/schemas/acp-1.26.0-upstream.schema.json");

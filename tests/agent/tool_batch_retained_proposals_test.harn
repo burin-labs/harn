@@ -1,4 +1,8 @@
-import { agent_capture_events } from "std/agent/events"
+import {
+  agent_capture_events,
+  agent_event_report,
+  agent_tool_batch_proposal_resolution_event_schema,
+} from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { __dispatch_call_tally } from "std/agent/loop_result_status"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
@@ -362,6 +366,13 @@ pipeline test_retained_proposals_require_current_explicit_confirmation(
   )
     .to_list()
   assert(len(resolutions) > 0, "retirement must be measured through the canonical event path")
+  for event in resolutions {
+    const report = agent_event_report(event, agent_tool_batch_proposal_resolution_event_schema())
+    assert(
+      report.ok,
+      "the native resolution event and public Harn schema must agree: " + json_stringify(report),
+    )
+  }
   assert(resolutions.any({ event -> event.resolution.pending_count == 0 }))
   if variant == "compacted" {
     assert(

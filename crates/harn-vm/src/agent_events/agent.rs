@@ -103,7 +103,8 @@ pub struct ToolBatchDispositionReceipt {
     pub blocking_mutation_status: Option<ToolMutationStatus>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ToolBatchProposalResolution {
     pub proposal_id: String,
     pub source_batch_id: String,
@@ -115,7 +116,7 @@ pub struct ToolBatchProposalResolution {
     pub pending_count: usize,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolBatchProposalResolutionKind {
     Confirmed,
