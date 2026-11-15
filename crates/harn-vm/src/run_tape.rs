@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::llm::api::{LlmRequestPayload, LlmResult};
 use crate::testbench::tape::{
-    content_hash, CommandEffect, EventTape, TapeHeader, TapePayload, TapeRecordKind, TapeRecorder,
+    CommandEffect, EventTape, TapeHeader, TapePayload, TapeRecordKind, TapeRecorder,
     TranscriptChange,
 };
 
@@ -342,9 +342,7 @@ fn request_surface(request: &LlmRequestPayload) -> serde_json::Map<String, serde
 }
 
 fn surface_digest(surface: &serde_json::Map<String, serde_json::Value>) -> String {
-    content_hash(&crate::canonical_json::to_vec(&serde_json::Value::Object(
-        surface.clone(),
-    )))
+    crate::testbench::tape::replay_digest(&serde_json::Value::Object(surface.clone()))
 }
 
 fn redact_tape_json(value: &mut serde_json::Value) -> bool {
@@ -359,7 +357,8 @@ fn redact_tape_json(value: &mut serde_json::Value) -> bool {
 
 fn record_payload_redaction() {
     if let Some(tape) = process_tape() {
-        tape.recorder.record(TapeRecordKind::PayloadRedaction);
+        tape.recorder
+            .note_redaction(crate::testbench::tape::RedactionReplay::StablePlaceholder);
     }
 }
 
@@ -535,6 +534,17 @@ pub struct BranchDivergence {
     pub detail: String,
 }
 
+impl BranchDivergence {
+    fn new(call: u64, what: &str, detail: String) -> Self {
+        let policy = crate::redact::current_policy();
+        Self {
+            call,
+            what: policy.redact_string(what).into_owned(),
+            detail: policy.redact_string(&detail).into_owned(),
+        }
+    }
+}
+
 /// Progress of the active branch, for hosts and receipts.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct BranchReport {
@@ -634,26 +644,26 @@ impl BranchGuard {
                 .map(|edit| format!("{}:{}:{}", edit.template_uri, edit.line, edit.column))
                 .collect();
             if !missing.is_empty() {
-                state.report.divergence = Some(BranchDivergence {
-                    call: state.report.served_calls + state.report.live_calls + 1,
-                    what: "unapplied prompt edits".to_string(),
-                    detail: format!(
+                state.report.divergence = Some(BranchDivergence::new(
+                    state.report.served_calls + state.report.live_calls + 1,
+                    "unapplied prompt edits",
+                    format!(
                         "{} prompt edits were never prepared for rendering: {}",
                         missing.len(),
                         missing.join(", ")
                     ),
-                });
+                ));
             }
         }
         if state.report.divergence.is_none()
             && state.report.live_after_calls == 0
             && state.report.live_calls == 0
         {
-            state.report.divergence = Some(BranchDivergence {
-                call: 1,
-                what: "under-run branch".to_string(),
-                detail: "the run ended before its first live model call".to_string(),
-            });
+            state.report.divergence = Some(BranchDivergence::new(
+                1,
+                "under-run branch",
+                "the run ended before its first live model call".to_string(),
+            ));
         }
         state.report.clone()
     }
@@ -663,11 +673,11 @@ fn under_run(state: &BranchState) -> Option<BranchDivergence> {
     let served = state.report.served_calls;
     let k = state.report.live_after_calls;
     if served < k {
-        return Some(BranchDivergence {
-            call: served + 1,
-            what: "under-run prefix".to_string(),
-            detail: format!("the run ended after {served} of {k} recorded model calls"),
-        });
+        return Some(BranchDivergence::new(
+            served + 1,
+            "under-run prefix",
+            format!("the run ended after {served} of {k} recorded model calls"),
+        ));
     }
     if let Some((after, tool)) = state.tools.iter().find_map(|(after, tools)| {
         tools
@@ -675,23 +685,25 @@ fn under_run(state: &BranchState) -> Option<BranchDivergence> {
             .find(|tool| !tool.used)
             .map(|tool| (*after, tool))
     }) {
-        return Some(BranchDivergence {
-            call: after,
-            what: "under-run prefix".to_string(),
-            detail: format!(
+        return Some(BranchDivergence::new(
+            after,
+            "under-run prefix",
+            format!(
                 "recorded `{}` call {} was never made",
                 tool.recorded.tool, tool.call_id
             ),
-        });
+        ));
     }
     state
         .cache_lookups
         .iter()
         .find(|(_, queue)| !queue.is_empty())
-        .map(|((after, namespace, key), _)| BranchDivergence {
-            call: *after + 1,
-            what: "under-run prefix".to_string(),
-            detail: format!("recorded read of `{key}` in `{namespace}` was never made"),
+        .map(|((after, namespace, key), _)| {
+            BranchDivergence::new(
+                *after + 1,
+                "under-run prefix",
+                format!("recorded read of `{key}` in `{namespace}` was never made"),
+            )
         })
 }
 
@@ -706,15 +718,17 @@ pub fn branch_report() -> Option<BranchReport> {
     current_branch().map(|branch| branch.state().report.clone())
 }
 
-/// Redaction preserves displayable evidence, not exact replay bytes or offsets.
-pub(super) fn require_unredacted_branch_payloads(tape: &EventTape) -> Result<(), String> {
-    if tape
-        .records
-        .iter()
-        .any(|record| matches!(record.kind, TapeRecordKind::PayloadRedaction))
-    {
+fn require_replayable_payloads(tape: &EventTape) -> Result<(), String> {
+    if let Some(replay) = tape.records.iter().find_map(|record| match record.kind {
+        TapeRecordKind::PayloadRedaction { replay }
+            if replay != crate::testbench::tape::RedactionReplay::StablePlaceholder =>
+        {
+            Some(replay)
+        }
+        _ => None,
+    }) {
         return Err(
-            "this tape contains redacted payloads and cannot reproduce an exact prefix".to_string(),
+            format!("this tape contains unreplayable redacted payloads ({replay:?}); re-record it with replayable payloads"),
         );
     }
     Ok(())
@@ -739,7 +753,6 @@ pub fn start_branch_with_sources(
     source_roots: Vec<ReplaySourceRoot>,
 ) -> Result<BranchGuard, String> {
     let tape = plan.tape;
-    require_unredacted_branch_payloads(&tape)?;
     let k = plan.live_after_calls;
     if tape.header.run.is_some()
         && tape.header.version < crate::testbench::tape::TAPE_FORMAT_VERSION
@@ -751,6 +764,7 @@ pub fn start_branch_with_sources(
             crate::testbench::tape::TAPE_FORMAT_VERSION,
         ));
     }
+    require_replayable_payloads(&tape)?;
     match &tape.header.run {
         Some(RunTapeHeader {
             recording: RecordingLevel::Full,
@@ -1067,6 +1081,11 @@ fn first_difference(
     recorded: &serde_json::Map<String, serde_json::Value>,
     replayed: &serde_json::Map<String, serde_json::Value>,
 ) -> String {
+    let policy = crate::redact::current_policy();
+    let recorded = policy.redact_json(&serde_json::Value::Object(recorded.clone()));
+    let replayed = policy.redact_json(&serde_json::Value::Object(replayed.clone()));
+    let recorded = recorded.as_object().expect("redaction preserves objects");
+    let replayed = replayed.as_object().expect("redaction preserves objects");
     let excerpt = |value: Option<&serde_json::Value>| {
         value.map_or_else(
             || "<absent>".to_string(),
@@ -1143,11 +1162,7 @@ pub(crate) fn serve_llm_call(
             || "the recorded request body was not kept".to_string(),
             |recorded| first_difference(recorded, &surface),
         );
-        let divergence = BranchDivergence {
-            call: call_number,
-            what: "request".to_string(),
-            detail,
-        };
+        let divergence = BranchDivergence::new(call_number, "request", detail);
         let error = divergence_error(&divergence);
         state.report.divergence = Some(divergence);
         return Some(Err(error));
@@ -1194,6 +1209,8 @@ fn recorded_lookup(
 ) -> Result<Option<serde_json::Value>, crate::value::VmError> {
     let recorded_key = workspace::current_projection()
         .map_or_else(|| key.to_string(), |projection| projection.text(key));
+    let recorded_key = redacted_tape_text(&recorded_key);
+    let recorded_namespace = redacted_tape_text(namespace);
     let served = {
         let branch = current_branch();
         let mut guard = branch.as_ref().map(|branch| branch.state());
@@ -1204,11 +1221,7 @@ fn recorded_lookup(
                 ));
             }
             Some(state) if !state.live => {
-                let slot = (
-                    state.report.served_calls,
-                    namespace.to_string(),
-                    recorded_key,
-                );
+                let slot = (state.report.served_calls, recorded_namespace, recorded_key);
                 let recorded = state
                     .cache_lookups
                     .get_mut(&slot)
@@ -1226,13 +1239,13 @@ fn recorded_lookup(
                         None
                     }
                     None => {
-                        let divergence = BranchDivergence {
-                            call: state.report.served_calls + 1,
-                            what: "cache_lookup".to_string(),
-                            detail: format!(
+                        let divergence = BranchDivergence::new(
+                            state.report.served_calls + 1,
+                            "cache_lookup",
+                            format!(
                             "the program read `{key}` in `{namespace}` where the recording did not"
                         ),
-                        };
+                        );
                         let error = divergence_error(&divergence);
                         state.report.divergence = Some(divergence);
                         return Err(error);
@@ -1294,11 +1307,7 @@ pub(crate) fn serve_tool_call(call_id: &str, tool: &str, args: &serde_json::Valu
     }
     let call = state.report.served_calls;
     let diverge = |state: &mut BranchState, what: &str, detail: String| {
-        let divergence = BranchDivergence {
-            call,
-            what: what.to_string(),
-            detail,
-        };
+        let divergence = BranchDivergence::new(call, what, detail);
         let error = divergence_error(&divergence);
         state.report.divergence = Some(divergence);
         ToolServe::Diverged(error)
@@ -1310,9 +1319,10 @@ pub(crate) fn serve_tool_call(call_id: &str, tool: &str, args: &serde_json::Valu
         projection.json(&mut original_args);
     }
     let digest = args_digest(&original_args);
+    let recorded_tool = redacted_tape_text(tool);
     let candidates = state.tools.get(&call).map_or(&[][..], Vec::as_slice);
     let same_call = |entry: &PrefixTool| {
-        !entry.used && entry.recorded.tool == tool && entry.recorded.args_digest == digest
+        !entry.used && entry.recorded.tool == recorded_tool && entry.recorded.args_digest == digest
     };
     let index = candidates
         .iter()

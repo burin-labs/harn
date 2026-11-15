@@ -50,6 +50,9 @@ mod permissions;
 #[path = "run_tape_branch_vm/command_effects.rs"]
 mod command_effects;
 
+#[path = "run_tape_branch_vm/privacy.rs"]
+mod privacy;
+
 /// Records no file changes: every effect these scripts make lives outside the
 /// workspace, so a served tool call has nothing to re-apply.
 struct NoChanges;

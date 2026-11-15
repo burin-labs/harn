@@ -269,7 +269,10 @@ fn missing_command_evidence_refuses_even_in_the_live_suffix() {
     );
     record(&source, &recorded.tapes, &recorded.workspace);
     let tape = EventTape::load(&recorded.tapes.join(TAPE_FILE_NAME)).unwrap();
-    assert_eq!(tape.header.version, 9);
+    assert_eq!(
+        tape.header.version,
+        harn_vm::testbench::tape::TAPE_FORMAT_VERSION
+    );
     for k in [0, 1] {
         let mut unmeasured = tape.clone();
         let mut changed = 0;

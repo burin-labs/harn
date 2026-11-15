@@ -203,11 +203,13 @@ pub(crate) fn prepare(uri: &str, source: &str) -> Result<Option<String>, String>
     match prompt_edits.apply(&uri, source, &mut report.prompt_edits, after_prefix) {
         Ok(value) => Ok(value),
         Err(detail) => {
-            report.divergence = Some(BranchDivergence {
-                call: report.served_calls + report.live_calls + 1,
-                what: "prompt source edit".to_string(),
-                detail: detail.clone(),
-            });
+            let divergence = BranchDivergence::new(
+                report.served_calls + report.live_calls + 1,
+                "prompt source edit",
+                detail,
+            );
+            let detail = divergence.detail.clone();
+            report.divergence = Some(divergence);
             Err(detail)
         }
     }

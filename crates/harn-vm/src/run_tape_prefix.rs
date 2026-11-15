@@ -533,11 +533,7 @@ impl BranchState {
         let divergence = self
             .report
             .divergence
-            .get_or_insert(super::BranchDivergence {
-                call,
-                what: what.to_string(),
-                detail,
-            });
+            .get_or_insert_with(|| super::BranchDivergence::new(call, what, detail));
         super::divergence_error(divergence)
     }
 }

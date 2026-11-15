@@ -4,9 +4,7 @@ use super::{
     overlap, process_tape, record_payload_redaction, transcript, ProcessTape, RecordedToolResult,
     RecordingLevel, RECORDING_FULL,
 };
-use crate::testbench::tape::{
-    content_hash, CommandEffect, FileEffect, TapeRecordKind, TranscriptChange,
-};
+use crate::testbench::tape::{CommandEffect, FileEffect, TapeRecordKind, TranscriptChange};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -113,7 +111,7 @@ pub(super) fn note_reminder_mutation() {
 }
 
 pub(crate) fn args_digest(args: &serde_json::Value) -> String {
-    content_hash(&crate::canonical_json::to_vec(args))
+    crate::testbench::tape::replay_digest(args)
 }
 
 /// Finish recording a tool call. `Err` names why the dispatch result has no
