@@ -99,10 +99,12 @@ pub(super) fn request_shell_dialect(ctx: &JsonValue) -> ShellDialectResolution {
         .and_then(JsonValue::as_str)
         .map(str::to_ascii_lowercase);
     let identity = shell.and_then(|value| {
-        value
-            .get("id")
-            .or_else(|| value.get("path"))
-            .and_then(JsonValue::as_str)
+        value.as_str().or_else(|| {
+            value
+                .get("id")
+                .or_else(|| value.get("path"))
+                .and_then(JsonValue::as_str)
+        })
     });
     let identity = identity.map(|value| {
         value
