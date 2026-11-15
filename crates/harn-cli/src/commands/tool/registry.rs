@@ -1162,9 +1162,9 @@ pub fn inspect(input: {id: string}) -> {id: string} { return input }
             .expect("offline export catalog");
         assert_eq!(catalog.tools.len(), 1);
         assert_eq!(catalog.tools[0].name, "inspect");
-        assert_eq!(
-            catalog.tools[0].input_schema["properties"]["input"]["properties"]["id"]["type"],
-            "string"
-        );
+        let schema = jsonschema::validator_for(&catalog.tools[0].input_schema).unwrap();
+        assert!(schema.is_valid(&serde_json::json!({"input":{"id":"known"}})));
+        assert!(!schema.is_valid(&serde_json::json!({"input":{"id":17}})));
+        assert!(!schema.is_valid(&serde_json::json!({"input":{}})));
     }
 }
