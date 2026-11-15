@@ -529,6 +529,11 @@ if [[ -n "${target_dir}" ]] && grep -Fxq \
   if [[ -x ./scripts/cargo_target_seed.sh ]]; then
     ./scripts/cargo_target_seed.sh restore "${target_dir}" "${HARN_DEV_SETUP_STORAGE_ROOT}"
   fi
+  case "$(basename "$(dirname "${target_dir}")")" in
+    harn-target|release-gate-target)
+      ./scripts/prune_stale_targets.sh --record-owner "${target_dir}" "${ROOT_DIR}"
+      ;;
+  esac
 elif [[ -n "${target_dir}" ]]; then
   echo "Preserved user-owned Cargo target dir from .cargo/config.toml"
 fi

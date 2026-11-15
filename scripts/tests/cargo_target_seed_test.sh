@@ -43,6 +43,8 @@ printf '%s\n' 'publisher workspace artifact' \
   > "${source_target}/debug/deps/libharn_vm-test.rlib"
 printf '%s\n' 'reusable dependency artifact' > "${source_target}/debug/deps/libreusable.rlib"
 printf '%s\n' 'operator-owned' > "${occupied_target}/sentinel"
+printf '%s\n' '{"schema":"harn.target-owner/v1","checkout":"/publisher"}' \
+  > "${source_target}/.harn-target-owner.json"
 
 seed_env=(
   HARN_CARGO_TARGET_SEED_KEY=test-toolchain
@@ -55,12 +57,14 @@ if [[ ! -f "${seed_dir}/.harn-cargo-target-seed" \
   || ! -f "${seed_dir}/debug/deps/libreusable.rlib" \
   || -e "${seed_dir}/debug/harn" \
   || -e "${seed_dir}/debug/harn.d" \
+  || -e "${seed_dir}/.harn-target-owner.json" \
   || -e "${seed_dir}/debug/deps/libharn_vm-test.rlib" \
   || -e "${seed_dir}/debug/.fingerprint/harn-vm-test" ]]; then
   echo "publish did not create a complete immutable Cargo target seed" >&2
   exit 1
 fi
-if [[ -e "${source_target}/CACHEDIR.TAG" || ! -x "${source_target}/debug/harn" ]]; then
+if [[ -e "${source_target}/CACHEDIR.TAG" || ! -x "${source_target}/debug/harn" \
+  || ! -f "${source_target}/.harn-target-owner.json" ]]; then
   echo "publish modified the original target instead of its private clone" >&2
   exit 1
 fi
@@ -69,6 +73,7 @@ env "${seed_env[@]}" "${seed_tool}" restore "${restored_target}" "${storage_root
 if [[ ! -f "${restored_target}/debug/deps/libreusable.rlib" \
   || -e "${restored_target}/debug/harn" \
   || -e "${restored_target}/debug/harn.d" \
+  || -e "${restored_target}/.harn-target-owner.json" \
   || -e "${restored_target}/debug/deps/libharn_vm-test.rlib" \
   || -e "${restored_target}/debug/.fingerprint/harn-vm-test" ]]; then
   echo "restore did not project the seed into the empty target" >&2
