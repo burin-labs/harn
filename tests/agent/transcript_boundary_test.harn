@@ -1,0 +1,104 @@
+import {
+  agent_transcript_normalize,
+  agent_transcript_normalize_report,
+  agent_transcript_tool_call,
+} from "std/agent/transcript"
+
+pipeline test_transcript_raw_containers_preserve_extra_fields(harness: Harness) {
+  const raw_call = {
+    id: "call-1",
+    function: {name: "look", arguments: "{\"path\":\"a.harn\"}", extension: {keep: true}},
+    extension: [1, 2],
+  }
+  const raw = {
+    role: "assistant",
+    message: {content: "inspect", tool_calls: [raw_call], extension: {keep: true}},
+    llm: {provider: "mock", model: "fixture", input_tokens: 7, extension: "keep"},
+    usage: {output_tokens: 3, cache_read_tokens: 2, extension: [1]},
+    _harn: {kind: "assistant", extension: {keep: true}},
+    extension: {keep: [true, false]},
+  }
+  const row = agent_transcript_normalize([raw])[0]
+  assert_eq(row.text, "inspect")
+  assert_eq(row.provider, "mock")
+  assert_eq(row.usage.input_tokens, 7)
+  assert_eq(row.usage.output_tokens, 3)
+  assert_eq(row.usage.cache_read_tokens, 2)
+  assert_eq(row.raw, raw)
+  assert_eq(row.raw.extension.keep, [true, false])
+  assert_eq(row.raw.message.extension.keep, true)
+  assert_eq(row.tool_calls[0].raw, raw_call)
+  assert_eq(row.tool_calls[0].raw.function.extension.keep, true)
+  assert_eq(row.tool_calls[0].args, {path: "a.harn"})
+  const shadowed = agent_transcript_tool_call({name: "look", function: {name: 7, arguments: "{}"}})
+  assert_eq(shadowed?.name, "look", "an unused scalar must not change name precedence")
+}
+
+pipeline test_transcript_non_record_containers_keep_existing_fallbacks(harness: Harness) {
+  for value in [nil, false, 7, "legacy", []] {
+    const raw = {
+      role: "assistant",
+      content: "fallback",
+      message: value,
+      llm: value,
+      usage: value,
+      _harn: value,
+    }
+    const row = agent_transcript_normalize([raw])[0]
+    assert_eq(row.text, "fallback")
+    assert_eq(row.usage.input_tokens, 0)
+    assert_eq(row.usage.output_tokens, 0)
+    assert_eq(row.raw, raw)
+    const call = agent_transcript_tool_call({name: "look", function: value})
+    assert_eq(call?.name, "look")
+    assert_eq(call?.args, {})
+  }
+}
+
+pipeline test_transcript_malformed_values_remain_reported_and_preserved(harness: Harness) {
+  const raw = {
+    role: "assistant",
+    text: "",
+    message: {content: "must not replace a present empty value"},
+    usage: {input_tokens: "invalid count"},
+    tool_calls: [{id: "bad", function: {name: "look", arguments: "not JSON"}}],
+  }
+  const report = agent_transcript_normalize_report([raw])
+  assert(!report.ok)
+  assert(report.issues.any({ issue -> issue.code == "tool_call_args_unparsed" }))
+  assert(report.issues.any({ issue -> issue.code == "row_schema_invalid" }))
+  assert_eq(report.rows[0].raw, raw)
+  assert_eq(report.rows[0].text, "")
+  assert_eq(report.rows[0].usage.input_tokens, "invalid count")
+  assert_eq(report.rows[0].tool_calls[0].args, {_raw: "not JSON"})
+  const invalid_text = try {
+    agent_transcript_normalize([{role: "assistant", text: false}])
+  }
+  assert(is_err(invalid_text), "invalid text must keep the existing refusal")
+}
+
+pipeline test_transcript_tool_result_preserves_storage_metadata(harness: Harness) {
+  const data = {exit_status: 0, provenance: {stage: "fixture"}, extension: [1, 2]}
+  const raw = {
+    role: "tool",
+    content: "result",
+    _harn: {
+      kind: "tool_result",
+      tool_name: "verify",
+      tool_call_id: "call-1",
+      outcome: "error",
+      origin: "harness_repair",
+      data: data,
+      extension: {keep: true},
+    },
+  }
+  const row = agent_transcript_normalize([raw])[0]
+  assert_eq(row.name, "verify")
+  assert_eq(row.tool_call_id, "call-1")
+  assert_eq(row.outcome, "error")
+  assert_eq(row.origin, "harness_repair")
+  assert_eq(row.data, data)
+  assert_eq(row.data.provenance.stage, "fixture")
+  assert_eq(row.data.extension, [1, 2])
+  assert_eq(row.raw._harn.extension.keep, true)
+}

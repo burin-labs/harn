@@ -156,6 +156,99 @@ pub type AgentTranscriptTurnLifecycleReport = {
   issues: list<string>,
 }
 
+type TranscriptRawFunction = {name?: unknown, arguments?: unknown, ...dict}
+
+type TranscriptRawMessage = {
+  role?: unknown,
+  content?: unknown,
+  tool_calls?: unknown,
+  model?: unknown,
+  name?: unknown,
+  tool_call_id?: unknown,
+  ...dict,
+}
+
+type TranscriptRawLlm = {
+  provider?: unknown,
+  model?: unknown,
+  input_tokens?: unknown,
+  output_tokens?: unknown,
+  ...dict,
+}
+
+type TranscriptRawUsage = {
+  input_tokens?: unknown,
+  output_tokens?: unknown,
+  cache_read_tokens?: unknown,
+  cache_write_tokens?: unknown,
+  ...dict,
+}
+
+type TranscriptRawHarn = {
+  kind?: unknown,
+  tool_calls?: unknown,
+  tool_name?: unknown,
+  tool_call_id?: unknown,
+  outcome?: unknown,
+  origin?: unknown,
+  data?: unknown,
+  ...dict,
+}
+
+type TranscriptRawCalls = list<unknown>
+
+/** Preserve legacy non-record fallbacks and defer scalar validation to field normalizers. */
+fn __transcript_record_field(record: dict?, key: string) -> dict? {
+  if type_of(record) != "dict" {
+    return nil
+  }
+  const value = record[key]
+  if type_of(value) != "dict" {
+    return nil
+  }
+  return value
+}
+
+fn __record_function(record: dict?) -> TranscriptRawFunction? {
+  const value = __transcript_record_field(record, "function")
+  if value == nil {
+    return nil
+  }
+  return schema_expect(value, schema_of(TranscriptRawFunction))
+}
+
+fn __record_message(record: dict?) -> TranscriptRawMessage? {
+  const value = __transcript_record_field(record, "message")
+  if value == nil {
+    return nil
+  }
+  return schema_expect(value, schema_of(TranscriptRawMessage))
+}
+
+fn __record_llm(record: dict?) -> TranscriptRawLlm? {
+  const value = __transcript_record_field(record, "llm")
+  if value == nil {
+    return nil
+  }
+  return schema_expect(value, schema_of(TranscriptRawLlm))
+}
+
+fn __record_usage(record: dict?) -> TranscriptRawUsage? {
+  const value = __transcript_record_field(record, "usage")
+  if value == nil {
+    return nil
+  }
+  return schema_expect(value, schema_of(TranscriptRawUsage))
+}
+
+fn __record_harn(record: dict?) -> TranscriptRawHarn? {
+  const value = __transcript_record_field(record, "_harn")
+  if value == nil {
+    return nil
+  }
+  return schema_expect(value, schema_of(TranscriptRawHarn))
+}
+
 fn __first_text(values: list) -> string {
   for value in values {
     if type_of(value) == "string" && value != "" {
@@ -354,7 +447,7 @@ pub fn agent_transcript_text(value: AgentTranscriptTextValue) -> string {
   return ""
 }
 
-fn __json_or_raw(raw: unknown) {
+fn __json_or_raw(raw: unknown) -> unknown {
   if type_of(raw) != "string" {
     return raw ?? {}
   }
@@ -367,7 +460,7 @@ fn __json_or_raw(raw: unknown) {
   return {_raw: raw}
 }
 
-fn __args_dict_or_raw(raw: unknown) {
+fn __args_dict_or_raw(raw: unknown) -> dict<string, unknown> {
   const value = __json_or_raw(raw)
   if type_of(value) == "dict" {
     return value
@@ -386,7 +479,8 @@ pub fn agent_transcript_tool_call_name(call: dict) -> string {
   if type_of(call) != "dict" {
     return ""
   }
-  return __first_text([call?.name, call?.function?.name, call?.tool_name])
+  const function = __record_function(call)
+  return __first_text([call?.name, function?.name, call?.tool_name])
 }
 
 /**
@@ -413,7 +507,7 @@ pub fn agent_transcript_tool_call_identity(call: dict) -> AgentTranscriptToolCal
  * @errors: []
  * @api_stability: experimental
  */
-pub fn agent_transcript_tool_call_args(call: dict) {
+pub fn agent_transcript_tool_call_args(call: dict) -> dict<string, unknown> {
   if type_of(call) != "dict" {
     return {}
   }
@@ -423,8 +517,9 @@ pub fn agent_transcript_tool_call_args(call: dict) {
   if call?.arguments != nil {
     return __args_dict_or_raw(call.arguments)
   }
-  if call?.function?.arguments != nil {
-    return __args_dict_or_raw(call.function.arguments)
+  const function = __record_function(call)
+  if function?.arguments != nil {
+    return __args_dict_or_raw(function.arguments)
   }
   return {}
 }
@@ -504,8 +599,9 @@ fn __tool_call_raw_args(call: dict) {
   if call?.arguments != nil {
     return call.arguments
   }
-  if call?.function?.arguments != nil {
-    return call.function.arguments
+  const function = __record_function(call)
+  if function?.arguments != nil {
+    return function.arguments
   }
   return nil
 }
@@ -518,7 +614,9 @@ fn __tool_call_record_issues(record: dict, index: int) -> list {
   if record?.type != "response" && role != "assistant" {
     return []
   }
-  let calls = record?._harn?.tool_calls ?? record?.tool_calls ?? record?.message?.tool_calls
+  const harn = __record_harn(record)
+  const message = __record_message(record)
+  let calls = harn?.tool_calls ?? record?.tool_calls ?? message?.tool_calls
   if calls == nil {
     return []
   }
@@ -554,7 +652,7 @@ fn __tool_call_record_issues(record: dict, index: int) -> list {
     }
     const raw_args = __tool_call_raw_args(call)
     const args = agent_transcript_tool_call_args(call)
-    if args?._raw != nil && type_of(raw_args) == "string" {
+    if args["_raw"] != nil && type_of(raw_args) == "string" {
       const parsed = try {
         json_parse(raw_args)
       }
@@ -579,7 +677,7 @@ fn __tool_call_record_issues(record: dict, index: int) -> list {
             ),
           ]
       }
-    } else if args?._raw != nil {
+    } else if args["_raw"] != nil {
       issues = issues
         + [
           __issue(
@@ -596,31 +694,38 @@ fn __tool_call_record_issues(record: dict, index: int) -> list {
 }
 
 fn __role(record: dict) -> string {
-  return __first_text([record?.role, record?.message?.role])
+  const message = __record_message(record)
+  return __first_text([record?.role, message?.role])
 }
 
 fn __assistant_row(record: dict, index: int, iteration: int) -> dict {
+  const message = __record_message(record)
+  const harn = __record_harn(record)
+  const llm = __record_llm(record)
+  const usage = __record_usage(record)
+  const calls = schema_expect(
+    harn?.tool_calls ?? record?.tool_calls ?? message?.tool_calls ?? [],
+    schema_of(TranscriptRawCalls),
+  )
   return {
     schema: TRANSCRIPT_ROW_SCHEMA,
     kind: "assistant",
     role: "assistant",
     iteration: iteration,
     index: index,
-    text: agent_transcript_text(record?.text ?? record?.content ?? record?.message?.content),
-    tool_calls: agent_transcript_tool_calls(
-      record?._harn?.tool_calls ?? record?.tool_calls ?? record?.message?.tool_calls ?? [],
-    ),
-    provider: record?.provider ?? record?.llm?.provider,
-    model: record?.model ?? record?.llm?.model ?? record?.message?.model,
+    text: agent_transcript_text(record?.text ?? record?.content ?? message?.content),
+    tool_calls: agent_transcript_tool_calls(calls),
+    provider: record?.provider ?? llm?.provider,
+    model: record?.model ?? llm?.model ?? message?.model,
     usage: {
-      input_tokens: record?.input_tokens ?? record?.usage?.input_tokens
-        ?? record?.llm?.input_tokens
+      input_tokens: record?.input_tokens ?? usage?.input_tokens
+        ?? llm?.input_tokens
         ?? 0,
-      output_tokens: record?.output_tokens ?? record?.usage?.output_tokens
-        ?? record?.llm?.output_tokens
+      output_tokens: record?.output_tokens ?? usage?.output_tokens
+        ?? llm?.output_tokens
         ?? 0,
-      cache_read_tokens: record?.cache_read_tokens ?? record?.usage?.cache_read_tokens ?? 0,
-      cache_write_tokens: record?.cache_write_tokens ?? record?.usage?.cache_write_tokens ?? 0,
+      cache_read_tokens: record?.cache_read_tokens ?? usage?.cache_read_tokens ?? 0,
+      cache_write_tokens: record?.cache_write_tokens ?? usage?.cache_write_tokens ?? 0,
       response_ms: record?.response_ms ?? record?.latency_ms ?? 0,
     },
     raw_type: record?.type,
@@ -629,23 +734,25 @@ fn __assistant_row(record: dict, index: int, iteration: int) -> dict {
 }
 
 fn __user_row(record: dict, index: int, iteration: int) -> dict {
+  const message = __record_message(record)
   return {
     schema: TRANSCRIPT_ROW_SCHEMA,
     kind: "user",
     role: "user",
     iteration: iteration,
     index: index,
-    text: agent_transcript_text(record?.content ?? record?.message?.content),
+    text: agent_transcript_text(record?.content ?? message?.content),
     raw_type: record?.type,
     raw: record,
   }
 }
 
 fn __tool_result_outcome(record: dict? = nil) -> AgentTranscriptToolResultOutcome {
+  const harn = __record_harn(record)
   const typed = if record?.schema == TRANSCRIPT_ROW_SCHEMA && record?.kind == "tool_result" {
     record?.outcome
   } else {
-    record?._harn?.outcome
+    harn?.outcome
   }
   if typed == "ok" || typed == "error" {
     return typed
@@ -658,10 +765,11 @@ fn __tool_result_outcome(record: dict? = nil) -> AgentTranscriptToolResultOutcom
 // record predates the tag, and a value we do not understand is not evidence
 // that the harness wrote the result.
 fn __tool_result_origin(record: dict) -> AgentTranscriptToolResultOrigin {
+  const harn = __record_harn(record)
   const typed = if record?.schema == TRANSCRIPT_ROW_SCHEMA && record?.kind == "tool_result" {
     record?.origin
   } else {
-    record?._harn?.origin
+    harn?.origin
   }
   if to_string(typed ?? "") == "harness_repair" {
     return "harness_repair"
@@ -677,6 +785,8 @@ fn __tool_result_row(
   index: int,
   iteration: int,
 ) -> dict {
+  const harn = __record_harn(record)
+  const data = harn?.data
   return {
     schema: TRANSCRIPT_ROW_SCHEMA,
     kind: "tool_result",
@@ -692,8 +802,8 @@ fn __tool_result_row(
     text: text,
     outcome: __tool_result_outcome(record),
     origin: __tool_result_origin(record),
-    data: if type_of(record?._harn?.data) == "dict" {
-      record._harn.data
+    data: if type_of(data) == "dict" {
+      data
     } else if record?.schema == TRANSCRIPT_ROW_SCHEMA
       && record?.kind
         == "tool_result"
@@ -708,19 +818,12 @@ fn __tool_result_row(
 }
 
 fn __tool_message_row(record: dict, index: int, iteration: int) -> dict {
+  const harn = __record_harn(record)
+  const message = __record_message(record)
   return __tool_result_row(
-    __first_text(
-      [record?._harn?.tool_name, record?.name, record?.message?.name, record?.tool_name],
-    ),
-    agent_transcript_text(record?.content ?? record?.message?.content),
-    __first_text(
-      [
-        record?._harn?.tool_call_id,
-        record?.tool_call_id,
-        record?.message?.tool_call_id,
-        record?.id,
-      ],
-    ),
+    __first_text([harn?.tool_name, record?.name, message?.name, record?.tool_name]),
+    agent_transcript_text(record?.content ?? message?.content),
+    __first_text([harn?.tool_call_id, record?.tool_call_id, message?.tool_call_id, record?.id]),
     record,
     index,
     iteration,
@@ -831,7 +934,8 @@ pub fn agent_transcript_normalize(records: list<dict>?) -> list<AgentTranscriptR
   for record in records ?? [] {
     const record_type = record?.type
     const role = __role(record)
-    if record?._harn?.kind == "tool_result" {
+    const harn = __record_harn(record)
+    if harn?.kind == "tool_result" {
       rows = rows + [__tool_message_row(record, index, max(0, last_assistant_iteration))]
     } else if record_type == "response" || role == "assistant" {
       const iteration = if record?.iteration != nil {
