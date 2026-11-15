@@ -218,10 +218,11 @@ pub fn granted_spawn(
     let Some(session) = super::session_env_with_command_grants(program)? else {
         return Ok(None);
     };
-    let untrusted = grant_spawn::untrusted_roots(cwd);
+    let roots = grant_spawn::spawn_roots(cwd);
+    let untrusted = &roots.untrusted;
     let path = session.get("PATH").cloned().unwrap_or_default();
-    let entries = grant_spawn::trusted_path_entries(&path, &untrusted);
-    let Some(canonical) = grant_spawn::trusted_program(program, &entries, &untrusted) else {
+    let entries = grant_spawn::trusted_path_entries(&path, untrusted);
+    let Some(canonical) = grant_spawn::trusted_program(program, &entries, untrusted) else {
         return Ok(None);
     };
     let home = crate::user_dirs::home_dir()
@@ -268,7 +269,7 @@ pub fn granted_spawn(
     };
     let mut subdirs: Vec<&str> = profile.dir_env.iter().map(|(_, dir)| *dir).collect();
     subdirs.push(HOOKS_DIR);
-    let dir = grant_spawn::create_spawn_dir(&untrusted, &subdirs)
+    let dir = grant_spawn::create_spawn_dir(&roots.writable, &subdirs)
         .map_err(|error| refusal(profile, format!("preparing its private directory: {error}")))?;
     let seeded = (profile.seed)(&SeedRequest {
         dir: dir.path(),

@@ -9,10 +9,14 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Every directory a workspace file or a confined child could occupy, made
-/// canonical: each active policy's writable roots, the package cache, the
-/// process and spawn cwd, and the host temp dir.
-pub(crate) fn untrusted_roots(spawn_cwd: &Path) -> Vec<PathBuf> {
+pub(crate) struct SpawnRoots {
+    pub(crate) writable: Vec<PathBuf>,
+    pub(crate) untrusted: Vec<PathBuf>,
+}
+
+/// Capture writable authority once. Private transfer state also cannot supply
+/// programs or configuration, but its owner must still be able to allocate it.
+pub(crate) fn spawn_roots(spawn_cwd: &Path) -> SpawnRoots {
     let mut roots = vec![
         spawn_cwd.to_path_buf(),
         std::env::temp_dir(),
@@ -21,8 +25,6 @@ pub(crate) fn untrusted_roots(spawn_cwd: &Path) -> Vec<PathBuf> {
     roots.extend(std::env::current_dir());
     roots.extend(crate::stdlib::process::project_root_path());
     roots.extend(crate::user_dirs::package_cache_dir());
-    // Private transfer state stays untrusted after its launch scope ends.
-    roots.extend(denied_read_root());
     let policies = crate::orchestration::current_execution_policy()
         .into_iter()
         .chain(super::super::active_sandbox_policy().map(|(policy, _)| policy));
@@ -35,7 +37,14 @@ pub(crate) fn untrusted_roots(spawn_cwd: &Path) -> Vec<PathBuf> {
         .collect();
     roots.sort();
     roots.dedup();
-    roots
+    let mut untrusted = roots.clone();
+    untrusted.extend(denied_read_root());
+    untrusted.sort();
+    untrusted.dedup();
+    SpawnRoots {
+        writable: roots,
+        untrusted,
+    }
 }
 
 fn is_untrusted(path: &Path, untrusted: &[PathBuf]) -> bool {
@@ -437,7 +446,9 @@ mod tests {
         let workspace = tempfile::tempdir().unwrap();
         let configured =
             denied_read_root().expect("grant tests require a configured Harn or user home");
-        assert!(untrusted_roots(workspace.path()).contains(&configured));
+        assert!(spawn_roots(workspace.path())
+            .untrusted
+            .contains(&configured));
 
         let fixture = tempfile::tempdir().unwrap();
         let private = canonical_spawns_root(fixture.path());
@@ -456,6 +467,18 @@ mod tests {
         assert!(trusted_path_entries(bin.to_str().unwrap(), &excluded).is_empty());
         assert!(trusted_program(planted.to_str().unwrap(), &[], &excluded).is_none());
         assert!(is_untrusted(&bin.join("config"), &excluded));
+    }
+
+    #[test]
+    fn private_transfer_root_is_untrusted_input_but_its_owner_can_allocate() {
+        let workspace = tempfile::tempdir().unwrap();
+        let roots = spawn_roots(workspace.path());
+        let private = denied_read_root().expect("configured grant root");
+        assert!(roots.untrusted.contains(&private));
+        assert!(!roots.writable.contains(&private));
+        let owned = create_spawn_dir(&roots.writable, &[]).expect("owned private allocation");
+        assert!(owned.path().starts_with(private));
+        assert!(owned.path().is_dir());
     }
 
     #[test]

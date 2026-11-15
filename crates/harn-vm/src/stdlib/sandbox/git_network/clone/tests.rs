@@ -66,9 +66,10 @@ fn completed_clone_installs_only_its_git_directory() {
 #[test]
 fn native_clone_remains_an_ordinary_worktree_after_private_directory_handoff() {
     let root = tempfile::tempdir().unwrap();
-    let source = root.path().join("source");
-    let private = root.path().join("private");
-    let destination = root.path().join("checkout");
+    let canonical_root = root.path().canonicalize().unwrap();
+    let source = canonical_root.join("source");
+    let private = canonical_root.join("private");
+    let destination = canonical_root.join("checkout");
     let repository = private.join("repository");
     let template = private.join("empty-template");
     std::fs::create_dir(&source).unwrap();
@@ -131,7 +132,7 @@ fn native_clone_remains_an_ordinary_worktree_after_private_directory_handoff() {
     CloneCompletion {
         repository: repository.clone(),
         target: ScopedMutationTarget {
-            root: root.path().to_path_buf(),
+            root: canonical_root,
             relative: "checkout/.git".into(),
         },
         marker: format!("gitdir: {}\n", repository.display()).into_bytes(),
@@ -266,9 +267,13 @@ fn fifo_marker_is_refused_without_opening_a_blocking_reader() {
 
 #[test]
 fn cross_filesystem_copy_preserves_native_names_contents_and_permissions() {
+    #[cfg(not(target_os = "macos"))]
     use std::os::unix::ffi::OsStringExt;
     let fixture = Fixture::new();
+    #[cfg(not(target_os = "macos"))]
     let name = std::ffi::OsString::from_vec(b"ref-\xff".to_vec());
+    #[cfg(target_os = "macos")]
+    let name = std::ffi::OsString::from("ref-é");
     let file = fixture.repository.join("objects").join(&name);
     std::fs::write(&file, b"git-object\0payload").unwrap();
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o640)).unwrap();
