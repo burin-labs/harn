@@ -90,7 +90,8 @@ async fn run_interruptible(
         .is_some_and(|token| token.load(Ordering::SeqCst));
     let cancel = Arc::new(AtomicBool::new(cancelled));
     sources.cancel = Some(Arc::clone(&cancel));
-    let process_scope = crate::process::call_scope::CallProcessScope::new(cancel, parent_cancel);
+    let process_scope = crate::process::call_scope::CallProcessScope::new(cancel, parent_cancel)
+        .with_execution_cancel(ctx.execution_cancel_token());
     let execution_cleanup = ctx.execution_cancel_token().map(|owner| {
         let guard = harn_vm::op_interrupt::register_active_process_cleanup_scope(
             owner.clone(),
@@ -654,6 +655,34 @@ mod run_tape_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn interruptible_calls_keep_the_execution_cancel_source_when_the_child_token_differs() {
+        let execution_cancel = Arc::new(AtomicBool::new(false));
+        let child_cancel = Arc::new(AtomicBool::new(false));
+        let mut parent = harn_vm::new_vm();
+        parent.install_cancel_token(Arc::clone(&execution_cancel));
+        let mut child = parent.child_vm_for_host();
+        child.install_cancel_token(Arc::clone(&child_cancel));
+        let ctx = harn_vm::AsyncBuiltinCtx::from_vm(child);
+        assert!(Arc::ptr_eq(
+            &ctx.execution_cancel_token().unwrap(),
+            &execution_cancel,
+        ));
+        let handler: SyncHandler = Arc::new(move |_| {
+            execution_cancel.store(true, Ordering::SeqCst);
+            assert!(!child_cancel.load(Ordering::SeqCst));
+            let call = HostCallContext::current();
+            assert!(
+                call.process_scope().unwrap().cancel_requested(),
+                "a child host call lost its session cancellation source"
+            );
+            Ok(VmValue::Nil)
+        });
+        run_interruptible(&ctx, "execution_cancel_probe", handler, VmValue::Nil)
+            .await
+            .expect("the native worker must observe cancellation before VM propagation");
+    }
 
     #[test]
     fn ambient_bridge_projects_legacy_hostlib_wire_names() {

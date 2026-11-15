@@ -70,9 +70,19 @@ impl PreparedCommand {
                 Stdio::piped()
             } else {
                 Stdio::null()
-            })
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            });
+        let output_capture = match request.output_capture {
+            GuardianOutputCapture::Pipe => OutputCapture::Pipe,
+            GuardianOutputCapture::File {
+                stdout_path,
+                stderr_path,
+            } => OutputCapture::File {
+                stdout_path: PathBuf::from(OsString::from_vec(stdout_path)),
+                stderr_path: PathBuf::from(OsString::from_vec(stderr_path)),
+            },
+        };
+        crate::process::real::configure_output_capture(&mut command, &output_capture)
+            .map_err(io::Error::other)?;
         apply_confinement(&mut command, request.confinement)?;
         #[cfg(target_os = "linux")]
         if !request.pinned_verifier_descriptors.is_empty() {

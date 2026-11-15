@@ -1,13 +1,22 @@
 import "std/schema"
 
-pub type InventorySuite = {id: string, binary_path: string?}
+pub type InventorySuite = {id: string, binary_path: string?, selected: int}
+
+pub type Invocation = {binary_id: string?, filter: string}
+
+pub type EventIdentity = {key: string, test_name: string, stress: string}
+
+pub type InventoryExclusion = "ignored" | "filter-mismatch"
 
 pub type SelectedInventory = {
   selected: list<string>,
+  excluded: dict<string, InventoryExclusion>,
   skipped: int,
   ignored: int,
   unlisted: list<string>,
   suites: list<InventorySuite>,
+  isolated: list<string>,
+  event_owners: dict<string, list<string>>,
   target: string?,
 }
 
@@ -55,6 +64,9 @@ pub fn selected_inventory(document: unknown) -> SelectedInventory {
     {additional_properties: true},
   )
   let selected: dict<string, bool> = {}
+  let event_owners: dict<string, list<string>> = {}
+  let isolated: dict<string, bool> = {}
+  let excluded: dict<string, InventoryExclusion> = {}
   let unlisted: list<string> = []
   let suites: list<InventorySuite> = []
   let skipped = 0
@@ -66,20 +78,40 @@ pub fn selected_inventory(document: unknown) -> SelectedInventory {
       continue
     }
     const suite = schema_expect(raw_suite, listed_suite)
-    suites = suites + [{id: binary_id, binary_path: suite["binary-path"]}]
+    const event_prefix = "${suite["package-name"]}::${suite["binary-name"]}"
+    let selected_count = 0
     for test_name in suite.testcases.keys() {
       const test = suite.testcases[test_name]
+      const id = "${binary_id}$${test_name}"
+      if selected[id] != nil || excluded[id] != nil {
+        throw "inventory has duplicate testcase ${id}"
+      }
       if test.ignored {
         ignored += 1
       }
       if test["filter-match"].status == "matches" && !test.ignored {
-        const id = "${suite["package-name"]}::${suite["binary-name"]}$${test_name}"
-        if selected[id] ?? false {
-          throw "inventory has duplicate testcase ${id}"
-        }
         selected[id] = true
+        selected_count += 1
       } else {
+        excluded[id] = if test.ignored {
+          "ignored"
+        } else {
+          "filter-mismatch"
+        }
         skipped += 1
+      }
+      const event_id = "${event_prefix}$${test_name}"
+      event_owners[event_id] = (event_owners[event_id] ?? []) + [binary_id]
+    }
+    suites = suites
+      + [{id: binary_id, binary_path: suite["binary-path"], selected: selected_count}]
+  }
+  for owners in event_owners.values() {
+    if len(owners) > 1 {
+      for owner in owners {
+        if suites.any({ suite -> suite.id == owner && suite.selected > 0 }) {
+          isolated[owner] = true
+        }
       }
     }
   }
@@ -91,21 +123,85 @@ pub fn selected_inventory(document: unknown) -> SelectedInventory {
   }
   return {
     selected: selected.keys(),
+    excluded: excluded,
     skipped: skipped,
     ignored: ignored,
     unlisted: unlisted,
     suites: suites,
+    isolated: isolated.keys().sorted(),
+    event_owners: event_owners,
     target: inventory["rust-build-meta"]?.["target-directory"],
   }
 }
 
+pub fn execution_plan(inventory: SelectedInventory) -> list<Invocation> {
+  let filters: list<string> = []
+  let isolated: list<Invocation> = []
+  for binary_id in inventory.isolated {
+    if regex_match(r"^[A-Za-z0-9_.:/+-]+$", binary_id) == nil {
+      throw "binary identity cannot be represented in a nextest filter: ${binary_id}"
+    }
+    const filter = "binary_id(=${binary_id})"
+    filters = filters + [filter]
+    isolated = isolated + [{binary_id: binary_id, filter: filter}]
+  }
+  const ordinary = inventory.suites.filter(
+    { suite -> suite.selected > 0 && !inventory.isolated.contains(suite.id) },
+  )
+  if len(ordinary) == 0 {
+    return isolated
+  }
+  const filter = if len(filters) == 0 {
+    "all()"
+  } else {
+    "not (${filters.join(" or ")})"
+  }
+  return [{binary_id: nil, filter: filter}] + isolated
+}
+
+pub fn event_identity(name: string) -> EventIdentity {
+  const parts = name.split("$")
+  if len(parts) != 2 {
+    throw "test event has no unique binary separator: ${name}"
+  }
+  const binary = unwrap(parts[0]).split("@stress-")
+  if len(binary) > 2 || (len(binary) == 2 && regex_match(r"^[0-9]+$", unwrap(binary[1])) == nil) {
+    throw "test event has an invalid stress identity: ${name}"
+  }
+  const prefix = unwrap(binary[0])
+  const stress = if len(binary) == 2 {
+    "@stress-${unwrap(binary[1])}"
+  } else {
+    ""
+  }
+  return {key: "${prefix}$${parts[1]}", test_name: unwrap(parts[1]), stress: stress}
+}
+
+pub fn event_test_identity(
+  identity: EventIdentity,
+  owners: list<string>,
+  owner: string?,
+) -> string {
+  const candidates = owners.filter({ binary_id -> owner == nil || binary_id == owner })
+  if len(candidates) != 1 {
+    throw "test event has no unique inventory owner: ${identity.key}"
+  }
+  return "${unwrap(candidates[0])}${identity.stress}$${identity.test_name}"
+}
+
 fn main(harness: Harness) {
   const outcome = try {
-    if len(argv) < 1 {
+    const planning = argv[0] == "--execution-plan"
+    const args = if planning {
+      argv[1:]
+    } else {
+      argv
+    }
+    if len(args) < 1 {
       throw "usage: nextest_inventory.harn INVENTORY_JSON [REQUIRED_TEST...]"
     }
-    const inventory = selected_inventory(json_parse(harness.fs.read_text(unwrap(argv[0]))))
-    for required in argv[1:] {
+    const inventory = selected_inventory(json_parse(harness.fs.read_text(unwrap(args[0]))))
+    for required in args[1:] {
       if !inventory.selected.contains(required) {
         throw "inventory did not select required test ${required}"
       }
@@ -119,6 +215,10 @@ fn main(harness: Harness) {
     harness.runtime.exit(2)
   }
   const inventory: SelectedInventory = unwrap(outcome)
+  if argv[0] == "--execution-plan" {
+    harness.stdio.println(json_stringify(execution_plan(inventory)))
+    return
+  }
   harness.stdio.eprintln(
     [
       "nextest_inventory eligible=${len(inventory.selected)} excluded=${inventory.skipped}",

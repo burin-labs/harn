@@ -240,3 +240,102 @@ fn a_socket_root_outside_every_writable_root_takes_a_socket_and_no_regular_file(
         "a socket root must not admit a regular file"
     );
 }
+
+/// A per-spawn credential socket answers only the granted spawn it belongs
+/// to. A confined sibling with every network grant is refused the connect;
+/// the same profile with that spawn's own directory re-allowed is answered,
+/// so the refusal is the per-spawn denial and not a broken socket.
+#[test]
+fn only_its_own_granted_spawn_may_ask_a_credential_socket() {
+    use super::super::workspace_env::git_credential_socket::{CredentialSocket, Login};
+    use super::super::workspace_env::git_network::CREDENTIAL_SOCKET as SOCKET;
+    use super::super::workspace_env::grant_spawn;
+    if !Path::new(SANDBOX_EXEC_PATH).exists() || grant_spawn::denied_read_root().is_none() {
+        return;
+    }
+    const SECRET: &str = "credential-socket-canary-7741";
+    let dir = grant_spawn::create_spawn_dir(&[], &[]).expect("spawn dir");
+    let socket = CredentialSocket::serve(
+        dir.path(),
+        Login {
+            protocol: "https".to_string(),
+            host: "github.com".to_string(),
+            paths: vec!["o/r".to_string()],
+            username: "x-access-token".to_string(),
+            password: SECRET.to_string(),
+        },
+    )
+    .expect("serve");
+    let mut policy = macos_policy_with_workspace_ops(&["read_text"]);
+    policy.side_effect_level = Some("network".to_string());
+    let ask = |profile: &str| -> String {
+        let output = std::process::Command::new(SANDBOX_EXEC_PATH)
+            .args(["-p", profile, "--", "/usr/bin/perl", "-MSocket", "-e"])
+            .arg(
+                "socket(S, PF_UNIX, SOCK_STREAM, 0) or die \"socket: $!\"; \
+                 connect(S, sockaddr_un($ARGV[0])) or die \"connect: $!\"; \
+                 syswrite(S, \"action=get\\nprotocol=https\\nhost=github.com\\npath=o/r\\n\\n\"); \
+                 shutdown(S, 1); print while <S>;",
+            )
+            .arg(dir.path().join(SOCKET))
+            .output()
+            .expect("spawn sandbox-exec");
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    };
+    let sibling = ask(&render_profile(&policy));
+    assert!(
+        sibling.contains("connect: Operation not permitted") && !sibling.contains(SECRET),
+        "{sibling}"
+    );
+    let own = {
+        let _launch = grant_spawn::OwnSpawnLaunch::begin(dir.path());
+        render_profile(&policy)
+    };
+    assert!(
+        ask(&own).contains(&format!("password={SECRET}")),
+        "the spawn's own profile is answered"
+    );
+    // The own directory is also listable and stat-able: a granted git checks
+    // its git directory's metadata before it reads anything there.
+    let list = |profile: &str| {
+        std::process::Command::new(SANDBOX_EXEC_PATH)
+            .args(["-p", profile, "--", "/bin/ls"])
+            .arg(dir.path())
+            .output()
+            .expect("spawn sandbox-exec")
+    };
+    let listed = list(&own);
+    assert!(
+        listed.status.success() && String::from_utf8_lossy(&listed.stdout).contains(SOCKET),
+        "{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    assert!(!list(&render_profile(&policy)).status.success());
+    // Resolving its real path stats the per-spawn root, which the own profile
+    // allows; listing the root, and so finding a sibling spawn, stays denied.
+    let root = dir.path().parent().expect("a spawn dir has a root");
+    let stat = std::process::Command::new(SANDBOX_EXEC_PATH)
+        .args(["-p", &own, "--", "/usr/bin/stat", "-f", "%N"])
+        .arg(root)
+        .output()
+        .expect("spawn sandbox-exec");
+    assert!(
+        stat.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stat.stderr)
+    );
+    let listed_root = std::process::Command::new(SANDBOX_EXEC_PATH)
+        .args(["-p", &own, "--", "/bin/ls"])
+        .arg(root)
+        .output()
+        .expect("spawn sandbox-exec");
+    assert!(
+        !listed_root.status.success(),
+        "the root listing stays denied"
+    );
+    drop(socket);
+}

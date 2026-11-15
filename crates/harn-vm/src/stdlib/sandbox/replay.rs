@@ -1,7 +1,21 @@
 //! A moved replay is a confined filesystem view, never just rewritten text.
 
 use crate::orchestration::{CapabilityPolicy, ProcessSandboxPreset, SandboxProfile};
-use crate::VmError;
+use crate::value::{ErrorCategory, VmError, VmValue};
+
+pub(super) fn relocation_unconfined(message: &str) -> VmError {
+    VmError::Thrown(VmValue::dict([
+        (
+            "category",
+            VmValue::string(ErrorCategory::ToolRejected.as_str()),
+        ),
+        (
+            "reason_code",
+            VmValue::string("replay_relocation_unconfined"),
+        ),
+        ("message", VmValue::string(message)),
+    ]))
+}
 
 pub(super) struct FilesystemBoundary {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -85,8 +99,8 @@ pub(super) fn policy(mut policy: CapabilityPolicy) -> CapabilityPolicy {
 /// Admission has no active command policy yet; check platform support only.
 pub(crate) fn check_platform_supported() -> Result<(), VmError> {
     if !cfg!(any(target_os = "linux", target_os = "macos")) {
-        return Err(super::sandbox_rejection(
-            "cannot replay commands in a moved workspace on this host; an enforced filesystem namespace is required".into(),
+        return Err(relocation_unconfined(
+            "cannot replay commands in a moved workspace on this host; an enforced filesystem namespace is required",
         ));
     }
     #[cfg(target_os = "macos")]
@@ -100,8 +114,8 @@ pub(crate) fn check_supported() -> Result<(), VmError> {
     }
     check_platform_supported()?;
     if super::active_sandbox_policy().is_none() || !super::active_backend_filesystem_available() {
-        return Err(super::sandbox_rejection(
-            "live commands in a relocated replay workspace require an enforced filesystem namespace on this host".into(),
+        return Err(relocation_unconfined(
+            "live commands in a relocated replay workspace require an enforced filesystem namespace on this host",
         ));
     }
     Ok(())

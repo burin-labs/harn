@@ -82,7 +82,8 @@ impl ProcessSandboxScope {
 /// agent server calls this once before it serves; see the module for what a
 /// confined process's children inherit on each platform.
 pub use crate::stdlib::sandbox::self_confinement::{
-    confine_current_process, current_process_confinement, ProcessConfinement,
+    confine_current_process, current_process_confinement, remove_process_temp_dir,
+    ProcessConfinement,
 };
 
 /// The subcommand the namespace helper is invoked as, and the flags that

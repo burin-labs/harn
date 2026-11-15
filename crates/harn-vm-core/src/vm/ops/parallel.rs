@@ -1,7 +1,7 @@
 use crate::value::VmDictExt;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::value::{DeadlockError, VmError, VmStream, VmStreamCancel, VmTaskHandle, VmValue};
 use crate::wait_for_graph::VmWaitForGraph;
@@ -788,7 +788,7 @@ impl super::super::Vm {
     }
 
     pub fn push_deadline_after(&mut self, duration: Duration) {
-        let deadline = Instant::now() + duration;
+        let deadline = tokio::time::Instant::now() + duration;
         self.deadlines.push((deadline, self.frames.len()));
     }
 

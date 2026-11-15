@@ -761,6 +761,17 @@ contract.
 
 ### Closing and resuming sessions
 
+Disconnecting an ACP transport or shutting down its server cancels its active
+turns and background commands. Other transports' sessions keep running. Cleanup
+starts when input closes, without waiting for `session/close` or an idle timeout.
+The channel handle reports termination after cancellation has run.
+
+Each command uses the process owner's bounded cleanup: Linux allows 15 seconds
+for its guardian receipt before terminating the reaper; other Unix hosts allow
+one second for graceful termination before escalation. A missing cleanup receipt
+or an unmeasured survivor count is reported as `process.session_cleanup_unconfirmed`.
+It doesn't prove that every descendant exited.
+
 `session/close` can return an opaque `continuation` string for the most recently
 completed transcript in that server process. A client that already holds the
 complete history can pass it to `session/load` with the same `sessionId` and

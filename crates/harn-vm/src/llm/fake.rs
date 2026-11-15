@@ -105,6 +105,9 @@ pub enum FakeLlmEvent {
     /// Finalize the turn with the given stop reason. Optional — when
     /// omitted, the turn ends with `EndTurn` after the last event.
     Done(FakeStopReason),
+    /// Surface the transport's typed phase, deadline, and partial-output facts.
+    #[cfg(test)]
+    StreamFailure(crate::value::ProviderStreamFailure),
 }
 
 /// Stop reason for a streaming turn.
@@ -434,6 +437,10 @@ async fn play_stream(
                 }
             }
             FakeLlmEvent::Error(error) => return Err(fake_error_to_vm_error(&error)),
+            #[cfg(test)]
+            FakeLlmEvent::StreamFailure(failure) => {
+                return Err(VmError::ProviderStreamFailure(Box::new(failure)));
+            }
             FakeLlmEvent::Done(reason) => {
                 stop_reason = Some(reason);
                 break;

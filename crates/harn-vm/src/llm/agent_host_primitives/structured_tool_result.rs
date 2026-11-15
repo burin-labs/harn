@@ -1,3 +1,31 @@
+pub(super) fn attach_hook_reminder_audit(
+    mut result: serde_json::Value,
+    reports: Vec<serde_json::Value>,
+) -> serde_json::Value {
+    if reports.is_empty() {
+        return result;
+    }
+    let Some(obj) = result.as_object_mut() else {
+        return result;
+    };
+    let audit = obj
+        .entry("audit".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    if !audit.is_object() {
+        *audit = serde_json::json!({});
+    }
+    if let Some(audit_obj) = audit.as_object_mut() {
+        audit_obj.insert(
+            "reminders".to_string(),
+            serde_json::json!({
+                "origin": "tool_hook",
+                "lifecycle": reports,
+            }),
+        );
+    }
+    result
+}
+
 pub(super) fn mutation_status(result: &serde_json::Value) -> &'static str {
     let status = fact(result, "mutation_status").and_then(serde_json::Value::as_str);
     match status {

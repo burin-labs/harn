@@ -42,7 +42,9 @@ pub(crate) use config::{
     collect_cross_file_imports, collect_harn_targets, ensure_module_dependencies,
     load_harn_lint_config, HarnLintConfig,
 };
-pub(crate) use driver::{check_files, check_files_independently, CheckCliOverrides};
+pub(crate) use driver::{
+    check_files, check_files_independently, run_ordered, worker_count_for_env, CheckCliOverrides,
+};
 pub(crate) use fmt::{fmt_targets, fmt_targets_json, FmtMode, FMT_SCHEMA_VERSION};
 pub(crate) use harn_lint::path_is_stdlib_source;
 pub(crate) use host_capabilities::load_host_capabilities;

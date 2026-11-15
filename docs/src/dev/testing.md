@@ -307,6 +307,11 @@ async fn timeout_fires_after_deadline() {
   `interval`). It does not advance `SystemTime::now()`, `Instant::now()`, or
   any file-descriptor-backed timer. If your code mixes Tokio timers with
   wall-clock reads, both need injection.
+- Harn's scoped `deadline` uses the runtime clock, including paused test
+  time. A blocking host call receives its remaining budget on the real clock;
+  advancing Tokio time cannot drive a blocking worker. The embedding host's
+  `execute_with_timeout` limit remains stored and polled on the real clock;
+  its async wakeup uses the remaining budget on the runtime clock.
 - Do not mix `start_paused = true` tests with code that touches real I/O
   (network, file system). The paused runtime will not drive completion events
   from the OS while time is frozen; a real TCP write behind a `tokio::time::sleep`

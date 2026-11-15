@@ -189,7 +189,7 @@ async fn read_responses_stream(
 
     let stream = response
         .bytes_stream()
-        .map(|chunk| chunk.map_err(std::io::Error::other));
+        .map(|chunk| chunk.map_err(crate::llm::api::stream_body_read_error));
     let reader = tokio::io::BufReader::new(tokio_util::io::StreamReader::new(stream));
     read_responses_events(reader, provider, delta_tx).await
 }
@@ -201,17 +201,18 @@ async fn read_responses_events<R: tokio::io::AsyncBufRead + Unpin>(
     provider: &str,
     delta_tx: &DeltaSender,
 ) -> Result<(serde_json::Value, bool), VmError> {
-    let interrupted = |detail: String| VmError::CategorizedError {
-        message: format!("{provider} Responses stream {detail}"),
-        category: crate::value::ErrorCategory::TransientNetwork,
-    };
+    use crate::value::ProviderStreamPhase;
+
     let mut frames = crate::sse_frames::SseFrames::new(reader);
     let mut streamed_text = false;
+    let mut phase = ProviderStreamPhase::AwaitingFirstChunk;
+    let mut partial = false;
     while let Some(frame) = frames
         .next()
         .await
-        .map_err(|error| interrupted(format!("read failed: {error}")))?
+        .map_err(|error| crate::llm::api::stream_read_failure(provider, phase, partial, &error))?
     {
+        phase = ProviderStreamPhase::Streaming;
         let data = frame.data.trim();
         if data.is_empty() || data == "[DONE]" {
             continue;
@@ -221,6 +222,7 @@ async fn read_responses_events<R: tokio::io::AsyncBufRead + Unpin>(
                 "{provider} Responses stream event parse error: {error}"
             )))
         })?;
+        partial = true;
         match event.get("type").and_then(serde_json::Value::as_str) {
             Some("response.output_text.delta") => {
                 let delta = event
@@ -268,8 +270,11 @@ async fn read_responses_events<R: tokio::io::AsyncBufRead + Unpin>(
             _ => {}
         }
     }
-    Err(interrupted(
-        "ended before the provider sent response.completed".to_string(),
+    Err(crate::llm::api::premature_stream_eof(
+        provider,
+        phase,
+        partial,
+        "response.completed",
     ))
 }
 
@@ -344,7 +349,135 @@ mod tests {
         let error = read_responses_events(reader, "openai", &tx)
             .await
             .expect_err("a stream without response.completed cannot succeed");
-        assert_transient_network(&error);
+        let failure = error
+            .provider_stream_failure()
+            .expect("typed stream failure");
+        assert_eq!(
+            failure.reason,
+            crate::value::ProviderStreamFailureReason::PrematureEof
+        );
+        assert_eq!(failure.phase, crate::value::ProviderStreamPhase::Streaming);
+        assert!(failure.partial);
+        assert_eq!(failure.deadline, None);
+    }
+
+    #[tokio::test]
+    async fn responses_body_read_failure_retains_phase_partial_and_deadline() {
+        use crate::value::{
+            ProviderStreamDeadline, ProviderStreamFailureReason, ProviderStreamPhase,
+        };
+        let partial = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hel\"}\n\n";
+        let metadata = "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n";
+        for initial in ["", metadata, partial] {
+            for kind in [std::io::ErrorKind::Other, std::io::ErrorKind::TimedOut] {
+                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+                let mut chunks = Vec::new();
+                if !initial.is_empty() {
+                    chunks.push(Ok(bytes::Bytes::copy_from_slice(initial.as_bytes())));
+                }
+                chunks.push(Err(std::io::Error::new(
+                    kind,
+                    "error decoding response body",
+                )));
+                let reader = tokio_util::io::StreamReader::new(tokio_stream::iter(chunks));
+                let error = read_responses_events(reader, "openai", &tx)
+                    .await
+                    .expect_err("the recorded body failure must surface");
+                let failure = error
+                    .provider_stream_failure()
+                    .expect("typed stream failure");
+                assert_eq!(failure.provider, "openai");
+                assert_eq!(failure.partial, !initial.is_empty());
+                assert_eq!(
+                    failure.phase,
+                    if initial.is_empty() {
+                        ProviderStreamPhase::AwaitingFirstChunk
+                    } else {
+                        ProviderStreamPhase::Streaming
+                    }
+                );
+                assert_eq!(
+                    failure.reason,
+                    if kind == std::io::ErrorKind::TimedOut {
+                        ProviderStreamFailureReason::Deadline
+                    } else {
+                        ProviderStreamFailureReason::Read
+                    }
+                );
+                assert_eq!(
+                    failure.deadline,
+                    (kind == std::io::ErrorKind::TimedOut).then_some(ProviderStreamDeadline::Total)
+                );
+                let deltas: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+                assert_eq!(deltas.concat(), if initial == partial { "Hel" } else { "" });
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn responses_real_http_failure_retains_partial_output_and_total_deadline() {
+        use crate::value::{
+            ProviderStreamDeadline, ProviderStreamFailureReason, ProviderStreamPhase,
+        };
+        const PARTIAL: &str =
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hel\"}\n\n";
+        for initial in ["", PARTIAL] {
+            for ending in [Some("invalid-chunk-size\r\n"), None] {
+                let (response, server, release) =
+                    crate::llm::api::test_http_stream_response(initial, ending).await;
+                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+                let reader =
+                    tokio::spawn(
+                        async move { read_responses_stream(response, "openai", &tx).await },
+                    );
+                if !initial.is_empty() {
+                    assert_eq!(rx.recv().await.as_deref(), Some("Hel"));
+                }
+                if ending.is_some() {
+                    release.send(()).expect("release HTTP body failure");
+                } else {
+                    tokio::time::pause();
+                    tokio::time::advance(std::time::Duration::from_mins(1)).await;
+                }
+                let error = reader
+                    .await
+                    .expect("reader task")
+                    .expect_err("body failure");
+                if ending.is_none() {
+                    tokio::time::resume();
+                    server.abort();
+                    let _ = server.await;
+                } else {
+                    server.await.expect("HTTP fixture");
+                }
+                let failure = error.provider_stream_failure().expect("typed body failure");
+                assert_eq!(failure.partial, !initial.is_empty());
+                assert_eq!(
+                    failure.phase,
+                    if initial.is_empty() {
+                        ProviderStreamPhase::AwaitingFirstChunk
+                    } else {
+                        ProviderStreamPhase::Streaming
+                    }
+                );
+                assert_eq!(
+                    failure.reason,
+                    if ending.is_none() {
+                        ProviderStreamFailureReason::Deadline
+                    } else {
+                        ProviderStreamFailureReason::Read
+                    }
+                );
+                assert_eq!(
+                    failure.deadline,
+                    ending.is_none().then_some(ProviderStreamDeadline::Total)
+                );
+                assert!(
+                    rx.try_recv().is_err(),
+                    "partial text must not be duplicated"
+                );
+            }
+        }
     }
 
     #[tokio::test]

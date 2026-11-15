@@ -746,6 +746,50 @@ try {
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn scoped_deadline_uses_the_runtime_clock_after_virtual_time_advances() {
+    tokio::time::advance(Duration::from_secs(2)).await;
+    assert_runtime_deadline(false).await;
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn scoped_deadline_keeps_its_order_against_a_host_wall_clock_budget() {
+    tokio::time::advance(Duration::from_secs(3600)).await;
+    assert_runtime_deadline(true).await;
+}
+
+async fn assert_runtime_deadline(host_timeout: bool) {
+    harn_clock::test_support::with_local_tasks(async {
+        let source = r#"pipeline t(harness: Harness, task: unknown) {
+try {
+  deadline 50ms {
+    harness.clock.sleep_ms(10)
+    harness.stdio.log("still active")
+    harness.clock.sleep_ms(1000)
+    harness.stdio.log("missed deadline")
+  }
+} catch(e) {
+  harness.stdio.log("caught")
+}
+}"#;
+        let mut lexer = Lexer::new(source);
+        let program = Parser::new(lexer.tokenize().unwrap()).parse().unwrap();
+        let chunk = Compiler::new().compile(&program).unwrap();
+        let mut vm = crate::new_vm();
+        register_vm_stdlib(&mut vm);
+        vm.set_harness(crate::Harness::real());
+        let result = if host_timeout {
+            vm.execute_with_timeout(&chunk, Duration::from_secs(60))
+                .await
+        } else {
+            vm.execute(&chunk).await
+        };
+        result.expect("the scoped deadline must fire before the host wall-clock budget");
+        assert_eq!(vm.output().trim_end(), "[harn] still active\n[harn] caught");
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn test_cancel_during_await_aborts_spawned_task() {
     harn_clock::test_support::with_local_tasks(async {
         let source = r"pipeline t(harness: Harness, task: unknown) {

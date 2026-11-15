@@ -1,8 +1,9 @@
-//! A child behind the managed proxy reaches the proxy and nothing else, measured
-//! with real sockets under the real Seatbelt profile. Every other endpoint is a
-//! host listener the child could otherwise use to bypass the proxy: an
-//! unrelated loopback port, and the proxy's own port number over IPv6, over
-//! UDP, and at the host's other IPv4 addresses.
+//! A child behind the managed proxy reaches the proxy, and with a loopback
+//! grant its own run's local servers, and nothing else, measured with real
+//! sockets under the real Seatbelt profile. Every other endpoint is a host
+//! listener the child could otherwise use to bypass the proxy: an unrelated
+//! loopback port, and the proxy's own port number over IPv6, over UDP, and at
+//! the host's other IPv4 addresses.
 
 use super::*;
 use std::collections::BTreeMap;
@@ -10,6 +11,7 @@ use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::time::Duration;
 
 const CHILD: &str = "HARN_TEST_MANAGED_PROXY_TARGETS";
+const EARLIER: &str = "HARN_TEST_MANAGED_PROXY_EARLIER_SERVER";
 const PREFIX: &str = "MANAGED_PROXY_RESULT ";
 const NAME: &str =
     "stdlib::sandbox::macos::tests::managed_proxy::managed_proxy_is_the_only_destination";
@@ -71,8 +73,26 @@ fn host_confinement_unavailable(test: &str) -> bool {
     unavailable
 }
 
+/// A server an earlier command of this run left running: it listens until its
+/// stdin closes.
+fn earlier_server() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let shared = TcpListener::bind("127.0.0.1:0").unwrap();
+    // libtest may print the test's name on the same line first.
+    println!(
+        "\nEARLIER_PORT {} {}",
+        listener.local_addr().unwrap().port(),
+        shared.local_addr().unwrap().port()
+    );
+    let _ = std::io::Read::read(&mut std::io::stdin(), &mut [0u8; 1]);
+}
+
 #[test]
 fn managed_proxy_is_the_only_destination() {
+    if std::env::var_os(EARLIER).is_some() {
+        earlier_server();
+        return;
+    }
     if let Ok(raw) = std::env::var(CHILD) {
         child(serde_json::from_str(&raw).unwrap());
         return;
@@ -124,8 +144,40 @@ fn managed_proxy_is_the_only_destination() {
         eprintln!("lan_same_port not_measured: this host has no non-loopback IPv4 address");
     }
 
-    let workspace = tempfile::tempdir().unwrap();
     let executable = std::env::current_exe().unwrap();
+    // Carries this run's lineage marker, as every child behind the proxy does.
+    let mut earlier = std::process::Command::new(&executable)
+        .args([NAME, "--exact", "--nocapture", "--test-threads=1"])
+        .env(EARLIER, "1")
+        .env(
+            crate::stdlib::sandbox::process_output::CHILD_LINEAGE_ENV,
+            crate::stdlib::sandbox::process_output::child_lineage(),
+        )
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let (earlier_port, shared_port): (u16, u16) =
+        std::io::BufRead::lines(std::io::BufReader::new(earlier.stdout.take().unwrap()))
+            .map_while(Result::ok)
+            .find_map(|line| {
+                let (own, shared) = line.strip_prefix("EARLIER_PORT ")?.trim().split_once(' ')?;
+                Some((own.parse().ok()?, shared.parse().ok()?))
+            })
+            .expect("the earlier server reports its ports");
+    targets.insert(
+        "earlier_command_server".into(),
+        SocketAddr::from(([127, 0, 0, 1], earlier_port)),
+    );
+    // A foreign listener on the same port number at another address: Seatbelt
+    // cannot tell the two apart, so the run's own listener there is denied too.
+    let _foreign_on_shared = TcpListener::bind(("::1", shared_port)).unwrap();
+    targets.insert(
+        "own_port_shared_with_foreign".into(),
+        SocketAddr::from(([127, 0, 0, 1], shared_port)),
+    );
+
+    let workspace = tempfile::tempdir().unwrap();
     let config = ProcessCommandConfig {
         cwd: Some(workspace.path().to_path_buf()),
         env: vec![(CHILD.into(), serde_json::to_string(&targets).unwrap())],
@@ -162,6 +214,8 @@ fn managed_proxy_is_the_only_destination() {
         measured.insert(if loopback { "loopback" } else { "public" }, result);
     }
     drop(proxy);
+    drop(earlier.stdin.take());
+    earlier.wait().unwrap();
 
     let expected = |loopback: bool| {
         let mut expected = BTreeMap::from([
@@ -170,10 +224,12 @@ fn managed_proxy_is_the_only_destination() {
             ("unrelated_loopback".to_string(), false),
             ("ipv6_same_port".to_string(), false),
             ("udp_same_port".to_string(), false),
-            // Listening is granted; connecting is the proxy's decision, and a
-            // client that ignores the proxy cannot reach its own listener.
+            // A loopback grant reaches the run's own servers directly: one
+            // the command opened, and one an earlier command left running.
             ("own_listener_bind".to_string(), loopback),
-            ("own_listener_connect".to_string(), false),
+            ("own_listener_connect".to_string(), loopback),
+            ("earlier_command_server".to_string(), loopback),
+            ("own_port_shared_with_foreign".to_string(), false),
         ]);
         if lan.is_some() {
             expected.insert("lan_same_port".to_string(), false);
@@ -184,7 +240,7 @@ fn managed_proxy_is_the_only_destination() {
     assert_eq!(
         (measured, wildcard_free, lan_exact_free),
         (expected, false, lan.map(|_| false)),
-        "lan={lan:?}"
+        "lan={lan:?} targets={targets:?}"
     );
 }
 

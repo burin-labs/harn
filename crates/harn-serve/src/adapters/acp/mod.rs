@@ -1145,6 +1145,7 @@ pub struct AcpServer {
 
 impl Drop for AcpServer {
     fn drop(&mut self) {
+        transport::cancel_transport_sessions(&self.session_cancellations);
         for (_, subscription) in self.timeline_subscriptions.drain() {
             subscription.handle.abort();
         }

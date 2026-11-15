@@ -9,6 +9,143 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.199
+
+### Added
+
+- A `for_command: "git"` grant gives `git fetch`, `git push` and `git ls-remote`
+  an HTTPS login for github.com on macOS. The granted git runs from a private
+  git directory with Harn-written config, so no repository hook, helper, alias,
+  proxy or other setting runs or sees the login.
+
+### Fixed
+
+- A confined `harn serve acp` process removes its private temp directory when it exits,
+  instead of leaving one `harn-confined-*` directory behind per run.
+- Thread-count qualification now reports live test progress and retains interrupted test censuses instead of leaving a
+  cancelled run indistinguishable from a scheduler stall.
+
+## v0.10.198
+
+### Changed
+
+- `harn fix --plan`, `harn fix --apply`, and `harn fmt` process independent files
+  concurrently while preserving deterministic receipts. Set `HARN_FIX_JOBS` or
+  `HARN_FMT_JOBS` to bound workers, or use `1` for serial execution.
+- CI publishes a stripped `harn-consumer-cli.tar.zst` beside the full build-transfer
+  archive, with source-bound checksums and a compressed size limit below 100 MiB.
+- CLI startup parses arguments once and reuses the result for runtime selection,
+  Linux server confinement, and dispatch. Help and argument errors return before
+  starting the async runtime.
+  Runtime assets are warmed after argument parsing, so help and version flags
+  avoid execution setup while preserving startup configuration validation.
+- macOS confined commands can look up only a fixed list of system services instead of any service.
+
+### Fixed
+
+- ACP transport disconnection and server shutdown cancel their sessions' background commands
+  while leaving other sessions' commands running. Incomplete process cleanup is reported as unconfirmed.
+- Host lease acquisition no longer blocks cancellation on a session's runtime thread.
+  Interrupted waits leave the queue, and a lease granted during cancellation is released.
+- A session that grants `PATH` keeps the SwiftPM and pnpm sandbox launchers ahead of it,
+  so `swift build` in a confined command no longer fails on SwiftPM's nested sandbox.
+- After store initialization, host lease acquisition attempts report contention as
+  a typed deferral even when opening their SQLite connection encounters the lock.
+  Delivered guards retain cleanup across
+  busy releases, including nonexpiring leases, while cancellation and guard drop
+  leave the session thread responsive.
+- On macOS, a confined command with a loopback grant behind the managed network proxy can connect to local servers it
+  started again, so test suites that serve and call themselves, and dev servers reached with `curl localhost`, work.
+  Each spawn denies the ports that other local services listen on, and `NO_PROXY` names the loopback addresses.
+- Main health reads recorded runs from disabled workflows and preserves their measured failures or unjudged state.
+- Relocated replay command refusals expose `reason_code:
+  "replay_relocation_unconfined"` alongside the `tool_rejected` category and
+  diagnostic message. Agent tool failure receipts preserve caught structured
+  errors in `error_data`, so hosts can identify the refusal without parsing text.
+- OpenAI Responses stream failures retain their phase, partial-response, and deadline facts.
+  An eligible interruption before the first parsed response event can use the existing one-shot
+  fallback to a non-streaming request. Parsed events, including metadata without visible text,
+  and deadlines prevent automatic fallback.
+- Scoped deadlines now use the runtime clock for asynchronous waits, so paused or
+  advanced test time cannot make them expire early or miss a timeout. Blocking
+  host calls receive the remaining deadline budget on their real clock.
+
+## v0.10.197
+
+### Breaking
+
+- **`AgentTurnPhase` gains an `Idle` variant (#11284).** A daemon agent loop
+  reports `Idle` when it finishes a step and waits for wake input. Because the
+  variant sits between `Generating` and `Verifying`, the numeric discriminants
+  of `Verifying` and `Terminal` each move up by one.
+
+  Migration: add an `AgentTurnPhase::Idle` arm to every exhaustive `match` on
+  `AgentTurnPhase`, and stop relying on the enum's numeric cast values.
+
+  ```rust
+  match phase {
+      AgentTurnPhase::Generating => show_working(),
+      AgentTurnPhase::Idle => show_waiting(),
+      AgentTurnPhase::Verifying { .. } => show_checking(),
+      AgentTurnPhase::Terminal { .. } => show_done(),
+  }
+  ```
+
+### Added
+
+- Add `std/decision` for typed semantic dispatch with route-specific thresholds,
+  separate unmatched and uncertain outcomes, and existing evaluation receipts and
+  replay. Include a synthetic HTTP example mixing lookup, review preparation,
+  and a bounded investigation agent.
+- Merged pull requests labeled `release-needed` now request a fresh release candidate and promote it only after the existing
+  release checks pass. Failed or stalled requests report pending and failing jobs on the pull request and in a reusable
+  `release-blocked` issue.
+
+### Changed
+
+- Clarify DeepInfra Ling 3.1 Flash's confirmed November 15 retirement time without changing route
+  selection or historical pricing.
+
+### Fixed
+
+- Process command receipts retain the group ID established during spawn
+  even when a fast command exits before the parent reads its metadata.
+- `harn check` rejects dict destructuring of known struct values, including typed
+  list elements, and suggests field access before the program can fail at runtime.
+- A tool path argument written from the home directory (`~` or `~/notes/todo.md`) now names that file
+  in the home directory. Before, it was read as a folder literally named `~` inside the workspace, so
+  reads reported the file missing and permission policy judged the wrong path. Tool dispatch and
+  workspace path classification share one reading of the spelling, so the policy and the tool always
+  see the same absolute path.
+- Preserve a server launcher's configured secret store across `serve site`,
+  file-backed MCP, and A2A dispatch workers, including credentials received through
+  `--parent-secret-stdin`.
+- An idle daemon agent loop now reports a `turn_phase_changed` event with phase `idle` once per idle
+  stretch, so a client can show it is waiting rather than working. A steer now wakes an idle daemon on
+  its own: the idle wait is the end of a step, where a steer is delivered, but the wait took only
+  `interrupt_immediate` input, so a steer stayed queued until a reminder or other input arrived.
+- A daemon agent loop now publishes the reply it goes idle on. A toolless reply was published only
+  when its session finalized, and a daemon idles between replies instead of finalizing, so ACP clients
+  saw no `agent_message_chunk` for any of a daemon's replies until the session ended. A reply that
+  wake input supersedes before the daemon idles stays unpublished.
+- Harn's binary freshness check no longer rejects a checkout's own Git `HEAD` as a conflicting input
+  when the Cargo build also watches it for the embedded source revision. The Git `HEAD` authority,
+  which already covers the exact file bytes, now governs that path.
+- OpenAI agent and streaming examples use GPT-5.6 Terra, the documented replacement for GPT-5 Mini
+  before its December 11, 2026 shutdown.
+- Release requests wait within their existing deadline when a newly dispatched
+  workflow has not reported its run purpose yet. Unreported purpose stays pending;
+  warm builds, mismatched promotion sources, and completed runs without purpose
+  remain refused.
+
+### Security
+
+- On macOS, a confined command behind the managed network proxy can no longer bypass it. Its profile now admits only
+  the proxy's TCP/IPv4 ports, and the proxy holds those ports at every local IPv4 address while it runs, so another
+  service on the same port numbers over IPv6, over UDP, or at the host's LAN address is out of reach. A loopback grant
+  behind the proxy still lets the command listen, but it connects only through the proxy, its own local servers
+  included. A spawn naming proxy ports that no live proxy in the process holds is refused by name.
+
 ## v0.10.196
 
 ### Fixed

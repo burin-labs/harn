@@ -511,6 +511,7 @@ async fn run_acp_channel_server_inner(
                 }
             }
 
+            cancel_transport_sessions(&server.session_cancellations);
             handle.mark_terminated();
         })
         .await;
@@ -585,6 +586,8 @@ pub async fn run_acp_server(config: AcpServerConfig) {
     if profile_enabled {
         harn_vm::tracing::set_tracing_enabled(false);
     }
+    // The server has stopped; a confined process's private temp dir is spent.
+    harn_vm::process_sandbox::remove_process_temp_dir();
 }
 
 /// The router lane reads every incoming frame while the dispatcher may be busy
@@ -655,8 +658,24 @@ impl RouterLane {
     /// The client is gone: no host callback will be answered, and no pending
     /// delivery prompt may still be inserted.
     async fn close(&self) {
+        cancel_transport_sessions(&self.cancellations);
         self.outbound.close().await;
         self.controls.drop_pending_prompts().await;
+    }
+}
+
+pub(super) fn cancel_transport_sessions(
+    cancellations: &Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
+) {
+    let owned: Vec<_> = cancellations
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .iter()
+        .map(|(id, cancellation)| (id.clone(), cancellation.clone()))
+        .collect();
+    for (id, cancellation) in owned {
+        cancellation.cancel();
+        cancel_session_command_handles(&id);
     }
 }
 

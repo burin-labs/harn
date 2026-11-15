@@ -1,7 +1,49 @@
+import { Invocation, selected_inventory } from "../ci/nextest_inventory"
 import { ReceiptResult } from "../ci/summarize_nextest_receipt"
 import { BuildEvidence, Snapshot } from "../ci/workspace_build_evidence"
 
 type CliResult = {exit_code: int, stdout: string, stderr: string}
+
+type Invocations = list<Invocation>
+
+type TestEvent = {type: string, event: string, name: string}
+
+fn ignored_inventory() -> unknown {
+  let testcases: dict<string, unknown> = {}
+  for name in ["completed", "pending", "queued"] {
+    testcases[name] = {ignored: false, "filter-match": {status: "matches"}}
+  }
+  testcases["filtered"] = {ignored: false, "filter-match": {status: "mismatch"}}
+  for index in range(0, 86) {
+    testcases["ignored-${index}"] = {ignored: true, "filter-match": {status: "mismatch"}}
+  }
+  return {
+    "test-count": 90,
+    "rust-suites": {
+      "demo::unit": {
+        "package-name": "demo",
+        "binary-name": "unit",
+        status: "listed",
+        testcases: testcases,
+      },
+    },
+  }
+}
+
+fn fixture_event(event: string, name: string) -> TestEvent {
+  return {type: "test", event: event, name: "demo::unit$${name}"}
+}
+
+fn ignored_events() -> list<TestEvent> {
+  let events: list<TestEvent> = []
+  for index in range(0, 86) {
+    events = events + [fixture_event("started", "ignored-${index}")]
+    if index < 75 {
+      events = events + [fixture_event("ignored", "ignored-${index}")]
+    }
+  }
+  return events
+}
 
 fn run_cli(harness: Harness, script: string, args: list<string>) -> CliResult {
   const root = path_normalize(path_join(harness.fs.source_dir(), "../.."))
@@ -120,11 +162,287 @@ fn check_collectors(harness: Harness, group: string) -> nil {
       assert(result.stdout.contains("selected=2 run=1 passed=1 skipped=1 not_run=1 failed=0"))
       assert(result.stderr.contains("thread_parity_missing_test demo::tests$omitted"))
     }
+    if scenario.reason == "test-failure" {
+      assert(result.stderr.contains("thread_parity_failed_test demo::tests$passes"))
+    }
   }
 }
 
 pipeline test_actual_nextest_inventory_refuses_empty_and_inconsistent_censuses(harness: Harness) {
   check_collectors(harness, "inventory")
+}
+
+pipeline test_duplicate_names_require_inventory_bound_invocations(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("nextest-identities-")
+  const inventory = path_join(root, "inventory.json")
+  const events = path_join(root, "events.jsonl")
+  const testcase = {
+    same: {ignored: false, "filter-match": {status: "matches"}},
+    ignored: {ignored: true, "filter-match": {status: "mismatch"}},
+  }
+  const shared = {
+    "package-name": "demo",
+    "binary-name": "tests",
+    status: "listed",
+    testcases: testcase,
+  }
+  harness.fs.write_text(
+    inventory,
+    json_stringify(
+      {
+        "test-count": 6,
+        "rust-suites": {
+          demo: shared,
+          "demo::tests": shared,
+          "demo::ordinary": shared + {"binary-name": "ordinary"},
+        },
+      },
+    ),
+  )
+  const planned = run_cli(harness, "nextest_inventory.harn", ["--execution-plan", inventory])
+  assert_eq(planned.exit_code, 0, planned.stderr)
+  const plan = schema_expect(json_parse(planned.stdout), schema_of(Invocations))
+  assert_eq(
+    plan,
+    [
+      {binary_id: nil, filter: "not (binary_id(=demo) or binary_id(=demo::tests))"},
+      {binary_id: "demo", filter: "binary_id(=demo)"},
+      {binary_id: "demo::tests", filter: "binary_id(=demo::tests)"},
+    ],
+  )
+  const ordinary = {type: "test", event: "ok", name: "demo::ordinary$same"}
+  const same = {type: "test", event: "ok", name: "demo::tests$same"}
+  const library = {type: "harn-invocation", event: "started", binary_id: "demo"}
+  const integration = library + {binary_id: "demo::tests"}
+  const ignored_start = same + {event: "started", name: "demo::tests$ignored"}
+  const ignored_end = ignored_start + {event: "ignored"}
+  for scenario in [
+    {
+      rows: [
+        ordinary,
+        library,
+        ignored_start,
+        ignored_end,
+        same,
+        integration,
+        ignored_start,
+        ignored_end,
+        same,
+      ],
+      code: 0,
+    },
+    {rows: [ordinary, same], code: 2},
+    {rows: [library + {binary_id: "missing"}, same], code: 2},
+    {rows: [ordinary, library, same, library, same], code: 2},
+    {rows: [library + {event: "finished"}, same], code: 2},
+  ] {
+    harness.fs.write_text(events, scenario.rows.map({ row -> json_stringify(row) }).join("\n"))
+    const result = run_cli(
+      harness,
+      "summarize_nextest_receipt.harn",
+      [
+        "--inventory",
+        inventory,
+        "--events",
+        events,
+        "--runner-status",
+        "0",
+        "--threads",
+        "4",
+        "--format",
+        "json",
+      ],
+    )
+    assert_eq(result.exit_code, scenario.code, result.stderr)
+    if scenario.code == 0 {
+      const receipt = schema_expect(json_parse(result.stdout), schema_of(ReceiptResult)).receipt
+      assert_eq(receipt.selected, 3)
+      assert_eq(receipt.run, 3)
+      assert_eq(receipt.passed, 3)
+      assert_eq(receipt.skipped, 3)
+      assert_eq(receipt.pending, [])
+      assert_eq(receipt.missing, [])
+      assert_eq(receipt.failed_names, [])
+    }
+  }
+  harness.fs.write_text(
+    events,
+    [library, same + {event: "started"}].map({ row -> json_stringify(row) }).join("\n"),
+  )
+  const interrupted = run_cli(
+    harness,
+    "summarize_nextest_receipt.harn",
+    [
+      "--inventory",
+      inventory,
+      "--events",
+      events,
+      "--runner-status",
+      "143",
+      "--threads",
+      "4",
+      "--format",
+      "json",
+    ],
+  )
+  assert_eq(interrupted.exit_code, 1, interrupted.stderr)
+  const partial = schema_expect(json_parse(interrupted.stdout), schema_of(ReceiptResult)).receipt
+  assert_eq(partial.selected, 3)
+  assert_eq(partial.run, 0)
+  assert_eq(partial.pending, ["demo$same"])
+  assert_eq(len(partial.missing), 3)
+}
+
+pipeline test_actual_receipt_excludes_known_ignored_starts_and_refuses_execution(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("nextest-ignored-")
+  const inventory_path = path_join(root, "inventory.json")
+  const events_path = path_join(root, "events.jsonl")
+  const inventory = ignored_inventory()
+  const selected = selected_inventory(inventory)
+  assert_eq(len(selected.selected), 3)
+  assert_eq(selected.skipped, 87)
+  assert_eq(selected.ignored, 86)
+  assert_eq(selected.excluded["demo::unit$ignored-0"], "ignored")
+  assert_eq(selected.excluded["demo::unit$filtered"], "filter-mismatch")
+  harness.fs.write_text(inventory_path, json_stringify(inventory))
+  let complete = ignored_events()
+  for name in ["completed", "pending", "queued"] {
+    complete = complete + [fixture_event("started", name), fixture_event("ok", name)]
+  }
+  const arguments = [
+    "--inventory",
+    inventory_path,
+    "--events",
+    events_path,
+    "--runner-status",
+    "0",
+    "--threads",
+    "1",
+    "--format",
+    "json",
+  ]
+  harness.fs.write_text(events_path, complete.map({ event -> json_stringify(event) }).join("\n"))
+  const positive = run_cli(harness, "summarize_nextest_receipt.harn", arguments)
+  assert_eq(positive.exit_code, 0, positive.stderr)
+  const receipt = schema_expect<ReceiptResult>(
+    json_parse(positive.stdout),
+    schema_of(ReceiptResult),
+  ).receipt
+  assert_eq(receipt.reason, "complete")
+  assert_eq(receipt.selected, 3)
+  assert_eq(receipt.run, 3)
+  assert_eq(receipt.passed, 3)
+  assert_eq(receipt.started, 3)
+  assert_eq(receipt.skipped, 87)
+  assert_eq(receipt.pending, [])
+  assert_eq(receipt.missing, [])
+  for unexpected in [
+    fixture_event("started", "unknown"),
+    fixture_event("ok", "unknown"),
+    fixture_event("failed", "unknown"),
+    fixture_event("ignored", "unknown"),
+    fixture_event("ok", "ignored-0"),
+    fixture_event("failed", "ignored-0"),
+    fixture_event("started", "filtered"),
+    fixture_event("ok", "filtered"),
+    fixture_event("failed", "filtered"),
+    fixture_event("ignored", "filtered"),
+    fixture_event("ignored", "completed"),
+  ] {
+    harness.fs.write_text(
+      events_path,
+      (complete + [unexpected]).map({ event -> json_stringify(event) }).join("\n"),
+    )
+    const refused = run_cli(harness, "summarize_nextest_receipt.harn", arguments)
+    assert_eq(refused.exit_code, 2, refused.stderr)
+    assert(refused.stderr.contains("receipt-invalid"), refused.stderr)
+  }
+  const partial = ignored_events()
+    + [
+      fixture_event("started", "completed"),
+      fixture_event("ok", "completed"),
+      fixture_event("started", "pending"),
+    ]
+  harness.fs.write_text(events_path, partial.map({ event -> json_stringify(event) }).join("\n"))
+  const interrupted = run_cli(
+    harness,
+    "summarize_nextest_receipt.harn",
+    [
+      "--inventory",
+      inventory_path,
+      "--events",
+      events_path,
+      "--runner-status",
+      "143",
+      "--threads",
+      "1",
+      "--format",
+      "json",
+    ],
+  )
+  assert_eq(interrupted.exit_code, 1, interrupted.stderr)
+  const progress = schema_expect<ReceiptResult>(
+    json_parse(interrupted.stdout),
+    schema_of(ReceiptResult),
+  ).receipt
+  assert_eq(progress.passed, 1)
+  assert_eq(progress.started, 2)
+  assert_eq(progress.pending, ["demo::unit$pending"])
+  assert_eq(progress.missing, ["demo::unit$pending", "demo::unit$queued"])
+}
+
+pipeline test_actual_stress_receipt_expands_known_ignored_identities(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("nextest-ignored-stress-")
+  const inventory_path = path_join(root, "inventory.json")
+  const events_path = path_join(root, "events.jsonl")
+  harness.fs.write_text(inventory_path, json_stringify(ignored_inventory()))
+  let events: list<TestEvent> = []
+  for iteration in range(0, 2) {
+    events = events
+      + [
+        {type: "test", event: "started", name: "demo::unit@stress-${iteration}$ignored-0"},
+        {type: "test", event: "ignored", name: "demo::unit@stress-${iteration}$ignored-0"},
+      ]
+    for name in ["completed", "pending", "queued"] {
+      events = events
+        + [{type: "test", event: "ok", name: "demo::unit@stress-${iteration}$${name}"}]
+    }
+  }
+  const arguments = [
+    "--inventory",
+    inventory_path,
+    "--events",
+    events_path,
+    "--runner-status",
+    "0",
+    "--threads",
+    "1",
+    "--stress-count",
+    "2",
+    "--format",
+    "json",
+  ]
+  harness.fs.write_text(events_path, events.map({ event -> json_stringify(event) }).join("\n"))
+  const measured = run_cli(harness, "summarize_nextest_receipt.harn", arguments)
+  assert_eq(measured.exit_code, 0, measured.stderr)
+  const receipt = schema_expect<ReceiptResult>(
+    json_parse(measured.stdout),
+    schema_of(ReceiptResult),
+  ).receipt
+  assert_eq(receipt.selected, 6)
+  assert_eq(receipt.passed, 6)
+  assert_eq(receipt.started, 6)
+  for invalid in [
+    {type: "test", event: "started", name: "demo::unit@stress-2$ignored-0"},
+    {type: "test", event: "ok", name: "demo::unit@stress-0$ignored-0"},
+  ] {
+    harness.fs.write_text(
+      events_path,
+      (events + [invalid]).map({ event -> json_stringify(event) }).join("\n"),
+    )
+    const refused = run_cli(harness, "summarize_nextest_receipt.harn", arguments)
+    assert_eq(refused.exit_code, 2, refused.stderr)
+  }
 }
 
 pipeline test_actual_nextest_receipt_reports_missing_failed_and_aborted_tests(harness: Harness) {
@@ -135,6 +453,71 @@ pipeline test_actual_nextest_receipt_refuses_duplicates_foreign_tests_and_invali
   harness: Harness,
 ) {
   check_collectors(harness, "invalid")
+}
+
+pipeline test_interrupted_receipt_retains_started_pending_and_failed_names(harness: Harness) {
+  const root = harness.fs.mkdtemp_in_workspace("nextest-interrupted-")
+  const inventory = path_join(root, "inventory.json")
+  const events = path_join(root, "events.jsonl")
+  const receipt_path = path_join(root, "receipt.json")
+  harness.fs.write_text(
+    inventory,
+    json_stringify(
+      {
+        "test-count": 3,
+        "rust-suites": {
+          "demo::tests": {
+            "package-name": "demo",
+            "binary-name": "tests",
+            status: "listed",
+            testcases: {
+              failed: {ignored: false, "filter-match": {status: "matches"}},
+              pending: {ignored: false, "filter-match": {status: "matches"}},
+              queued: {ignored: false, "filter-match": {status: "matches"}},
+            },
+          },
+        },
+      },
+    ),
+  )
+  harness.fs.write_text(
+    events,
+    [
+      {type: "test", event: "failed", name: "demo::tests$failed"},
+      {type: "test", event: "started", name: "demo::tests$pending"},
+    ]
+      .map({ event -> json_stringify(event) })
+      .join("\n"),
+  )
+  const result = run_cli(
+    harness,
+    "summarize_nextest_receipt.harn",
+    [
+      "--inventory",
+      inventory,
+      "--events",
+      events,
+      "--runner-status",
+      "143",
+      "--threads",
+      "1",
+      "--receipt",
+      receipt_path,
+    ],
+  )
+  assert_eq(result.exit_code, 1, result.stderr)
+  const receipt = schema_expect(
+    json_parse(harness.fs.read_text(receipt_path)),
+    schema_of(ReceiptResult),
+  )
+  assert_eq(receipt.receipt.selected, 3)
+  assert_eq(receipt.receipt.run, 1)
+  assert_eq(receipt.receipt.started, 2)
+  assert_eq(receipt.receipt.failed_names, ["demo::tests$failed"])
+  assert_eq(receipt.receipt.pending, ["demo::tests$pending"])
+  assert_eq(receipt.receipt.missing, ["demo::tests$pending", "demo::tests$queued"])
+  assert(result.stderr.contains("thread_parity_pending_test demo::tests$pending"))
+  assert(result.stderr.contains("thread_parity_failed_test demo::tests$failed"))
 }
 
 pipeline test_actual_stress_receipt_requires_every_selected_test_in_every_iteration(
@@ -149,7 +532,7 @@ pipeline test_actual_stress_receipt_requires_every_selected_test_in_every_iterat
       {
         "test-count": 1,
         "rust-suites": {
-          demo: {
+          "demo::tests": {
             "package-name": "demo",
             "binary-name": "tests",
             status: "listed",

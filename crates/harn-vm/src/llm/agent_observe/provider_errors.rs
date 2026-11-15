@@ -440,6 +440,16 @@ pub(super) fn message_is_native_tool_channel_failure(msg: &str) -> bool {
 /// HTTP/SSE body path forever; when the route does not require streaming, the
 /// productive fallback is to retry once as a normal request/response call.
 pub(super) fn is_stream_transport_failure(err: &VmError) -> bool {
+    if let Some(failure) = err.provider_stream_failure() {
+        // Parsed provider events may already represent work that cannot be replayed.
+        return !failure.partial
+            && failure.deadline.is_none()
+            && matches!(
+                failure.reason,
+                crate::value::ProviderStreamFailureReason::Read
+                    | crate::value::ProviderStreamFailureReason::PrematureEof
+            );
+    }
     let msg = match err {
         VmError::Thrown(crate::value::VmValue::String(s)) => s.as_ref(),
         VmError::CategorizedError { message, .. } => message.as_str(),

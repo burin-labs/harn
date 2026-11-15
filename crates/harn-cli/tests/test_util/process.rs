@@ -53,6 +53,35 @@ use std::time::Duration;
 
 use tokio::process::Command as TokioCommand;
 
+#[cfg(unix)]
+#[test]
+fn in_process_foreground_uses_declared_guardian() {
+    use harn_hostlib::process::{EnvMode, OutputCapture, OwnerDeathPolicy, SpawnSpec};
+    use std::io::Read;
+
+    let mut process = harn_hostlib::process::default_spawner()
+        .spawn(SpawnSpec {
+            builtin: "cli_in_process_guardian_control",
+            program: "/bin/echo".to_string(),
+            args: vec!["guardian-cli-test".to_string()],
+            cwd: None,
+            env: Default::default(),
+            env_remove: Vec::new(),
+            env_mode: EnvMode::Replace,
+            use_stdin: false,
+            configure_process_group: true,
+            owner_death: OwnerDeathPolicy::KillContainment,
+            output_capture: OutputCapture::Pipe,
+        })
+        .expect("the integration executable declares its guardian dispatcher");
+    let mut stdout = process.take_stdout().expect("payload stdout");
+    assert_eq!(process.wait().unwrap().code, Some(0));
+    let mut bytes = Vec::new();
+    stdout.read_to_end(&mut bytes).unwrap();
+    assert_eq!(bytes, b"guardian-cli-test\n");
+    assert!(process.cleanup_report().is_some());
+}
+
 pub struct ChildGuard(pub std::process::Child);
 
 impl Drop for ChildGuard {

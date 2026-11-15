@@ -8,6 +8,7 @@ use harn_clock::PausedClock;
 use rusqlite::Connection;
 use tempfile::TempDir;
 
+use super::admission::WaitProgressSchedule;
 use super::*;
 
 #[path = "tests/status.rs"]
@@ -15,6 +16,9 @@ mod status_tests;
 
 #[path = "tests/wait_deadlines.rs"]
 mod wait_deadlines;
+
+#[path = "tests/interrupt.rs"]
+mod interrupt;
 
 fn store(temp: &TempDir) -> HostLeaseStore {
     HostLeaseStore::for_root(temp.path()).unwrap()

@@ -211,6 +211,13 @@ request identity.
 
 ## Branch prefix effects
 
+A live command in a relocated workspace requires an enforced filesystem
+namespace. If the host cannot provide one, the caught error carries category
+`tool_rejected`, reason code `replay_relocation_unconfined`, and a diagnostic
+`message`. Agent tool failure receipts preserve these fields in `error_data`.
+Hosts should read the code to identify this refusal instead of matching the
+message.
+
 Code-index maintenance and coordination rebuild the capability's own state
 inside the restored workspace. A rebuild outside that workspace is refused.
 Source refactors (`rename_symbol`, `move_symbol`, `extract_function` and

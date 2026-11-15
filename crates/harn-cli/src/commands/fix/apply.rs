@@ -145,9 +145,25 @@ fn apply_repairs_with_options_inner(
                     .map_err(|error| format!("failed to write {path}: {error}"))?;
             }
         } else {
-            for (path, edits) in &edits_by_file {
-                let edits = dedupe_wire_edits(edits);
-                apply_file_edits(Path::new(path), &edits)?;
+            let files = edits_by_file.keys().map(PathBuf::from).collect::<Vec<_>>();
+            let results = commands::check::run_ordered(
+                &files,
+                commands::check::worker_count_for_env(files.len(), "HARN_FIX_JOBS"),
+                || (),
+                |(), file| {
+                    let edits =
+                        dedupe_wire_edits(&edits_by_file[&file.to_string_lossy().into_owned()]);
+                    apply_file_edits(file, &edits)
+                },
+                |file| {
+                    Err(format!(
+                        "internal repair application failure for {}",
+                        file.display()
+                    ))
+                },
+            );
+            for result in results {
+                result?;
             }
         }
         if !options.capability_migrations_only {
@@ -462,64 +478,32 @@ fn count_remaining_diagnostics(targets: &[PathBuf]) -> Result<RemainingDiagnosti
     let files = commands::check::collect_harn_targets(&target_refs);
     let module_graph = commands::check::build_module_graph(&files);
     let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
-    let mut analysis = AnalysisDatabase::new();
     let mut count = 0;
     let mut skipped_files = Vec::new();
     let mut declared_invalid_files = Vec::new();
 
-    for file in &files {
-        let mut config = package::load_check_config(Some(file));
-        commands::check::apply_harn_lint_config(file, &mut config);
-        let output = commands::check::analyze_file(&mut analysis, file, &config, &module_graph);
-        analysis.remove_source(&SourceId::path(file));
-        let output = match output {
-            Ok(output) => output,
-            Err(skipped) => {
-                let wire =
-                    skipped_file_from_analysis_error(file.to_string_lossy().into_owned(), skipped);
-                // A fixture the repo declares expected-invalid is still not
-                // repairable, but it must not fail the run (harn#6264).
-                if super::declares_expected_invalid(file) {
-                    declared_invalid_files.push(wire);
-                } else {
-                    skipped_files.push(wire);
-                }
-                continue;
+    let results = commands::check::run_ordered(
+        &files,
+        commands::check::worker_count_for_env(files.len(), "HARN_FIX_JOBS"),
+        AnalysisDatabase::new,
+        |analysis, file| {
+            count_file_diagnostics(analysis, file, &module_graph, &cross_file_imports).map_err(Some)
+        },
+        |_| Err(None),
+    );
+    for (file, result) in files.iter().zip(results) {
+        match result {
+            Ok(file_count) => count += file_count,
+            Err(Some(skipped)) if super::declares_expected_invalid(file) => {
+                declared_invalid_files.push(skipped);
             }
-        };
-        let source = output.source;
-        let program = output.program;
-
-        count += output
-            .diagnostics
-            .iter()
-            .filter(|diag| !harn_lint::type_diagnostic_lint_disabled(diag, &config.disable_rules))
-            .count();
-
-        let lint_context = FixLintContext::load(file);
-        let options = harn_lint::LintOptions {
-            binding_types: Some(&output.binding_types),
-            ..lint_context.options(file)
-        };
-        count += harn_lint::lint_with_module_graph(
-            &program,
-            &config.disable_rules,
-            Some(&source),
-            &cross_file_imports,
-            &module_graph,
-            file,
-            &options,
-        )
-        .len();
-
-        let preflight_severity = PreflightSeverity::from_opt(config.preflight_severity.as_deref());
-        if preflight_severity != PreflightSeverity::Off {
-            count += preflight_diagnostics(file, &source, &program, &config, &module_graph)
-                .into_iter()
-                .filter(|diag| {
-                    !commands::check::is_preflight_allowed(&diag.tags, &config.preflight_allow)
-                })
-                .count();
+            Err(Some(skipped)) => skipped_files.push(skipped),
+            Err(None) => {
+                return Err(format!(
+                    "internal diagnostic count failure for {}",
+                    file.display()
+                ))
+            }
         }
     }
 
@@ -528,4 +512,61 @@ fn count_remaining_diagnostics(targets: &[PathBuf]) -> Result<RemainingDiagnosti
         skipped_files,
         declared_invalid_files,
     })
+}
+
+fn count_file_diagnostics(
+    analysis: &mut AnalysisDatabase,
+    file: &Path,
+    module_graph: &harn_modules::ModuleGraph,
+    cross_file_imports: &HashSet<String>,
+) -> Result<usize, SkippedFileWire> {
+    let mut count = 0;
+    let mut config = package::load_check_config(Some(file));
+    commands::check::apply_harn_lint_config(file, &mut config);
+    let output = commands::check::analyze_file(analysis, file, &config, module_graph);
+    analysis.remove_source(&SourceId::path(file));
+    let output = match output {
+        Ok(output) => output,
+        Err(skipped) => {
+            return Err(skipped_file_from_analysis_error(
+                file.to_string_lossy().into_owned(),
+                skipped,
+            ));
+        }
+    };
+    let source = output.source;
+    let program = output.program;
+
+    count += output
+        .diagnostics
+        .iter()
+        .filter(|diag| !harn_lint::type_diagnostic_lint_disabled(diag, &config.disable_rules))
+        .count();
+
+    let lint_context = FixLintContext::load(file);
+    let options = harn_lint::LintOptions {
+        binding_types: Some(&output.binding_types),
+        ..lint_context.options(file)
+    };
+    count += harn_lint::lint_with_module_graph(
+        &program,
+        &config.disable_rules,
+        Some(&source),
+        cross_file_imports,
+        module_graph,
+        file,
+        &options,
+    )
+    .len();
+
+    let preflight_severity = PreflightSeverity::from_opt(config.preflight_severity.as_deref());
+    if preflight_severity != PreflightSeverity::Off {
+        count += preflight_diagnostics(file, &source, &program, &config, module_graph)
+            .into_iter()
+            .filter(|diag| {
+                !commands::check::is_preflight_allowed(&diag.tags, &config.preflight_allow)
+            })
+            .count();
+    }
+    Ok(count)
 }

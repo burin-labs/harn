@@ -30,11 +30,11 @@ mod private_inputs;
 mod sse;
 mod stream_fold;
 
-pub(crate) use liveness::premature_eof;
+pub(crate) use liveness::{premature_eof, stream_read_failure};
 
 use capture::{capture_stream_bytes, captured_stream_text, RawProviderCaptureTarget};
 
-fn stream_body_read_error(error: reqwest::Error) -> std::io::Error {
+pub(crate) fn stream_body_read_error(error: reqwest::Error) -> std::io::Error {
     let kind = if error.is_timeout() {
         std::io::ErrorKind::TimedOut
     } else {
@@ -840,6 +840,8 @@ pub(crate) use sse::reqwest_send_error;
 mod dialect_golden_stream_tests;
 #[cfg(test)]
 mod http_stream_error_tests;
+#[cfg(test)]
+pub(crate) use http_stream_error_tests::response as test_http_stream_response;
 #[cfg(test)]
 mod liveness_tests;
 #[cfg(test)]

@@ -48,6 +48,13 @@ impl ProcessNetworkGrant {
         matches!(self, Self::Loopback { .. } | Self::Public { proxy: None })
     }
 
+    /// A loopback grant whose other traffic goes through the managed proxy:
+    /// the command reaches its own local servers directly, everything else
+    /// through the proxy.
+    pub(super) fn loopback_behind_proxy(self) -> bool {
+        matches!(self, Self::Loopback { proxy: Some(_) })
+    }
+
     pub(super) fn managed_proxy(self) -> bool {
         matches!(
             self,

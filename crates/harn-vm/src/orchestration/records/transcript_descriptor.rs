@@ -1,5 +1,6 @@
 //! Verified descriptors for LLM transcript sidecars.
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
@@ -8,6 +9,9 @@ use sha2::{Digest, Sha256};
 
 use super::types::{RunRecord, RunTranscriptArtifactDescriptor, RunTranscriptPointerRecord};
 use crate::orchestration::payload_parse_error;
+
+mod raw_provider_artifacts;
+use raw_provider_artifacts::RawProviderArtifactPath;
 
 const DESCRIPTOR_SCHEMA_VERSION: &str = "harn.llm_transcript_artifact.v1";
 const ARTIFACT_KIND: &str = "llm_jsonl";
@@ -37,6 +41,7 @@ impl std::error::Error for LlmTranscriptDescriptorError {}
 
 #[derive(Default)]
 struct DescriptorScan {
+    raw_provider_paths: BTreeSet<RawProviderArtifactPath>,
     event_count: usize,
     first_event_type: Option<String>,
     first_event_id: Option<String>,
@@ -61,6 +66,7 @@ pub fn describe_llm_transcript_sidecar(
         )
     })?;
     let scan = scan_jsonl(&bytes, transcript_path)?;
+    raw_provider_artifacts::validate(transcript_path, &scan.raw_provider_paths)?;
     let sha256 = format!("sha256:{}", hex::encode(Sha256::digest(&bytes)));
     let relative_path = relative_to_run_record(run_record_path, transcript_path);
     Ok(RunTranscriptArtifactDescriptor {
@@ -88,10 +94,9 @@ pub fn pointer_for_llm_transcript_sidecar(
     run: &RunRecord,
     run_record_path: &Path,
     transcript_path: &Path,
-) -> Option<RunTranscriptPointerRecord> {
-    describe_llm_transcript_sidecar(run, run_record_path, transcript_path)
-        .ok()
-        .map(|descriptor| RunTranscriptPointerRecord {
+) -> RunTranscriptPointerRecord {
+    match describe_llm_transcript_sidecar(run, run_record_path, transcript_path) {
+        Ok(descriptor) => RunTranscriptPointerRecord {
             id: "run:llm_transcript".to_string(),
             label: "LLM transcript sidecar".to_string(),
             kind: ARTIFACT_KIND.to_string(),
@@ -105,31 +110,59 @@ pub fn pointer_for_llm_transcript_sidecar(
             },
             verification_error: None,
             descriptor: Some(descriptor),
-        })
+        },
+        Err(error) => unavailable_llm_transcript_pointer(run, &error),
+    }
+}
+
+pub(super) fn unavailable_llm_transcript_pointer(
+    run: &RunRecord,
+    error: &LlmTranscriptDescriptorError,
+) -> RunTranscriptPointerRecord {
+    let recorded_error = (error.kind == "recorded_unavailable")
+        .then(|| recorded_llm_pointer(run).and_then(|pointer| pointer.verification_error.clone()))
+        .flatten();
+    RunTranscriptPointerRecord {
+        id: "run:llm_transcript".to_string(),
+        label: "LLM transcript sidecar".to_string(),
+        kind: ARTIFACT_KIND.to_string(),
+        location: "run sidecar".to_string(),
+        available: false,
+        verification_status: "unavailable".to_string(),
+        verification_error: Some(recorded_error.unwrap_or_else(|| error.kind.to_string())),
+        ..Default::default()
+    }
 }
 
 pub(super) fn discover_llm_transcript_sidecar(
     run: &RunRecord,
     run_record_path: &Path,
-) -> Option<PathBuf> {
-    verified_llm_transcript_pointer_path(run, run_record_path)
-        .ok()
-        .or_else(|| {
-            let canonical = super::persistence::llm_transcript_sidecar_path(run_record_path)?;
-            describe_llm_transcript_sidecar(run, run_record_path, &canonical)
-                .is_ok()
-                .then_some(canonical)
-        })
+) -> Result<Option<PathBuf>, LlmTranscriptDescriptorError> {
+    if let Some(pointer) = recorded_llm_pointer(run) {
+        if !pointer.available || pointer.verification_status == "unavailable" {
+            return Err(LlmTranscriptDescriptorError::new(
+                "recorded_unavailable",
+                "the recorded transcript sidecar is unavailable",
+            ));
+        }
+        return verified_llm_transcript_pointer_path(run, run_record_path).map(Some);
+    }
+    let Some(canonical) = super::persistence::llm_transcript_sidecar_path(run_record_path) else {
+        return Ok(None);
+    };
+    match std::fs::symlink_metadata(&canonical) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        _ => describe_llm_transcript_sidecar(run, run_record_path, &canonical)
+            .map(|_| Some(canonical)),
+    }
 }
 
 pub(super) fn materialize_llm_transcript_sidecar(
     run: &RunRecord,
     run_record_path: &Path,
     active_transcript_path: Option<&Path>,
-) -> Option<PathBuf> {
+) -> Result<Option<PathBuf>, LlmTranscriptDescriptorError> {
     materialize_llm_transcript_sidecar_checked(run, run_record_path, active_transcript_path)
-        .ok()
-        .flatten()
 }
 
 fn materialize_llm_transcript_sidecar_checked(
@@ -145,15 +178,13 @@ fn materialize_llm_transcript_sidecar_checked(
             )
         })?;
 
-    if let Some(active) = active_transcript_path.filter(|path| path.exists()) {
-        describe_llm_transcript_sidecar(run, run_record_path, active)?;
+    if let Some(active) = active_transcript_path {
+        let bytes = std::fs::read(active).map_err(|_| {
+            LlmTranscriptDescriptorError::new("unavailable", "active transcript is unavailable")
+        })?;
+        let scan = scan_jsonl(&bytes, active)?;
+        raw_provider_artifacts::validate(active, &scan.raw_provider_paths)?;
         if active != canonical {
-            let bytes = std::fs::read(active).map_err(|error| {
-                LlmTranscriptDescriptorError::new(
-                    "unavailable",
-                    format!("failed to read {}: {error}", active.display()),
-                )
-            })?;
             let parent = canonical.parent().ok_or_else(|| {
                 LlmTranscriptDescriptorError::new(
                     "invalid_run_path",
@@ -166,6 +197,7 @@ fn materialize_llm_transcript_sidecar_checked(
                     format!("failed to create {}: {error}", parent.display()),
                 )
             })?;
+            raw_provider_artifacts::copy(active, &canonical, &scan.raw_provider_paths)?;
             crate::atomic_io::atomic_write(&canonical, &bytes).map_err(|error| {
                 LlmTranscriptDescriptorError::new(
                     "unavailable",
@@ -173,11 +205,19 @@ fn materialize_llm_transcript_sidecar_checked(
                 )
             })?;
         }
-        describe_llm_transcript_sidecar(run, run_record_path, &canonical)?;
         return Ok(Some(canonical));
     }
 
-    Ok(discover_llm_transcript_sidecar(run, run_record_path))
+    discover_llm_transcript_sidecar(run, run_record_path)
+}
+
+fn recorded_llm_pointer(run: &RunRecord) -> Option<&RunTranscriptPointerRecord> {
+    run.observability.as_ref().and_then(|observability| {
+        observability
+            .transcript_pointers
+            .iter()
+            .find(|pointer| pointer.kind == ARTIFACT_KIND)
+    })
 }
 
 pub fn verified_llm_transcript_pointer_path(
@@ -292,6 +332,10 @@ fn scan_jsonl(
             .and_then(|value| value.as_str())
             .unwrap_or("")
             .to_string();
+        if event_type == "provider_raw_capture" {
+            scan.raw_provider_paths
+                .insert(raw_provider_artifacts::pointer_path(&event)?);
+        }
         let event_id = event_identity(&event, scan.event_count + 1);
         if scan.first_event_type.is_none() {
             scan.first_event_type = Some(event_type.clone());
@@ -381,50 +425,45 @@ fn resolve_descriptor_path(
     let parent = run_record_path.parent().ok_or_else(|| {
         LlmTranscriptDescriptorError::new("invalid_run_path", "run record path has no parent")
     })?;
-    if let Some(relative) = descriptor
+    let relative = descriptor
         .relative_path
         .as_deref()
-        .filter(|value| !value.is_empty())
-    {
-        let relative_path = Path::new(relative);
-        if relative_path.is_absolute()
-            || relative_path
-                .components()
-                .any(|component| matches!(component, Component::ParentDir))
-        {
-            return Err(LlmTranscriptDescriptorError::new(
-                "path_traversal",
-                "descriptor relative_path must stay inside the run directory",
-            ));
-        }
-        return Ok(parent.join(relative_path));
-    }
-    let fallback_path = Path::new(&descriptor.path);
-    if descriptor.path.is_empty() {
+        .filter(|value| !value.is_empty());
+    let supplied = relative.unwrap_or(&descriptor.path);
+    if supplied.is_empty() {
         return Err(LlmTranscriptDescriptorError::new(
             "missing_path",
             "llm_jsonl descriptor has no path",
         ));
     }
-    if fallback_path.is_absolute() {
-        if fallback_path.strip_prefix(parent).is_err() {
-            return Err(LlmTranscriptDescriptorError::new(
-                "path_traversal",
-                "descriptor path must stay inside the run directory",
-            ));
-        }
-        return Ok(fallback_path.to_path_buf());
-    }
-    if fallback_path
-        .components()
-        .any(|component| matches!(component, Component::ParentDir))
+    let supplied = Path::new(supplied);
+    if (relative.is_some() && supplied.is_absolute())
+        || supplied
+            .components()
+            .any(|component| matches!(component, Component::ParentDir))
     {
         return Err(LlmTranscriptDescriptorError::new(
             "path_traversal",
             "descriptor path must stay inside the run directory",
         ));
     }
-    Ok(parent.join(fallback_path))
+    let parent = if parent.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        parent
+    };
+    let contained =
+        crate::workspace_path::canonicalize_existing_workspace_path_checked(supplied, parent)
+            .map_err(|_| {
+                LlmTranscriptDescriptorError::new("unavailable", "descriptor path is unavailable")
+            })?;
+    let contained = contained.ok_or_else(|| {
+        LlmTranscriptDescriptorError::new(
+            "path_traversal",
+            "descriptor path must stay inside the run directory",
+        )
+    })?;
+    Ok(parent.join(contained))
 }
 
 #[cfg(test)]

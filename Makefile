@@ -419,6 +419,11 @@ test-e2e:
 test-cargo:
 	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test --workspace
 
+.PHONY: test-hostlib-embedding
+test-hostlib-embedding:
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) build --locked -p harn-hostlib --example foreground_command
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test --locked -p harn-hostlib --example foreground_command
+
 # Compatibility alias for the smarter default `make test`.
 test-fast:
 	@$(MAKE) test
@@ -560,6 +565,7 @@ lint-actions-source:
 # Evaluate workflow decisions with GitHub's expression engine.
 	@node --test scripts/tests/smart_ship_workflow_test.mjs
 	@node --test scripts/tests/install_smoke_workflow_test.mjs
+	@node --test scripts/tests/thread_parity_workflow_test.mjs
 
 # Validate the Harn-specific runner-tier contract in a lane that already has a
 # warm, exact-commit Harn binary.
@@ -860,6 +866,7 @@ test-pr-gate-scripts:
 	bash ./scripts/tests/prune_stale_targets_lock_test.sh
 	python3 ./scripts/tests/prune_stale_targets_reader_test.py
 	python3 ./scripts/tests/prune_stale_targets_linux_census_test.py
+	python3 ./scripts/tests/prune_stale_targets_incremental_test.py
 	./scripts/tests/prune_stale_targets_retention_test.sh
 	./scripts/tests/prune_stale_targets_host_policy_test.sh
 	bash ./scripts/tests/prune_stale_targets_pressure_test.sh
@@ -894,6 +901,7 @@ test-pr-gate-post-warm-integrations: test-rust-lint-lane-cache
 		echo "test-pr-gate-post-warm-integrations requires an executable HARN_BIN" >&2; \
 		exit 1; \
 	fi
+	HARN_BIN="$(HARN_BIN)" python3 scripts/tests/thread_parity_runner_test.py
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/cargo_target_seed_reuse_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/nextest_filters_from_paths_test.sh
 	HARN_BIN="$(HARN_BIN)" ./scripts/tests/touched_test_repeats_test.sh

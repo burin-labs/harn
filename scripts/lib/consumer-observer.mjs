@@ -449,13 +449,19 @@ function artifactJsonFromZip(bytes, filename) {
 }
 
 /** Authenticate the declaration to the exact parent run before claiming custody.
- * Missing or ambiguous artifacts are unmeasured, never inferred from run names. */
+ * Missing or ambiguous artifacts are unmeasured, never inferred from run names.
+ * The artifact list can omit a just-finalized upload for about a second, so an
+ * empty read is retried within `readRetry`; a duplicate is refused at once. */
 export async function githubDeclaration(token, context, fetchRecord = fetch, extract = artifactJsonFromZip) {
   const observer = observerContext(context);
   if (!token) refuse('read_authority_or_identity_missing');
-  const census = await githubArtifactCensus(token, observer.parent_repository,
-    observer.parent_run_id, fetchRecord, observerDeclarationName(observer));
-  const matches = census.filter(artifact => artifact.name === observerDeclarationName(observer));
+  let matches = [];
+  for (let attempt = 1; matches.length === 0 && attempt <= readRetry.attempts; attempt++) {
+    if (attempt > 1) await waitForRead(fetchRecord, readRetry.backoffMs * 2 ** (attempt - 2));
+    const census = await githubArtifactCensus(token, observer.parent_repository,
+      observer.parent_run_id, fetchRecord, observerDeclarationName(observer));
+    matches = census.filter(artifact => artifact.name === observerDeclarationName(observer));
+  }
   if (matches.length !== 1) refuse('dispatch_declaration_missing_or_ambiguous');
   const declaration = observerContext(await githubArtifactJson(token, observer.parent_repository, matches[0], {
     runId: observer.parent_run_id, headSha: observer.parent_head_sha,

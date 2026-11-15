@@ -99,6 +99,8 @@ mod read_roots;
 mod refusal;
 mod scope_memo;
 mod scoped_fs;
+#[cfg(unix)]
+pub mod signing_agent;
 use backend::ActiveBackend;
 pub use backend::{
     active_backend_available, active_backend_filesystem_available,
@@ -127,7 +129,6 @@ mod policy_projection;
 pub(crate) mod replay;
 #[cfg(target_os = "linux")]
 pub(crate) use policy_projection::process_sandbox_unix_socket_roots;
-pub use policy_projection::unix_socket_enforcement;
 #[cfg(any(
     target_os = "linux",
     target_os = "macos",
@@ -137,6 +138,7 @@ pub use policy_projection::unix_socket_enforcement;
 pub(crate) use policy_projection::{
     process_sandbox_policy_read_roots, process_sandbox_policy_write_roots,
 };
+pub use policy_projection::{process_sandbox_writable_roots, unix_socket_enforcement};
 mod replace;
 
 // Each backend uses one of these: platform helpers call `unavailable`; Linux confines in `pre_exec`.

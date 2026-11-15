@@ -1,7 +1,7 @@
 use std::process::{Command, Stdio};
 
 use super::ProcessCommandConfig;
-use crate::orchestration::{CapabilityPolicy, ProcessNetworkProxy};
+use crate::orchestration::CapabilityPolicy;
 
 /// Environment overlay that pins child-tool diagnostics to deterministic,
 /// English, UTF-8-preserving messages without changing the character locale.
@@ -33,8 +33,8 @@ pub(super) fn apply_process_config(
     for key in &config.env_remove {
         command.env_remove(key);
     }
-    if let Some(proxy) = policy.and_then(|policy| policy.process_network_proxy) {
-        apply_managed_proxy_env(command, proxy);
+    if let Some(policy) = policy {
+        apply_managed_proxy_env(command, policy);
     }
     match &config.stdin {
         super::ProcessStdin::Null => {
@@ -46,22 +46,26 @@ pub(super) fn apply_process_config(
     }
 }
 
-pub(super) fn apply_managed_proxy_env(command: &mut Command, proxy: ProcessNetworkProxy) {
-    for (key, value) in managed_proxy_environment(proxy) {
+pub(super) fn apply_managed_proxy_env(command: &mut Command, policy: &CapabilityPolicy) {
+    for (key, value) in managed_proxy_environment(policy) {
         command.env(key, value);
     }
 }
 
 pub(super) fn apply_managed_proxy_env_tokio(
     command: &mut tokio::process::Command,
-    proxy: ProcessNetworkProxy,
+    policy: &CapabilityPolicy,
 ) {
-    for (key, value) in managed_proxy_environment(proxy) {
+    for (key, value) in managed_proxy_environment(policy) {
         command.env(key, value);
     }
 }
 
-pub(super) fn managed_proxy_environment(proxy: ProcessNetworkProxy) -> Vec<(&'static str, String)> {
+/// What a child behind the managed proxy is told about it. Empty without one.
+pub(super) fn managed_proxy_environment(policy: &CapabilityPolicy) -> Vec<(&'static str, String)> {
+    let Some(proxy) = policy.process_network_proxy else {
+        return Vec::new();
+    };
     let http = format!("http://127.0.0.1:{}", proxy.http_port);
     let socks = format!("socks5h://127.0.0.1:{}", proxy.socks_port);
     let mut env = [
@@ -86,18 +90,41 @@ pub(super) fn managed_proxy_environment(proxy: ProcessNetworkProxy) -> Vec<(&'st
     );
     // A launcher-level bypass must not let an allowlisted hostname resolve to
     // a direct child socket. The kernel boundary would deny it anyway, but
-    // clearing this makes cooperative tools reach the managed proxy.
+    // clearing this makes cooperative tools reach the managed proxy. A command
+    // with a loopback grant reaches its own local servers directly, which the
+    // proxy would refuse, so only the loopback names bypass it.
+    let bypass = if super::policy::ProcessNetworkGrant::for_policy(policy).loopback_behind_proxy() {
+        "localhost,127.0.0.1,::1"
+    } else {
+        ""
+    };
     env.extend([
-        ("NO_PROXY", String::new()),
-        ("no_proxy", String::new()),
+        ("NO_PROXY", bypass.to_string()),
+        ("no_proxy", bypass.to_string()),
         ("HARN_PROCESS_EGRESS_PROXY", "managed".to_string()),
     ]);
+    // Marks the processes this runtime started, so a later spawn can tell
+    // their local listeners from other services' (see `macos/own_listeners.rs`).
+    env.push((CHILD_LINEAGE_ENV, child_lineage().to_string()));
     env
+}
+
+/// Environment name of the marker every child behind the managed proxy carries.
+pub(crate) const CHILD_LINEAGE_ENV: &str = "HARN_CHILD_LINEAGE";
+
+/// This runtime's marker value. It is random per runtime, so another
+/// runtime's children do not carry it by accident. It is a label, not a
+/// secret: any process of the same user can read a child's environment and
+/// copy it.
+pub(crate) fn child_lineage() -> &'static str {
+    static LINEAGE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    LINEAGE.get_or_init(|| uuid::Uuid::new_v4().simple().to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::orchestration::ProcessNetworkProxy;
 
     #[test]
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -117,7 +144,6 @@ mod tests {
 
     #[test]
     fn managed_proxy_environment_wins_over_caller_bypass_values() {
-        let mut command = Command::new("ignored");
         let config = ProcessCommandConfig {
             env: vec![
                 (
@@ -136,21 +162,35 @@ mod tests {
             ..Default::default()
         };
 
-        apply_process_config(&mut command, &config, Some(&policy));
-        let env = command
-            .get_envs()
-            .filter_map(|(key, value)| {
-                value.map(|value| {
-                    (
-                        key.to_string_lossy().to_string(),
-                        value.to_string_lossy().to_string(),
-                    )
+        let env = |policy: &CapabilityPolicy| {
+            let mut command = Command::new("ignored");
+            apply_process_config(&mut command, &config, Some(policy));
+            command
+                .get_envs()
+                .filter_map(|(key, value)| {
+                    value.map(|value| {
+                        (
+                            key.to_string_lossy().to_string(),
+                            value.to_string_lossy().to_string(),
+                        )
+                    })
                 })
-            })
-            .collect::<std::collections::BTreeMap<_, _>>();
+                .collect::<std::collections::BTreeMap<_, _>>()
+        };
 
-        assert_eq!(env["HTTP_PROXY"], "http://127.0.0.1:3128");
-        assert_eq!(env["ALL_PROXY"], "socks5h://127.0.0.1:1080");
-        assert_eq!(env["NO_PROXY"], "");
+        let public = env(&policy);
+        assert_eq!(public["HTTP_PROXY"], "http://127.0.0.1:3128");
+        assert_eq!(public["ALL_PROXY"], "socks5h://127.0.0.1:1080");
+        assert_eq!(public["NO_PROXY"], "");
+        assert_eq!(public[CHILD_LINEAGE_ENV], child_lineage());
+
+        // A loopback grant reaches its own local servers directly; everything
+        // else still goes through the proxy.
+        let mut loopback = policy;
+        loopback.process_sandbox.allow_tcp_loopback = true;
+        let loopback = env(&loopback);
+        assert_eq!(loopback["HTTP_PROXY"], "http://127.0.0.1:3128");
+        assert_eq!(loopback["NO_PROXY"], "localhost,127.0.0.1,::1");
+        assert_eq!(loopback["no_proxy"], "localhost,127.0.0.1,::1");
     }
 }
