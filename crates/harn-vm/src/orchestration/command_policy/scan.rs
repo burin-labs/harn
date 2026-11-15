@@ -3,7 +3,7 @@ use super::*;
 mod request;
 use request::*;
 mod reader_paths;
-pub(crate) use reader_paths::permission_reader_paths;
+pub(crate) use reader_paths::{permission_reader_paths, PermissionReaderPath};
 
 pub(super) const EXECUTION_SEMANTICS_UNRESOLVED_LABEL: &str = "execution_semantics_unresolved";
 pub(super) const SHELL_DIALECT_UNKNOWN_LABEL: &str = "shell_dialect_unknown";

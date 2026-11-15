@@ -136,7 +136,7 @@ pub fn current_command_policy() -> Option<CommandPolicy> {
     COMMAND_POLICY_STACK.with(|stack| stack.borrow().last().cloned())
 }
 
-pub(crate) use scan::permission_reader_paths;
+pub(crate) use scan::{permission_reader_paths, PermissionReaderPath};
 
 /// Per-task ambient-scope swap of the command-policy stack and hook depth. See
 /// `orchestration::ambient_scope` — these move whole stacks so a spawned worker

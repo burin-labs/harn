@@ -5,7 +5,7 @@ use std::path::Path;
 use serde_json::Value as JsonValue;
 
 use crate::tool_annotations::ToolAnnotations;
-use crate::workspace_path::{classify_permission_path, WorkspacePathInfo};
+use crate::workspace_path::{classify_permission_path, WorkspacePathInfo, WorkspacePathKind};
 
 pub(super) use crate::tool_annotations::path_inputs::{
     parameters, validate, CONVENTIONAL_PATH_PARAMETERS,
@@ -33,14 +33,36 @@ pub(super) fn classify(
             _ => {}
         }
     }
-    paths
-        .extend(super::super::super::command_policy::permission_reader_paths(arguments, workspace));
+    use super::super::super::command_policy::PermissionReaderPath;
+    let mut entries = Vec::new();
+    for reader in super::super::super::command_policy::permission_reader_paths(arguments, workspace)
+    {
+        match reader {
+            PermissionReaderPath::Known(path) => paths.push(path),
+            PermissionReaderPath::UnresolvedWorkingDirectory { operand } => {
+                entries.push(WorkspacePathInfo {
+                    input: operand.clone(),
+                    kind: WorkspacePathKind::Invalid,
+                    normalized: operand,
+                    workspace_path: None,
+                    host_path: None,
+                    recovered_root_drift: false,
+                    reason: Some(
+                        "reader working directory is not proven across this command sequence"
+                            .into(),
+                    ),
+                });
+            }
+        }
+    }
     paths.sort();
     paths.dedup();
-    paths
-        .iter()
-        .map(|path| classify_permission_path(path, Some(workspace)))
-        .collect()
+    entries.extend(
+        paths
+            .iter()
+            .map(|path| classify_permission_path(path, Some(workspace))),
+    );
+    entries
 }
 
 #[cfg(test)]
@@ -83,6 +105,7 @@ mod tests {
             "rules": [{"source": "mode", "allow": "run"}]
         }))
         .unwrap();
+        let unknown_relative = "opaque_directory_step && cd src/inner && head Makefile";
         let cases = [
             (json!({"command": "head Makefile", "shell": "sh"}), true),
             (
@@ -138,7 +161,29 @@ mod tests {
                 false,
             ),
             (json!({"argv": ["head", ".env"], "cwd": "src/inner"}), false),
+            (
+                json!({"command": "head Makefile && head Makefile", "shell": "sh"}),
+                true,
+            ),
+            (
+                json!({"command": "opaque_directory_step && cd src/inner && head ../../Makefile", "shell": "sh"}),
+                false,
+            ),
+            (
+                json!({"command": "touch marker && cd src/inner && head ../../Makefile", "shell": "sh"}),
+                false,
+            ),
+            (json!({"command": unknown_relative, "shell": "sh"}), false),
+            (
+                json!({"command": "touch marker && cd src/inner && head Makefile", "shell": "sh"}),
+                false,
+            ),
+            (
+                json!({"command": "cd src/inner; head Makefile", "shell": "sh"}),
+                false,
+            ),
         ];
+        let mut mismatches = Vec::new();
         for (arguments, allowed) in cases {
             let host = ToolApprovalRequest {
                 tool_name: "run".into(),
@@ -151,9 +196,31 @@ mod tests {
             };
             let native = policy.evaluate_request(&host);
             let vm = super::super::evaluate_tool_approval_policy(&policy, "run", &arguments, None);
-            assert_eq!(native.is_allow(), allowed, "host: {arguments}: {native:?}");
-            assert_eq!(vm.is_allow(), allowed, "VM: {arguments}: {vm:?}");
+            if native.is_allow() != allowed || vm.is_allow() != allowed {
+                mismatches.push(format!(
+                    "arguments={arguments}; expected_allow={allowed}; host={native:?}; VM={vm:?}"
+                ));
+            }
             assert_eq!(native.denial_gate(), vm.denial_gate(), "{arguments}");
+            if arguments.get("command").and_then(JsonValue::as_str) == Some(unknown_relative) {
+                assert_eq!(
+                    native.denial_gate(),
+                    crate::agent_events::DenialGate::WorkspaceBoundary
+                );
+                assert_eq!(
+                    native
+                        .matched_rule
+                        .as_ref()
+                        .and_then(|rule| rule.id.as_deref()),
+                    Some("invalid_path")
+                );
+                assert!(classify(&arguments, Some(&annotations), &workspace)
+                    .iter()
+                    .any(|entry| entry.kind == WorkspacePathKind::Invalid
+                        && entry.input == "Makefile"
+                        && entry.host_path.is_none()
+                        && entry.workspace_path.is_none()));
+            }
             if allowed {
                 let actual = workspace.join("Makefile").canonicalize().unwrap();
                 assert!(
@@ -166,6 +233,7 @@ mod tests {
                 );
             }
         }
+        assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
     }
 
     #[test]

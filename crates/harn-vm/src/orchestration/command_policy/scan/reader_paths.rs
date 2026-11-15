@@ -2,9 +2,18 @@
 
 use super::*;
 
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) enum PermissionReaderPath {
+    Known(String),
+    UnresolvedWorkingDirectory { operand: String },
+}
+
 /// The workspace remains the authority root. A command's cwd only locates its
 /// reader operands; it cannot substitute a new workspace boundary.
-pub(crate) fn permission_reader_paths(args: &JsonValue, workspace: &Path) -> Vec<String> {
+pub(crate) fn permission_reader_paths(
+    args: &JsonValue,
+    workspace: &Path,
+) -> Vec<PermissionReaderPath> {
     let context = serde_json::json!({"request": args});
     let argv = request_argv(&context).ok().flatten();
     let commands = if let Some(argv) = &argv {
@@ -47,11 +56,13 @@ pub(crate) fn permission_reader_paths(args: &JsonValue, workspace: &Path) -> Vec
         .ok()
         .and_then(Path::to_str);
     let mut paths = Vec::new();
+    let mut readers = Vec::new();
     if cwd.is_some() {
         paths.push(base.to_string_lossy().into_owned());
     }
     let dialect = request_shell_dialect(&context).dialect;
     for command in commands {
+        let mut unproven_directory = false;
         let planned = if let Some(argv) = &argv {
             simple_reader_paths(argv, &base)
         } else if let Some(paths) =
@@ -61,6 +72,13 @@ pub(crate) fn permission_reader_paths(args: &JsonValue, workspace: &Path) -> Vec
         } else if dialect == Some(crate::shells::ShellDialect::Posix) {
             relative.and_then(|relative| {
                 let steps = crate::shells::plan_posix_sequence(&command, relative)?;
+                // An earlier process can change directory entries used by a
+                // later cd. The plan describes cwd text, not their stability.
+                // Only a single process may benefit from a planned directory.
+                if steps.len() != 1 {
+                    unproven_directory = steps.iter().any(|step| step.cwd != relative);
+                    return None;
+                }
                 let mut planned = Vec::new();
                 for step in steps {
                     let directory = physical_workspace.join(&step.cwd);
@@ -77,17 +95,35 @@ pub(crate) fn permission_reader_paths(args: &JsonValue, workspace: &Path) -> Vec
         if let Some(planned) = planned {
             paths.extend(planned);
         } else {
-            // Unknown control flow retains the original candidates too. A
-            // guessed directory must never turn a former refusal into access.
+            // The original root is not a substitute for an unknown cwd: an
+            // inside-looking relative operand could actually name an outside
+            // file. Use canonical semantic stages, not command text matching.
+            unproven_directory |= dialect != Some(crate::shells::ShellDialect::Posix) || {
+                let analysis = super::super::catastrophic::analyze_shell_dialect(
+                    crate::shells::ShellDialect::Posix,
+                    &command,
+                );
+                analysis.unresolved
+                    || analysis.io_unresolved
+                    || analysis
+                        .stages
+                        .iter()
+                        .any(|stage| stage.argv.first().is_some_and(|name| name == "cd"))
+            };
             for operand in credential_read_path_candidates(&command) {
+                if unproven_directory && !Path::new(&operand).is_absolute() {
+                    readers.push(PermissionReaderPath::UnresolvedWorkingDirectory { operand });
+                    continue;
+                }
                 paths.push(workspace.join(&operand).to_string_lossy().into_owned());
                 paths.push(base.join(&operand).to_string_lossy().into_owned());
             }
         }
     }
-    paths.sort();
-    paths.dedup();
-    paths
+    readers.extend(paths.into_iter().map(PermissionReaderPath::Known));
+    readers.sort();
+    readers.dedup();
+    readers
 }
 
 fn literal_reader_paths(
