@@ -633,6 +633,7 @@ fn render_profile_with_extra_read_roots(
             let escaped = sandbox_profile_escape(&path);
             profile.push_str(&format!(
                 "(allow file-read* file-write* (subpath \"{escaped}\"))\n\
+                 (allow file-write-unlink (subpath \"{escaped}\"))\n\
                  (deny file-write-unlink (literal \"{escaped}\"))\n"
             ));
         }

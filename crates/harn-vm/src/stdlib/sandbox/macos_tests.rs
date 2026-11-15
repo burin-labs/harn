@@ -5,6 +5,73 @@
 use super::*;
 
 #[test]
+fn granted_write_subtree_allows_lock_rename_but_keeps_private_roots_pinned() {
+    use crate::stdlib::sandbox::workspace_env::grant_spawn;
+    let workspace = tempfile::tempdir().unwrap();
+    let roots = grant_spawn::spawn_roots(workspace.path());
+    let owned = grant_spawn::create_spawn_dir(&roots.writable, &[]).unwrap();
+    let other = grant_spawn::create_spawn_dir(&roots.writable, &[]).unwrap();
+    let repository = owned.path().join("repository");
+    std::fs::create_dir(&repository).unwrap();
+    let lock = repository.join("config.lock");
+    let config_path = repository.join("config");
+    let sibling = other.path().join("private-state");
+    std::fs::write(&lock, b"known repository config").unwrap();
+    std::fs::write(&sibling, b"unchanged sibling").unwrap();
+    let _launch = grant_spawn::OwnSpawnLaunch::begin_with_writes(
+        owned.path(),
+        std::slice::from_ref(&repository),
+    );
+    let mut policy = macos_policy_with_workspace_ops(&["write_text"]);
+    policy.workspace_roots = vec![workspace.path().display().to_string()];
+    let config = ProcessCommandConfig {
+        cwd: Some(workspace.path().to_path_buf()),
+        ..Default::default()
+    };
+    let run = |program: &str, args: Vec<String>| {
+        Backend::run_to_output(program, &args, &config, &policy, SandboxProfile::Worktree)
+    };
+    let rename = run(
+        "/bin/mv",
+        vec![
+            lock.display().to_string(),
+            config_path.display().to_string(),
+        ],
+    );
+    if crate::sandbox_host::assert_unavailable_result(&rename) {
+        return;
+    }
+    let output = rename.unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        std::fs::read(&config_path).unwrap(),
+        b"known repository config"
+    );
+    let moved = workspace.path().join("moved-repository");
+    assert!(!run(
+        "/bin/mv",
+        vec![
+            repository.display().to_string(),
+            moved.display().to_string()
+        ],
+    )
+    .unwrap()
+    .status
+    .success());
+    assert!(repository.is_dir());
+    assert!(!moved.exists());
+    assert!(!run("/bin/rm", vec![sibling.display().to_string()])
+        .unwrap()
+        .status
+        .success());
+    assert_eq!(std::fs::read(sibling).unwrap(), b"unchanged sibling");
+}
+
+#[test]
 fn sandbox_exec_missing_program_matches_direct_spawn_error() {
     let cwd = std::env::current_dir().expect("current dir");
     let mut policy = macos_policy_with_workspace_ops(&[]);
