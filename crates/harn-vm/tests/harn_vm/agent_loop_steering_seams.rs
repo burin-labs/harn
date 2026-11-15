@@ -48,6 +48,9 @@ mod stop;
 #[path = "agent_loop_steering_completion.rs"]
 mod completion;
 
+#[path = "workspace_anchor_delivery.rs"]
+mod workspace_anchor;
+
 /// Canonical session journals outlive a VM and may be shared by parallel test
 /// processes. Mint a process-local monotonic id for every pipeline invocation
 /// so repeated runs cannot rehydrate an earlier transcript without relying on
