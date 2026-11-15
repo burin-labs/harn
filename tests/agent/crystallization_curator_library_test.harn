@@ -1,7 +1,148 @@
 import { crystallization_curate } from "std/agent/crystallization_curator"
+import { pattern_learning_pending } from "std/agent/pattern_knowledge"
+import { pattern_learning_session_transcript } from "std/agent/pattern_knowledge_sessions"
+import { agent_tool_result_data } from "std/agent/tool_lifecycle"
+import { session_store_append } from "std/session-store"
 import { llm_calls, llm_tool_call, with_llm_script, with_temp_dir } from "std/testing"
 
 const CITED_RUNS = ["run-one", "run-two"]
+
+type SourceTranscript = {session_id: string, entries: list<{text: string}>}
+
+pipeline test_curator_can_read_clipped_source_with_a_bounded_transcript_query(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root: string ->
+      let source = "source"
+      for _index in range(10) {
+        source = "${source}${source}"
+      }
+      source = "${source}:complete source ending"
+      session_store_append(
+        harness.agent,
+        "source-session",
+        {transcript_event: {kind: "message", role: "user", visibility: "public", text: source}},
+        {root: root, kind_type: "message"},
+      )
+      const brief = pattern_learning_session_transcript(
+        harness.agent,
+        "source-session",
+        {session_store_root: root},
+      )
+      assert_eq(brief.state, "present")
+      assert_eq(brief.entry_count, 1)
+      assert_eq(brief.returned_count, 1)
+      for entry in brief.entries {
+        assert_eq(entry.content_truncated, true)
+        assert_eq(entry.entry_index, 0)
+        assert_eq(entry.content_chars, len(source))
+      }
+      const full = pattern_learning_session_transcript(
+        harness.agent,
+        "source-session",
+        {session_store_root: root},
+        {start_entry: 0, entry_limit: 1, text_limit: 12000},
+      )
+      assert_eq(full.returned_count, 1)
+      for entry in full.entries {
+        assert_eq(entry.kind, "message")
+        if entry.kind == "message" {
+          assert_eq(entry.text, source)
+        }
+        assert_eq(entry.content_truncated, false)
+      }
+      const absent = pattern_learning_session_transcript(
+        harness.agent,
+        "missing-session",
+        {session_store_root: path_join(root, "missing-store")},
+      )
+      assert_eq(absent.state, "absent")
+      const oversized = try {
+        pattern_learning_session_transcript(
+          harness.agent,
+          "source-session",
+          {session_store_root: root},
+          {entry_limit: 80, text_limit: 12000},
+        )
+      }
+      assert(is_err(oversized))
+    },
+  )
+}
+
+pipeline test_curator_reads_each_session_from_its_imported_source_store(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root: string ->
+      let evidence = []
+      for name in ["first", "second"] {
+        const source = path_join(root, name)
+        session_store_append(
+          harness.agent,
+          "session-${name}",
+          {transcript_event: {kind: "message", role: "user", visibility: "public", text: name}},
+          {root: source, kind_type: "message"},
+        )
+        evidence = evidence
+          + [
+            run_card("run-${name}", "session-${name}", [passed("make generate")])
+              + {session_store_root: source},
+          ]
+      }
+      let inspected: list<SourceTranscript> = []
+      with_llm_script(
+        harness.llm,
+        [
+          llm_tool_call("inspect_session_evidence", {session_id: "session-first"}),
+          llm_tool_call("inspect_session_evidence", {session_id: "session-second"}),
+          llm_tool_call("submit_crystallization_batch", {proposals: []}),
+        ],
+        { ->
+          const result = crystallization_curate(
+            harness,
+            {
+              project_root: root,
+              memory_root: path_join(root, "memory"),
+              session_store_root: path_join(root, "unrelated-store"),
+              evidence: evidence,
+              agent: {
+                provider: "mock",
+                model: "mock",
+                tool_format: "native",
+                max_iterations: 3,
+                tool_caller: { call: dict, next: fn(dict) -> dict ->
+                  const dispatched = next(call)
+                  if call.tool_name == "inspect_session_evidence" {
+                    inspected = inspected
+                      + [
+                        schema_expect(
+                          agent_tool_result_data(dispatched),
+                          schema_of(SourceTranscript),
+                        ),
+                      ]
+                  }
+                  return dispatched
+                },
+              },
+            },
+          )
+          assert_eq(result.proposal_count, 0)
+        },
+      )
+      assert_eq(
+        inspected.map({ item: SourceTranscript -> item.session_id }).to_list(),
+        ["session-first", "session-second"],
+      )
+      assert_eq(
+        inspected.map(
+          { item: SourceTranscript -> item.entries.map({ entry -> entry.text }).to_list() },
+        )
+          .to_list(),
+        [["first"], ["second"]],
+      )
+    },
+  )
+}
 
 fn run_card(id: string, session_id: string, ledger: list) -> dict {
   return {
@@ -435,12 +576,47 @@ pipeline test_curator_matches_the_effective_check_directory(harness: Harness) {
         submit_one(verify_tool("cd web && python3 codegen.py && npm test") + {name: "verify-web"}),
         declared + {declared_checks: [{intent: "test", command: "npm test", cwd: "web"}]},
       )
-      assert_eq(web.proposal_count, 2, "both correctly scoped proposals remain staged")
+      assert_eq(web.proposal_count, 1, "count only this newly submitted batch")
+      assert_eq(
+        len(
+          pattern_learning_pending(
+            harness,
+            {project_root: root, memory_root: path_join(root, "memory")},
+          ),
+        ),
+        2,
+        "both correctly scoped proposals remain staged",
+      )
       assert(
         web.proposals.any({ proposal -> proposal.name == "verify-web" }),
         "an earlier cd still applies after a prerequisite",
       )
       return nil
+    },
+  )
+}
+
+/** Empty optional steps still request a general tool scaffold. */
+@heavy(threads: 1)
+pipeline test_curator_empty_sequence_uses_the_general_tool_scaffold(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root: string ->
+      const result = curate_with(
+        harness,
+        root,
+        [
+          llm_tool_call(
+            "scaffold_harn_tool",
+            {name: "create-file", description: "Create a checked file", steps: [], fast_steps: []},
+          ),
+          llm_tool_call("submit_crystallization_batch", {proposals: []}),
+        ],
+        {},
+      )
+      assert(result.agent_result.tools.successful.contains("scaffold_harn_tool"))
+      assert_eq(result.agent_result.tools.rejected, [])
+      assert_eq(result.proposal_count, 0)
     },
   )
 }
@@ -545,7 +721,9 @@ fn recoveries_shown_to_the_model(harness: Harness, root: string, evidence: list)
         },
       )
       const prompt = json_stringify(llm_calls(harness.llm))
-      return prompt.split("<repeated_recoveries>")[1].split("</repeated_recoveries>")[0]
+      const parts = prompt.split("<repeated_recoveries>")
+      require len(parts) == 2, "the request must contain the recovery evidence section"
+      return unwrap(unwrap(parts[1]).split("</repeated_recoveries>")[0])
     },
   )
 }

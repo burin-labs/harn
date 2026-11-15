@@ -9,7 +9,7 @@ mod capability_invocation;
 pub(crate) use approval_rules::first_sensitive_path;
 pub(crate) use approval_rules::PolicyAuthorityRequest;
 pub use capability_invocation::enforce_current_policy_for_capability;
-pub(crate) use capability_invocation::scope_read_only_invocation;
+pub(crate) use capability_invocation::{scope_read_only_effects, scope_read_only_invocation};
 mod consent_capability;
 pub(crate) use consent_capability::{is_policy_machinery_consent_call, CONSENT_CAPABILITY};
 mod effects;

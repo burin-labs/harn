@@ -20,6 +20,30 @@ const SKIP_SEGMENTS = [
 
 const PYTHON_ALLOWLIST = [
   {
+    kind: "prefix",
+    pattern: "experiments/learned-dispatch/project/",
+    category: "subprocess-fixture",
+    owner: "Learned workflow execution qualification",
+    reason:
+      "The Python HTTP application and unittest suite are the foreign project exercised by the reviewed executable.",
+  },
+  {
+    kind: "exact",
+    pattern: "experiments/learned-dispatch/grade.py",
+    category: "foreign-runtime-adapter",
+    owner: "Learned workflow execution qualification",
+    reason:
+      "Imports the generated Python resource and runs its real App handlers and stock unittest discovery; Harn owns qualification.",
+  },
+  {
+    kind: "exact",
+    pattern: "experiments/learned-dispatch/calibrate_grader.py",
+    category: "subprocess-fixture",
+    owner: "Learned workflow execution qualification",
+    reason:
+      "Checks real Python implementations and a boolean-as-integer mutant against the independent foreign-runtime grader.",
+  },
+  {
     kind: "exact",
     pattern: "scripts/lib/target_gc_incremental.py",
     category: "foreign-runtime-bootstrap",

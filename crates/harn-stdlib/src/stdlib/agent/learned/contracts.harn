@@ -1,0 +1,116 @@
+import {
+  DecisionDefinition,
+  DecisionEvidence,
+  DecisionNonMatch,
+  DecisionPolicy,
+} from "std/decision"
+import { SelectiveRiskOptions, SelectiveRiskReport } from "std/eval/selective_risk"
+import { LlmCallOptions } from "std/llm/options"
+import { BooleanQuestion, EvaluationOutcome, EvaluationPolicy } from "std/predicate"
+import { ToolCatalogEntry } from "std/tools"
+
+/** Reviewed executable coordinates over the ordinary tool catalog. */
+pub type LearnedCapability = {
+  id: string,
+  meaning: string,
+  tool: ToolCatalogEntry,
+  preflight_tool?: ToolCatalogEntry,
+  package_digest: string,
+  project_digest: string,
+  verification_digest: string,
+  minimum_probability: float,
+}
+
+pub type LearnedRequest = {request: string}
+
+pub type LearnedExecutionEvidence = {kind: "not_run"} \
+  | {kind: "failed", receipt: string, workspace_digest: string} \
+  | {kind: "passed", receipt: string, workspace_digest: string}
+
+/** One end-to-end observation, including every committed tool call's outcome. */
+pub type LearnedTrial = {
+  id: string,
+  expected: string,
+  selected: string,
+  confidence: float,
+  abstained: bool,
+  execution: LearnedExecutionEvidence,
+}
+
+/** Assessment is advisory; commitment begins after argument and preflight checks. */
+pub type LearnedObservation = {
+  id: string,
+  expected: string,
+  assessment: LearnedAssessment,
+  binding?: EvaluationOutcome,
+  disposition: {kind: "abstained", reason: string} \
+    | {kind: "committed", capability_id: string, decision_receipt: string, binding_receipt: string},
+  execution: LearnedExecutionEvidence,
+}
+
+pub type LearnedPreflight = {kind: "ready"} | {kind: "declined", reason: string}
+
+pub type LearnedBindingState = {
+  request: string,
+  capability_id: string,
+  capability_meaning: string,
+  input_schema_json: string,
+  arguments_json: string,
+}
+
+pub type LearnedBindingRequest = {
+  site_id: string,
+  state: LearnedBindingState,
+  questions: {faithful: BooleanQuestion},
+  policy: EvaluationPolicy,
+}
+
+pub type LearnedIdentity = {
+  definition_digest: string,
+  capabilities_digest: string,
+  evaluator_revision: string,
+  binding_digest: string,
+  runtime_digest: string,
+  grader_digest: string,
+  population: string,
+}
+
+pub type LearnedQualification = {
+  contract: "harn.learned_qualification.v1",
+  identity: LearnedIdentity,
+  trials_digest: string,
+  report: SelectiveRiskReport,
+  executed: int,
+  failed: int,
+  negatives: int,
+}
+
+pub type LearnedAssessment = {
+  kind: "selected",
+  capability: LearnedCapability,
+  evidence: DecisionEvidence,
+} \
+  | {kind: "unqualified", reason: string} \
+  | DecisionNonMatch
+
+pub type LearnedDispatcherOptions = {
+  id: string,
+  instructions: string,
+  capabilities: list<LearnedCapability>,
+  policy: DecisionPolicy,
+  evaluator_revision: string,
+  binding: LlmCallOptions,
+  runtime_digest: string,
+  grader_digest: string,
+  population: string,
+}
+
+pub type LearnedDispatcher = {
+  definition: DecisionDefinition,
+  identity: LearnedIdentity,
+  binding: LlmCallOptions,
+  probe: fn(HarnessLlm, LearnedRequest) -> LearnedAssessment,
+  assess: fn(HarnessLlm, LearnedRequest, LearnedQualification?) -> LearnedAssessment,
+}
+
+pub type LearnedQualificationOptions = {risk: SelectiveRiskOptions}

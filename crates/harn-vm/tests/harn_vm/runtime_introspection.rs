@@ -280,6 +280,7 @@ fn snapshot_does_not_leak_outside_allowlist() {
     let value = introspection::snapshot_to_vm_value(introspection::current_snapshot().as_ref());
     let dict = value.as_dict().expect("dict");
     let allowed: std::collections::BTreeSet<&str> = [
+        "runtime_content_fingerprint",
         "harn_version",
         "harness",
         "provider",

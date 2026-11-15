@@ -1,0 +1,97 @@
+{
+  "contract": "harn.learned_dispatch_study_result.v3",
+  "protocol": "protocol-v3.json",
+  "corpus": "corpus-v3.json",
+  "runtime_source": "ec047c065524af8a74dac6348b4366c2e64996af",
+  "qualification": {
+    "verdict": "admitted",
+    "trials": 150,
+    "positive_cases": 120,
+    "negative_cases": 30,
+    "assessment_selected": 84,
+    "incompatible_assessment_selected": 12,
+    "committed": 54,
+    "verified_correct_outputs": 54,
+    "committed_errors": 0,
+    "committed_incompatible_requests": 0,
+    "positive_commitment_coverage": 0.45,
+    "overall_commitment_coverage": 0.36,
+    "fallback_reasons": {
+      "uncertain": 66,
+      "binding_uncertain": 18,
+      "incomplete_arguments": 5,
+      "preflight_declined": 7
+    },
+    "completed_runs": 150,
+    "ordinary_fallback_not_completed": [],
+    "pending": 0,
+    "collection_failures": [],
+    "accepted_error_upper_bound": 0.05396576709837627,
+    "target_error": 0.1,
+    "delta": 0.05,
+    "threshold": 0.9,
+    "provider_cost_usd": 0.442912783,
+    "report_digest": "184d64fe18715feba6a05b8922d99fa7f2727872ecd62ed712c60dcf72eb8f39",
+    "trials_digest": "ac647af511665fa967326a705f98e9b76c3d0cc92f8ee972ad04f0ffb186bc76",
+    "candidate_freeze_sha256": "f2d622467e2a5003d67e3f3b864d7698b886c459ce99212ef3d63a7eb612038b",
+    "frozen_input_readback": "Both executable hashes and all frozen pipeline, project, capability, skill, candidate, protocol, corpus, grader, launcher and collector inputs matched after collection. No measured result was replaced."
+  },
+  "ordinary_execution": {
+    "trial_flag": false,
+    "execution_mode": "qualified",
+    "qualification_digest": "ac647af511665fa967326a705f98e9b76c3d0cc92f8ee972ad04f0ffb186bc76",
+    "independent_request_checks": 34,
+    "generated_tests_discovered": true,
+    "real_http_checks": 6,
+    "persisted_completed": true,
+    "physical_calls": 4,
+    "provider_cost_usd": 0.000780551,
+    "wall_ms": 16595,
+    "observed_event_phase_spans_ms": {
+      "run_start_to_preflight": 10745,
+      "preflight_to_mutation_dispatch": 1355,
+      "mutation_dispatch_to_verified": 2403,
+      "verified_to_run_terminal": 7,
+      "outside_observed_run_span": 2085
+    },
+    "timing_scope": "Spans use canonical persisted event timestamps. Setup and judgment are combined before preflight; individual provider latency is unmeasured. The residual is reported separately."
+  },
+  "matched_ordinary_caller": {
+    "same_available_tools": true,
+    "same_request_and_identical_output_files": true,
+    "independent_request_checks": 34,
+    "persisted_completed": true,
+    "physical_calls": 6,
+    "provider_cost_usd": 0.00315599,
+    "wall_ms": 33016
+  },
+  "controls": {
+    "approval": "A parked learned mutation ran after an explicit one-use grant and passed all 34 independent checks.",
+    "stop": "The parked ask matched a canonical local learned-generation receipt. Cancellation ended as user_cancelled without changing the isolated workspace.",
+    "steer": "The parked ask matched a canonical local learned-generation receipt. Steer refused the late grant, changed no files, and naturally completed the replacement objective.",
+    "measurement_negative_control": "An earlier steer probe reached an ordinary fallback call after binding declined. The receipt-correlating verifier refused to credit it as learned execution. Its result and cost were retained separately.",
+    "argument_interception": "The actual pre-tool hook fired in both deterministic controls. Unchanged arguments reached the handler; rewritten arguments produced execution_contract_changed before handler dispatch.",
+    "http_negative_control": "The old wrong-name workspace returned 404 for the requested route. A correct workspace passed the same six real HTTP checks."
+  },
+  "integrated_runtime_compatibility": {
+    "runtime_source": "b60b82b41050d68df807e3d48635cf56f8e69dca",
+    "scope": "Separate development smoke after integrating the newer shared tool-wire boundary; not an extension of the qualification cohort.",
+    "trial_execution": {
+      "independent_request_checks": 34,
+      "generated_tests_discovered": true,
+      "persisted_completed": true,
+      "physical_calls": 4,
+      "provider_cost_usd": 0.000853951,
+      "wall_ms": 28253
+    },
+    "older_report_refusal": {
+      "reason": "stale_qualification",
+      "learned_inference_calls": 0,
+      "measured_physical_calls": 7,
+      "provider_cost_usd": 0.003378875,
+      "ordinary_fallback_completed": true
+    }
+  },
+  "interpretation": "The prespecified candidate passed this bounded synthetic study. Both earlier failed reports remain refused. Only 45 percent of compatible requests committed to the learned path; the others used ordinary fallback. Completion of fallback runs does not independently grade their requested behavior.",
+  "limits": "Related synthetic case templates, one small application and one reviewed generator; no IID deployment sample or production reliability guarantee. The matched execution comparison is a small observational sample. A separate development smoke took 33782 ms, so these timings do not establish a general latency improvement. Qualification binds the measured artifacts and must be refreshed when their execution identity changes."
+}

@@ -158,11 +158,29 @@ impl McpScriptRegistry {
     }
 
     pub fn surface(&self) -> McpScriptSurface {
+        let mut tools = self.tools.prepared().mcp_tools().to_vec();
+        let runtime = serde_json::to_value(crate::runtime_content_fingerprint())
+            .expect("runtime content fingerprint is JSON");
+        for tool in &mut tools {
+            let metadata = tool
+                .as_object_mut()
+                .expect("prepared MCP tool is an object")
+                .entry("_meta")
+                .or_insert_with(|| serde_json::json!({}))
+                .as_object_mut()
+                .expect("prepared MCP metadata is an object");
+            // This names the serving process, so authored metadata cannot
+            // substitute a different runtime or a mutable launcher probe.
+            metadata.insert(
+                crate::runtime_content::MCP_RUNTIME_CONTENT_META_KEY.into(),
+                runtime.clone(),
+            );
+        }
         McpScriptSurface {
             server_name: self.server_name.clone(),
             server_version: self.server_version.clone(),
             instructions: self.instructions.clone(),
-            tools: self.tools.prepared().mcp_tools().to_vec(),
+            tools,
             task_support: self
                 .tools
                 .iter()

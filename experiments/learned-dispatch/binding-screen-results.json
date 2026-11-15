@@ -1,0 +1,126 @@
+{
+  "contract": "harn.learned_binding_screen.v1",
+  "model": "vercel/typesafe-ai/jev-1.14.0",
+  "development_scope": "Four observed requests from prior development and the failed v2 study; correct mappings, substituted resource names, and swapped integer/boolean roles. These are development controls for a new candidate, not qualification cases.",
+  "runs": [
+    {
+      "run": 1,
+      "question_revision": 0,
+      "question_sha256": "797b1e2312d3cc2ffea7ea408114a4c8fb9e0009ccf676af298dcf045875a45d",
+      "response_sha256": "0ec314e0dbc03ea23d1b29b3e79ced2cc1b676172b872484c37b868fbdf08c3c",
+      "physical_calls": 36,
+      "positive": 12,
+      "negative": 24,
+      "provider_cost_usd": 0.00096453,
+      "thresholds": [
+        {
+          "threshold": 0.8,
+          "accepted_positive": 0,
+          "accepted_negative": 0
+        },
+        {
+          "threshold": 0.9,
+          "accepted_positive": 0,
+          "accepted_negative": 0
+        },
+        {
+          "threshold": 0.95,
+          "accepted_positive": 0,
+          "accepted_negative": 0
+        }
+      ]
+    },
+    {
+      "run": 2,
+      "question_revision": 1,
+      "question_sha256": "c4767b04a805eea6bfc2a5c92670835b7708dbd8569bfd3a26db8aea3004119c",
+      "response_sha256": "b4934eb323ae6e6ac41703b484a153f9e38c41d6276196d3f21eebbead604b54",
+      "physical_calls": 36,
+      "positive": 12,
+      "negative": 24,
+      "provider_cost_usd": 0.001065834,
+      "thresholds": [
+        {
+          "threshold": 0.8,
+          "accepted_positive": 12,
+          "accepted_negative": 4
+        },
+        {
+          "threshold": 0.9,
+          "accepted_positive": 9,
+          "accepted_negative": 3
+        },
+        {
+          "threshold": 0.95,
+          "accepted_positive": 3,
+          "accepted_negative": 0
+        }
+      ]
+    },
+    {
+      "run": 3,
+      "question_revision": 2,
+      "question_sha256": "422311a2d24b3eabd284caa0b1c5eeb87732a787dd103a1bf39b5c27cf122e4e",
+      "response_sha256": "63e849617bf53366a31b62bc1bc30907853f8eaa14d5be649b451fe41890e7e1",
+      "physical_calls": 36,
+      "positive": 12,
+      "negative": 24,
+      "provider_cost_usd": 0.0011656260000000001,
+      "thresholds": [
+        {
+          "threshold": 0.8,
+          "accepted_positive": 11,
+          "accepted_negative": 3
+        },
+        {
+          "threshold": 0.9,
+          "accepted_positive": 9,
+          "accepted_negative": 0
+        },
+        {
+          "threshold": 0.95,
+          "accepted_positive": 4,
+          "accepted_negative": 0
+        }
+      ]
+    },
+    {
+      "run": 4,
+      "question_revision": 2,
+      "question_sha256": "422311a2d24b3eabd284caa0b1c5eeb87732a787dd103a1bf39b5c27cf122e4e",
+      "response_sha256": "3445da8a226693d9aebae6172612363b5a78d7ec2c5f8ff69b37e0489f679f59",
+      "physical_calls": 120,
+      "positive": 40,
+      "negative": 80,
+      "provider_cost_usd": 0.00388542,
+      "thresholds": [
+        {
+          "threshold": 0.8,
+          "accepted_positive": 35,
+          "accepted_negative": 13
+        },
+        {
+          "threshold": 0.9,
+          "accepted_positive": 30,
+          "accepted_negative": 0
+        },
+        {
+          "threshold": 0.95,
+          "accepted_positive": 14,
+          "accepted_negative": 0
+        }
+      ]
+    }
+  ],
+  "selected": {
+    "question_revision": 2,
+    "minimum_probability": 0.9,
+    "expanded_screen": {
+      "correct_accepted": 30,
+      "correct_total": 40,
+      "wrong_accepted": 0,
+      "wrong_total": 80
+    }
+  },
+  "limits": "A finite development screen. No claim of perfect semantic understanding or production accuracy. A fresh execution study must grade committed effects; the failed v2 result stays failed."
+}

@@ -27,12 +27,14 @@ import "std/agent/loop_tool_calls"
 import "std/agent/loop_turn_options"
 import "std/agent/loop_turn_scope"
 import { __agent_loop_turn_setup } from "std/agent/loop_turn_setup"
+import { completion_obligations_from_control_events } from "std/agent/obligations"
 import {
   __agent_stall_resume_edit_history,
   __agent_stall_validate_checkpoint,
   __agent_stall_verification_dispatch,
   agent_stall_initial_checkpoint,
 } from "std/agent/stall_checkpoint"
+import { agent_session_control_events } from "std/agent/state"
 
 @complexity(allow)
 pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_opts: any) {
@@ -84,6 +86,8 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
     // distinct-tool counts and would mislabel a call count if reported as one.
     let tool_calls_attempted = 0
     let tool_calls_succeeded = 0
+    let completion_control_id = ""
+    let completion_tool_baseline = {attempted: 0, succeeded: 0}
     let last_tool_rejection_category = nil
     let suspend_result = nil
     let abandonment = nil
@@ -177,6 +181,18 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           break
         }
         const iteration_index = setup.iteration_index
+        const obligations = completion_obligations_from_control_events(
+          agent_session_control_events(harness.agent, session.session_id),
+          to_string(message),
+        )
+        const retarget_id = obligations.retarget?.control_id ?? ""
+        if retarget_id != "" && retarget_id != completion_control_id {
+          completion_control_id = retarget_id
+          completion_tool_baseline = {
+            attempted: tool_calls_attempted,
+            succeeded: tool_calls_succeeded,
+          }
+        }
         const turn_opts = setup.turn_opts
         const turn_llm_opts = setup.turn_llm_opts
         const turn_prompt = setup.turn_prompt
@@ -1116,6 +1132,10 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
           rejected_tools_seen: rejected_tools_seen,
           tool_calls_attempted: tool_calls_attempted,
           tool_calls_succeeded: tool_calls_succeeded,
+          completion_tool_calls_attempted: tool_calls_attempted \
+            - completion_tool_baseline.attempted,
+          completion_tool_calls_succeeded: tool_calls_succeeded \
+            - completion_tool_baseline.succeeded,
           last_tool_rejection_category: last_tool_rejection_category,
           feedback_history: feedback_history,
         },

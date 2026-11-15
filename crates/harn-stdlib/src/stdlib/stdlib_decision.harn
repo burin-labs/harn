@@ -1,5 +1,5 @@
 pub import "std/decision/contracts"
-import { EvaluationOutcome, boolean, choice } from "std/predicate"
+import { BooleanQuestion, ChoiceQuestion, EvaluationOutcome, boolean, choice } from "std/predicate"
 import { schema_contract_check } from "std/schema"
 
 const APPLICABILITY_INSTRUCTIONS =
@@ -51,8 +51,28 @@ fn evidence(definition: DecisionDefinition, evaluation: EvaluationOutcome) -> De
     throw "std/decision: evidence requires an answered evaluation"
   }
   const applicable = evaluation.value.applicable
+  guard applicable.kind == "boolean" else {
+    throw "std/decision: evaluator returned incompatible applicability question kind"
+  }
+  if len(definition.routes) == 1 {
+    const route = definition.routes[0]
+    guard route != nil else {
+      throw "std/decision: missing sole route"
+    }
+    return {
+      definition_id: definition.id,
+      definition_digest: definition.digest,
+      receipt: evaluation.receipt,
+      applicability_probability: applicable.probability,
+      applicability_confidence_kind: applicable.confidence_kind,
+      route: route.name,
+      route_probability: 1.0,
+      route_confidence_kind: "not_required",
+      margin: 1.0,
+    }
+  }
   const answer = evaluation.value.route
-  guard applicable.kind == "boolean" && answer.kind == "choice" else {
+  guard answer.kind == "choice" else {
     throw "std/decision: evaluator returned incompatible question kinds"
   }
   let selected_probability = 0.0
@@ -83,6 +103,9 @@ fn assess<T>(
   input_contract: SchemaContract<T>,
   definition: DecisionDefinition,
 ) -> DecisionAssessment<T> {
+  if len(definition.routes) == 0 {
+    return {kind: "no_routes"}
+  }
   const checked = schema_contract_check(raw, input_contract)
   const input: T = match checked {
     Ok(value) -> { value }
@@ -122,7 +145,9 @@ fn assess<T>(
 /**
  * Bind typed handlers to their meanings once. Construction validates policy;
  * assessment validates input once and makes one ordinary evaluator request.
- * Only a matched assessment can invoke a handler. Handler failures propagate
+ * Empty routers abstain without inference. A single route asks only about
+ * applicability; its route probability is a structural identity, not a model
+ * confidence. Only a matched assessment can invoke a handler. Handler failures propagate
  * without retries. Assessment alone never invokes a handler.
  *
  * @effects: []
@@ -130,8 +155,8 @@ fn assess<T>(
  */
 pub fn router<T, R>(options: DecisionRouterOptions<T, R>) -> DecisionRouter<T, R> {
   validate_policy(options.policy)
-  if trim(options.id) == "" || trim(options.instructions) == "" || len(options.routes) < 2 {
-    throw "std/decision: id, instructions, and at least two routes are required"
+  if trim(options.id) == "" || trim(options.instructions) == "" {
+    throw "std/decision: id and instructions are required"
   }
   let meanings: dict<string, string> = {}
   let definitions: list<DecisionRouteDefinition> = []
@@ -147,9 +172,12 @@ pub fn router<T, R>(options: DecisionRouterOptions<T, R>) -> DecisionRouter<T, R
     handlers[route.name] = route.handle
     definitions = definitions + [pick(route, ["name", "meaning", "minimum_probability"])]
   }
-  const questions = {
+  let questions: {applicable: BooleanQuestion, route?: ChoiceQuestion} = {
     applicable: boolean("${options.instructions}\n${APPLICABILITY_INSTRUCTIONS}"),
-    route: choice("${options.instructions}\n${ROUTE_INSTRUCTIONS}", meanings),
+  }
+  if len(options.routes) > 1 {
+    questions = questions
+      + {route: choice("${options.instructions}\n${ROUTE_INSTRUCTIONS}", meanings)}
   }
   const input_schema_digest = sha256(
     json_stringify(

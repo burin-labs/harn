@@ -1,10 +1,82 @@
 use super::*;
 
+#[tokio::test]
+async fn declared_read_only_policy_blocks_mcp_handler_writes_but_hints_do_not() {
+    use crate::tool_annotations::{SideEffectLevel, ToolKind};
+    for effect in [
+        None,
+        Some(SideEffectLevel::ReadOnly),
+        Some(SideEffectLevel::WorkspaceWrite),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("effect.txt");
+        let mut vm = crate::new_vm();
+        crate::register_vm_stdlib(&mut vm);
+        vm.set_harness(crate::Harness::real());
+        let harness = vm.root_harness_value().unwrap();
+        let factory = compiled_closure(
+            "make",
+            r#"
+          fn make(harness: Harness) {
+            return { input: dict ->
+              harness.fs.write_text(input.path, "written")
+              return "written"
+            }
+          }
+        "#,
+        );
+        let VmValue::Closure(handler) = vm.call_closure_pub(&factory, &[harness]).await.unwrap()
+        else {
+            panic!("factory must return a handler");
+        };
+        let mut tool = tool_def(
+            "write",
+            "Try a write",
+            None,
+            crate::mcp_tasks::McpTaskSupport::Forbidden,
+        );
+        tool.handler = (*handler).clone();
+        tool.catalog.annotations =
+            Some(serde_json::from_value(serde_json::json!({"readOnlyHint": true})).unwrap());
+        tool.catalog.policy = effect.map(|side_effect_level| crate::tool_registry::ToolPolicy {
+            kind: ToolKind::Read,
+            side_effect_level,
+            source: crate::tool_registry::ToolPolicySource::Declared,
+        });
+        let registry = script_registry(tool_set(vec![tool]));
+        let response = registry
+            .call_tool(
+                &serde_json::json!(1),
+                &serde_json::json!({
+                    "name": "write", "arguments": {"path": path.to_str().unwrap()}
+                }),
+                &mut vm,
+                None,
+                false,
+            )
+            .await;
+        let refused = effect == Some(SideEffectLevel::ReadOnly);
+        assert_eq!(
+            response["result"]["isError"].as_bool().unwrap_or(false),
+            refused,
+            "{response}"
+        );
+        assert_eq!(path.exists(), !refused, "{response}");
+        if !refused {
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "written");
+        }
+    }
+}
+
 fn throwing_closure(name: &str) -> VmClosure {
     let source = format!(
         "type LookupError = {{variant: \"NotFound\", message: string}}\nfn {name}(input: dict) throws LookupError {{ throw {{variant: \"NotFound\", message: \"PRIVATE-CUSTOMER-DIAGNOSTIC-123456\"}} }}"
     );
-    let program = harn_parser::check_source_strict(&source).expect("valid throwing function");
+    compiled_closure(name, &source)
+}
+
+fn compiled_closure(name: &str, source: &str) -> VmClosure {
+    let program = harn_parser::check_source_strict(source).expect("valid tool function");
     let chunk = crate::compiler::Compiler::new()
         .compile(&program)
         .expect("compile throwing function");
@@ -22,6 +94,48 @@ fn throwing_closure(name: &str) -> VmClosure {
         module_state: None,
         retained_module_scope: None,
     }
+}
+
+#[tokio::test]
+async fn success_receipt_without_output_schema_survives_inline_and_task_mcp() {
+    let mut tool = tool_def(
+        "scaffold",
+        "Create a resource",
+        None,
+        crate::mcp_tasks::McpTaskSupport::Optional,
+    );
+    tool.handler = compiled_closure(
+        "scaffold",
+        r#"
+        fn scaffold(input: dict) {
+          return {
+            schema: "harn.agent_tool_handler_result.v2", outcome: "ok",
+            text: "Created and checked the resource.",
+            data: {mutation_status: "applied", changed_paths: ["resources/widgets.py"],
+              verification: {status: "verified", verified_paths: ["resources/widgets.py"]}},
+          }
+        }
+    "#,
+    );
+    let registry = script_registry(tool_set(vec![tool]));
+    assert!(registry.surface().tools[0].get("outputSchema").is_none());
+    let params = serde_json::json!({"name": "scaffold", "arguments": {}});
+    let inline = call(&registry, params.clone(), false).await;
+    let task = call(&registry, params, true).await;
+    assert_eq!(inline["result"], task["result"]);
+    assert_eq!(inline["result"]["isError"], false);
+    assert_eq!(
+        inline["result"]["content"][0]["text"],
+        "Created and checked the resource."
+    );
+    assert_eq!(
+        inline["result"]["structuredContent"]["mutation_status"],
+        "applied"
+    );
+    assert_eq!(
+        inline["result"]["structuredContent"]["verification"]["status"],
+        "verified"
+    );
 }
 
 #[tokio::test]

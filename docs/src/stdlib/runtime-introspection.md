@@ -60,7 +60,7 @@ thread populates the snapshot.
 | `current_model`                 | `{model, model_alias, family, tier, resolved}`                     |
 | `current_provider`              | `{provider, tool_format, resolved}`                                |
 | `current_context_window`        | `{context_window, runtime_context_window, resolved}` (token counts) |
-| `current_harn_version`          | `{harn_version}` — embedded `HARN_VERSION` from the build          |
+| `current_harn_version`          | `{harn_version, runtime_content_fingerprint}`; [linked content receipt](../runtime-content-fingerprint.md) |
 | `current_harness`               | `{harness}` — host shell embedding the runtime                     |
 | `available_runtime_capabilities` | `{capabilities, resolved}` — provider/model capability matrix     |
 | `current_compaction_policy`     | `{policy}` — transcript compaction policy (engine default today)   |
@@ -92,7 +92,7 @@ harness.stdio.log("harn=" + to_string(snap.harn_version))
 ```
 
 All fields are `nil` until at least one `harness.llm.call` has run on the
-thread; `harn_version` and `harness` are always populated.
+thread; `harn_version`, `harness`, and `runtime_content_fingerprint` are always populated.
 
 ## Configuring the harness identity
 
@@ -117,7 +117,7 @@ knows internally:
 ```text
 harn_version, harness, provider, model, model_alias, family,
 tool_format, tier, context_window, runtime_context_window,
-capabilities
+capabilities, runtime_content_fingerprint
 ```
 
 The introspection bundle deliberately does **not** surface:

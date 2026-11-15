@@ -1,0 +1,1605 @@
+{
+  "contract": "harn.learned_dispatch_corpus.v3",
+  "development": [
+    {
+      "id": "development-positive-00",
+      "resource": "widgets",
+      "fields": {
+        "label": "string",
+        "quantity": "integer",
+        "active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard widgets resource with label (string), quantity (integer), active (boolean). Add the resource module, dispatch tests and API documentation using this application's existing App conventions."
+    },
+    {
+      "id": "development-positive-01",
+      "resource": "reading_groups",
+      "fields": {
+        "display_name": "string",
+        "member_count": "integer",
+        "is_open": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add a repository-standard in-memory reading_groups resource: is_open (boolean), member_count (integer), display_name (string). Generate its auto-mounted module, request tests, and API documentation. Preserve the host and dependencies."
+    },
+    {
+      "id": "development-positive-02",
+      "resource": "sensors",
+      "fields": {
+        "location": "string",
+        "revision": "integer",
+        "enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold sensors, including its module, tests and documentation. Its fields are location (string), revision (integer), enabled (boolean). Use the existing standard POST/GET App pattern with strict payload validation and per-App storage."
+    },
+    {
+      "id": "development-positive-03",
+      "resource": "stock_items",
+      "fields": {
+        "description": "string",
+        "remaining": "integer",
+        "available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need a standard stock_items resource for this App: available (boolean), remaining (integer), description (string). Create app/resources/stock_items.py, tests/test_stock_items.py and docs/stock_items.md, following the current in-memory resource contract."
+    },
+    {
+      "id": "development-positive-04",
+      "resource": "projects",
+      "fields": {
+        "title": "string",
+        "priority": "integer",
+        "archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard projects resource with title (string), priority (integer), archived (boolean). Add the resource module, dispatch tests and API documentation using this application's existing App conventions."
+    },
+    {
+      "id": "development-positive-05",
+      "resource": "tickets",
+      "fields": {
+        "summary": "string",
+        "severity": "integer",
+        "resolved": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add a repository-standard in-memory tickets resource: resolved (boolean), severity (integer), summary (string). Generate its auto-mounted module, request tests, and API documentation. Preserve the host and dependencies."
+    },
+    {
+      "id": "development-positive-06",
+      "resource": "notebooks",
+      "fields": {
+        "owner": "string",
+        "page_count": "integer",
+        "shared": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold notebooks, including its module, tests and documentation. Its fields are owner (string), page_count (integer), shared (boolean). Use the existing standard POST/GET App pattern with strict payload validation and per-App storage."
+    },
+    {
+      "id": "development-positive-07",
+      "resource": "locations",
+      "fields": {
+        "address": "string",
+        "capacity": "integer",
+        "accessible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need a standard locations resource for this App: accessible (boolean), capacity (integer), address (string). Create app/resources/locations.py, tests/test_locations.py and docs/locations.md, following the current in-memory resource contract."
+    },
+    {
+      "id": "development-negative-00",
+      "expected": "",
+      "request": "Explain how I could create a standard widgets resource with label string, quantity integer, and active boolean. Do not edit files."
+    },
+    {
+      "id": "development-negative-01",
+      "expected": "",
+      "request": "Create a widgets resource with label string, quantity integer, active boolean, and SQLite persistence."
+    },
+    {
+      "id": "development-negative-02",
+      "expected": "",
+      "request": "Create both widgets and labels resources, each with name string, count integer and enabled boolean."
+    },
+    {
+      "id": "development-negative-03",
+      "expected": "",
+      "request": "Modify the existing books resource to add an enabled boolean field."
+    },
+    {
+      "id": "development-negative-04",
+      "expected": "",
+      "request": "Create a widgets resource with label string, quantity integer and active boolean, and remove /health."
+    },
+    {
+      "id": "development-negative-05",
+      "expected": "",
+      "request": "Create a widgets resource with label string, description string and active boolean."
+    },
+    {
+      "id": "development-negative-06",
+      "expected": "",
+      "request": "Create a measurements resource with label string, value float and active boolean."
+    },
+    {
+      "id": "development-negative-07",
+      "expected": "",
+      "request": "Create a widgets resource with label string, quantity integer and active boolean, protected by authentication."
+    }
+  ],
+  "qualification": [
+    {
+      "id": "qualification-v3-positive-000",
+      "resource": "members",
+      "fields": {
+        "display_label": "string",
+        "capacity": "integer",
+        "is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard members resource with display_label (string), capacity (integer), and is_enabled (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v3-positive-001",
+      "resource": "workers",
+      "fields": {
+        "reference_code": "string",
+        "sequence_number": "integer",
+        "is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named workers. Fields: is_visible boolean, reference_code string, sequence_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v3-positive-002",
+      "resource": "rooms",
+      "fields": {
+        "short_title": "string",
+        "revision_number": "integer",
+        "is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold rooms: revision_number is an integer, is_ready is a boolean, and short_title is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v3-positive-003",
+      "resource": "prompts",
+      "fields": {
+        "description_text": "string",
+        "priority_level": "integer",
+        "is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/prompts.py, tests/test_prompts.py, and docs/prompts.md for a new standard prompts resource. Its exact fields are description_text: string, priority_level: integer, is_archived: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v3-positive-004",
+      "resource": "periods",
+      "fields": {
+        "owner_name": "string",
+        "total_count": "integer",
+        "is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add periods with the string field owner_name, integer field total_count, and boolean field is_public. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v3-positive-005",
+      "resource": "platforms",
+      "fields": {
+        "category_name": "string",
+        "sort_rank": "integer",
+        "is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new platforms resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly is_available (boolean), sort_rank (integer), and category_name (string), with strict types."
+    },
+    {
+      "id": "qualification-v3-positive-006",
+      "resource": "browsers",
+      "fields": {
+        "external_key": "string",
+        "retry_limit": "integer",
+        "is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard browsers resource with external_key (string), retry_limit (integer), and is_active (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v3-positive-007",
+      "resource": "requests",
+      "fields": {
+        "summary_text": "string",
+        "version_number": "integer",
+        "is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named requests. Fields: is_complete boolean, summary_text string, version_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v3-positive-008",
+      "resource": "desks",
+      "fields": {
+        "display_label": "string",
+        "capacity": "integer",
+        "is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold desks: capacity is an integer, is_enabled is a boolean, and display_label is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v3-positive-009",
+      "resource": "cycles",
+      "fields": {
+        "reference_code": "string",
+        "sequence_number": "integer",
+        "is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/cycles.py, tests/test_cycles.py, and docs/cycles.md for a new standard cycles resource. Its exact fields are reference_code: string, sequence_number: integer, is_visible: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v3-positive-010",
+      "resource": "contracts",
+      "fields": {
+        "short_title": "string",
+        "revision_number": "integer",
+        "is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add contracts with the string field short_title, integer field revision_number, and boolean field is_ready. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v3-positive-011",
+      "resource": "ranges",
+      "fields": {
+        "description_text": "string",
+        "priority_level": "integer",
+        "is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new ranges resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly is_archived (boolean), priority_level (integer), and description_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v3-positive-012",
+      "resource": "cameras",
+      "fields": {
+        "owner_name": "string",
+        "total_count": "integer",
+        "is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard cameras resource with owner_name (string), total_count (integer), and is_public (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v3-positive-013",
+      "resource": "editions",
+      "fields": {
+        "category_name": "string",
+        "sort_rank": "integer",
+        "is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named editions. Fields: is_available boolean, category_name string, sort_rank integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v3-positive-014",
+      "resource": "nodes",
+      "fields": {
+        "external_key": "string",
+        "retry_limit": "integer",
+        "is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold nodes: retry_limit is an integer, is_active is a boolean, and external_key is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v3-positive-015",
+      "resource": "frames",
+      "fields": {
+        "summary_text": "string",
+        "version_number": "integer",
+        "is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/frames.py, tests/test_frames.py, and docs/frames.md for a new standard frames resource. Its exact fields are summary_text: string, version_number: integer, is_complete: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v3-positive-016",
+      "resource": "skills",
+      "fields": {
+        "display_label": "string",
+        "capacity": "integer",
+        "is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add skills with the string field display_label, integer field capacity, and boolean field is_enabled. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v3-positive-017",
+      "resource": "leases",
+      "fields": {
+        "reference_code": "string",
+        "sequence_number": "integer",
+        "is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new leases resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly is_visible (boolean), sequence_number (integer), and reference_code (string), with strict types."
+    },
+    {
+      "id": "qualification-v3-positive-018",
+      "resource": "estimates",
+      "fields": {
+        "short_title": "string",
+        "revision_number": "integer",
+        "is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard estimates resource with short_title (string), revision_number (integer), and is_ready (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v3-positive-019",
+      "resource": "assets",
+      "fields": {
+        "description_text": "string",
+        "priority_level": "integer",
+        "is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named assets. Fields: is_archived boolean, description_text string, priority_level integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v3-positive-020",
+      "resource": "cards",
+      "fields": {
+        "owner_name": "string",
+        "total_count": "integer",
+        "is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold cards: total_count is an integer, is_public is a boolean, and owner_name is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v3-positive-021",
+      "resource": "tags",
+      "fields": {
+        "category_name": "string",
+        "sort_rank": "integer",
+        "is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/tags.py, tests/test_tags.py, and docs/tags.md for a new standard tags resource. Its exact fields are category_name: string, sort_rank: integer, is_available: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v3-positive-022",
+      "resource": "cabinets",
+      "fields": {
+        "external_key": "string",
+        "retry_limit": "integer",
+        "is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add cabinets with the string field external_key, integer field retry_limit, and boolean field is_active. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v3-positive-023",
+      "resource": "departments",
+      "fields": {
+        "summary_text": "string",
+        "version_number": "integer",
+        "is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new departments resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly is_complete (boolean), version_number (integer), and summary_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v3-positive-024",
+      "resource": "rules",
+      "fields": {
+        "display_label": "string",
+        "capacity": "integer",
+        "is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard rules resource with display_label (string), capacity (integer), and is_enabled (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v3-positive-025",
+      "resource": "sequences",
+      "fields": {
+        "reference_code": "string",
+        "sequence_number": "integer",
+        "is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named sequences. Fields: is_visible boolean, reference_code string, sequence_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v3-positive-026",
+      "resource": "courses",
+      "fields": {
+        "short_title": "string",
+        "revision_number": "integer",
+        "is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold courses: revision_number is an integer, is_ready is a boolean, and short_title is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v3-positive-027",
+      "resource": "maps",
+      "fields": {
+        "description_text": "string",
+        "priority_level": "integer",
+        "is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/maps.py, tests/test_maps.py, and docs/maps.md for a new standard maps resource. Its exact fields are description_text: string, priority_level: integer, is_archived: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v3-positive-028",
+      "resource": "sections",
+      "fields": {
+        "owner_name": "string",
+        "total_count": "integer",
+        "is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add sections with the string field owner_name, integer field total_count, and boolean field is_public. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v3-positive-029",
+      "resource": "magazines",
+      "fields": {
+        "category_name": "string",
+        "sort_rank": "integer",
+        "is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new magazines resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly is_available (boolean), sort_rank (integer), and category_name (string), with strict types."
+    },
+    {
+      "id": "qualification-v3-positive-030",
+      "resource": "funds",
+      "fields": {
+        "external_key": "string",
+        "retry_limit": "integer",
+        "is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard funds resource with external_key (string), retry_limit (integer), and is_active (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v3-positive-031",
+      "resource": "moments",
+      "fields": {
+        "summary_text": "string",
+        "version_number": "integer",
+        "is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named moments. Fields: is_complete boolean, summary_text string, version_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v3-positive-032",
+      "resource": "destinations",
+      "fields": {
+        "display_label": "string",
+        "capacity": "integer",
+        "is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold destinations: capacity is an integer, is_enabled is a boolean, and display_label is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v3-positive-033",
+      "resource": "printers",
+      "fields": {
+        "reference_code": "string",
+        "sequence_number": "integer",
+        "is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/printers.py, tests/test_printers.py, and docs/printers.md for a new standard printers resource. Its exact fields are reference_code: string, sequence_number: integer, is_visible: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v3-positive-034",
+      "resource": "farms",
+      "fields": {
+        "short_title": "string",
+        "revision_number": "integer",
+        "is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add farms with the string field short_title, integer field revision_number, and boolean field is_ready. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v3-positive-035",
+      "resource": "brands",
+      "fields": {
+        "description_text": "string",
+        "priority_level": "integer",
+        "is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new brands resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly is_archived (boolean), priority_level (integer), and description_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v3-positive-036",
+      "resource": "positions",
+      "fields": {
+        "owner_name": "string",
+        "total_count": "integer",
+        "is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard positions resource with owner_name (string), total_count (integer), and is_public (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v3-positive-037",
+      "resource": "tasks",
+      "fields": {
+        "category_name": "string",
+        "sort_rank": "integer",
+        "is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named tasks. Fields: is_available boolean, category_name string, sort_rank integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v3-positive-038",
+      "resource": "quotas",
+      "fields": {
+        "external_key": "string",
+        "retry_limit": "integer",
+        "is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold quotas: retry_limit is an integer, is_active is a boolean, and external_key is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v3-positive-039",
+      "resource": "modules",
+      "fields": {
+        "summary_text": "string",
+        "version_number": "integer",
+        "is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/modules.py, tests/test_modules.py, and docs/modules.md for a new standard modules resource. Its exact fields are summary_text: string, version_number: integer, is_complete: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v3-positive-040",
+      "resource": "dimensions",
+      "fields": {
+        "display_label": "string",
+        "capacity": "integer",
+        "is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add dimensions with the string field display_label, integer field capacity, and boolean field is_enabled. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v3-positive-041",
+      "resource": "keys",
+      "fields": {
+        "reference_code": "string",
+        "sequence_number": "integer",
+        "is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new keys resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly is_visible (boolean), sequence_number (integer), and reference_code (string), with strict types."
+    },
+    {
+      "id": "qualification-v3-positive-042",
+      "resource": "levels",
+      "fields": {
+        "short_title": "string",
+        "revision_number": "integer",
+        "is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard levels resource with short_title (string), revision_number (integer), and is_ready (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v3-positive-043",
+      "resource": "entities",
+      "fields": {
+        "description_text": "string",
+        "priority_level": "integer",
+        "is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named entities. Fields: is_archived boolean, description_text string, priority_level integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v3-positive-044",
+      "resource": "players",
+      "fields": {
+        "owner_name": "string",
+        "total_count": "integer",
+        "is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold players: total_count is an integer, is_public is a boolean, and owner_name is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v3-positive-045",
+      "resource": "containers",
+      "fields": {
+        "category_name": "string",
+        "sort_rank": "integer",
+        "is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/containers.py, tests/test_containers.py, and docs/containers.md for a new standard containers resource. Its exact fields are category_name: string, sort_rank: integer, is_available: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v3-positive-046",
+      "resource": "readers",
+      "fields": {
+        "external_key": "string",
+        "retry_limit": "integer",
+        "is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add readers with the string field external_key, integer field retry_limit, and boolean field is_active. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v3-positive-047",
+      "resource": "airports",
+      "fields": {
+        "summary_text": "string",
+        "version_number": "integer",
+        "is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new airports resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly is_complete (boolean), version_number (integer), and summary_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v3-positive-048",
+      "resource": "houses",
+      "fields": {
+        "display_label": "string",
+        "capacity": "integer",
+        "is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard houses resource with display_label (string), capacity (integer), and is_enabled (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v3-positive-049",
+      "resource": "languages",
+      "fields": {
+        "reference_code": "string",
+        "sequence_number": "integer",
+        "is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named languages. Fields: is_visible boolean, reference_code string, sequence_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v3-positive-050",
+      "resource": "numbers",
+      "fields": {
+        "short_title": "string",
+        "revision_number": "integer",
+        "is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold numbers: revision_number is an integer, is_ready is a boolean, and short_title is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v3-positive-051",
+      "resource": "streets",
+      "fields": {
+        "description_text": "string",
+        "priority_level": "integer",
+        "is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/streets.py, tests/test_streets.py, and docs/streets.md for a new standard streets resource. Its exact fields are description_text: string, priority_level: integer, is_archived: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v3-positive-052",
+      "resource": "services",
+      "fields": {
+        "owner_name": "string",
+        "total_count": "integer",
+        "is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add services with the string field owner_name, integer field total_count, and boolean field is_public. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v3-positive-053",
+      "resource": "residents",
+      "fields": {
+        "category_name": "string",
+        "sort_rank": "integer",
+        "is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new residents resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly is_available (boolean), sort_rank (integer), and category_name (string), with strict types."
+    },
+    {
+      "id": "qualification-v3-positive-054",
+      "resource": "rates",
+      "fields": {
+        "external_key": "string",
+        "retry_limit": "integer",
+        "is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard rates resource with external_key (string), retry_limit (integer), and is_active (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v3-positive-055",
+      "resource": "signals",
+      "fields": {
+        "summary_text": "string",
+        "version_number": "integer",
+        "is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named signals. Fields: is_complete boolean, summary_text string, version_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v3-positive-056",
+      "resource": "boards",
+      "fields": {
+        "display_label": "string",
+        "capacity": "integer",
+        "is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold boards: capacity is an integer, is_enabled is a boolean, and display_label is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v3-positive-057",
+      "resource": "records",
+      "fields": {
+        "reference_code": "string",
+        "sequence_number": "integer",
+        "is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/records.py, tests/test_records.py, and docs/records.md for a new standard records resource. Its exact fields are reference_code: string, sequence_number: integer, is_visible: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v3-positive-058",
+      "resource": "files",
+      "fields": {
+        "short_title": "string",
+        "revision_number": "integer",
+        "is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add files with the string field short_title, integer field revision_number, and boolean field is_ready. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v3-positive-059",
+      "resource": "billboards",
+      "fields": {
+        "description_text": "string",
+        "priority_level": "integer",
+        "is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new billboards resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly is_archived (boolean), priority_level (integer), and description_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v3-positive-060",
+      "resource": "plans",
+      "fields": {
+        "owner_name": "string",
+        "total_count": "integer",
+        "is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard plans resource with owner_name (string), total_count (integer), and is_public (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v3-positive-061",
+      "resource": "tables",
+      "fields": {
+        "category_name": "string",
+        "sort_rank": "integer",
+        "is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named tables. Fields: is_available boolean, category_name string, sort_rank integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v3-positive-062",
+      "resource": "districts",
+      "fields": {
+        "external_key": "string",
+        "retry_limit": "integer",
+        "is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold districts: retry_limit is an integer, is_active is a boolean, and external_key is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v3-positive-063",
+      "resource": "operations",
+      "fields": {
+        "summary_text": "string",
+        "version_number": "integer",
+        "is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/operations.py, tests/test_operations.py, and docs/operations.md for a new standard operations resource. Its exact fields are summary_text: string, version_number: integer, is_complete: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v3-positive-064",
+      "resource": "sites",
+      "fields": {
+        "display_label": "string",
+        "capacity": "integer",
+        "is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add sites with the string field display_label, integer field capacity, and boolean field is_enabled. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v3-positive-065",
+      "resource": "shifts",
+      "fields": {
+        "reference_code": "string",
+        "sequence_number": "integer",
+        "is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new shifts resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly is_visible (boolean), sequence_number (integer), and reference_code (string), with strict types."
+    },
+    {
+      "id": "qualification-v3-positive-066",
+      "resource": "units",
+      "fields": {
+        "short_title": "string",
+        "revision_number": "integer",
+        "is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard units resource with short_title (string), revision_number (integer), and is_ready (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v3-positive-067",
+      "resource": "timings",
+      "fields": {
+        "description_text": "string",
+        "priority_level": "integer",
+        "is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named timings. Fields: is_archived boolean, description_text string, priority_level integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v3-positive-068",
+      "resource": "writers",
+      "fields": {
+        "owner_name": "string",
+        "total_count": "integer",
+        "is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold writers: total_count is an integer, is_public is a boolean, and owner_name is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v3-positive-069",
+      "resource": "forums",
+      "fields": {
+        "category_name": "string",
+        "sort_rank": "integer",
+        "is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/forums.py, tests/test_forums.py, and docs/forums.md for a new standard forums resource. Its exact fields are category_name: string, sort_rank: integer, is_available: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v3-positive-070",
+      "resource": "codes",
+      "fields": {
+        "external_key": "string",
+        "retry_limit": "integer",
+        "is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add codes with the string field external_key, integer field retry_limit, and boolean field is_active. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v3-positive-071",
+      "resource": "chapters",
+      "fields": {
+        "summary_text": "string",
+        "version_number": "integer",
+        "is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new chapters resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly is_complete (boolean), version_number (integer), and summary_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v3-positive-072",
+      "resource": "instances",
+      "fields": {
+        "display_label": "string",
+        "capacity": "integer",
+        "is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard instances resource with display_label (string), capacity (integer), and is_enabled (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v3-positive-073",
+      "resource": "countries",
+      "fields": {
+        "reference_code": "string",
+        "sequence_number": "integer",
+        "is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named countries. Fields: is_visible boolean, reference_code string, sequence_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v3-positive-074",
+      "resource": "items",
+      "fields": {
+        "short_title": "string",
+        "revision_number": "integer",
+        "is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold items: revision_number is an integer, is_ready is a boolean, and short_title is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v3-positive-075",
+      "resource": "offices",
+      "fields": {
+        "description_text": "string",
+        "priority_level": "integer",
+        "is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/offices.py, tests/test_offices.py, and docs/offices.md for a new standard offices resource. Its exact fields are description_text: string, priority_level: integer, is_archived: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v3-positive-076",
+      "resource": "seasons",
+      "fields": {
+        "owner_name": "string",
+        "total_count": "integer",
+        "is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add seasons with the string field owner_name, integer field total_count, and boolean field is_public. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v3-positive-077",
+      "resource": "objects",
+      "fields": {
+        "category_name": "string",
+        "sort_rank": "integer",
+        "is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new objects resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly is_available (boolean), sort_rank (integer), and category_name (string), with strict types."
+    },
+    {
+      "id": "qualification-v3-positive-078",
+      "resource": "pages",
+      "fields": {
+        "external_key": "string",
+        "retry_limit": "integer",
+        "is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard pages resource with external_key (string), retry_limit (integer), and is_active (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v3-positive-079",
+      "resource": "identities",
+      "fields": {
+        "summary_text": "string",
+        "version_number": "integer",
+        "is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named identities. Fields: is_complete boolean, summary_text string, version_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v3-positive-080",
+      "resource": "reviews",
+      "fields": {
+        "display_label": "string",
+        "capacity": "integer",
+        "is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold reviews: capacity is an integer, is_enabled is a boolean, and display_label is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v3-positive-081",
+      "resource": "sets",
+      "fields": {
+        "reference_code": "string",
+        "sequence_number": "integer",
+        "is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/sets.py, tests/test_sets.py, and docs/sets.md for a new standard sets resource. Its exact fields are reference_code: string, sequence_number: integer, is_visible: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v3-positive-082",
+      "resource": "drivers",
+      "fields": {
+        "short_title": "string",
+        "revision_number": "integer",
+        "is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add drivers with the string field short_title, integer field revision_number, and boolean field is_ready. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v3-positive-083",
+      "resource": "slides",
+      "fields": {
+        "description_text": "string",
+        "priority_level": "integer",
+        "is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new slides resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly is_archived (boolean), priority_level (integer), and description_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v3-positive-084",
+      "resource": "certificates",
+      "fields": {
+        "owner_name": "string",
+        "total_count": "integer",
+        "is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard certificates resource with owner_name (string), total_count (integer), and is_public (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v3-positive-085",
+      "resource": "studios",
+      "fields": {
+        "category_name": "string",
+        "sort_rank": "integer",
+        "is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named studios. Fields: is_available boolean, category_name string, sort_rank integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v3-positive-086",
+      "resource": "columns",
+      "fields": {
+        "external_key": "string",
+        "retry_limit": "integer",
+        "is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold columns: retry_limit is an integer, is_active is a boolean, and external_key is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v3-positive-087",
+      "resource": "networks",
+      "fields": {
+        "summary_text": "string",
+        "version_number": "integer",
+        "is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/networks.py, tests/test_networks.py, and docs/networks.md for a new standard networks resource. Its exact fields are summary_text: string, version_number: integer, is_complete: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v3-positive-088",
+      "resource": "parameters",
+      "fields": {
+        "display_label": "string",
+        "capacity": "integer",
+        "is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add parameters with the string field display_label, integer field capacity, and boolean field is_enabled. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v3-positive-089",
+      "resource": "variables",
+      "fields": {
+        "reference_code": "string",
+        "sequence_number": "integer",
+        "is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new variables resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly is_visible (boolean), sequence_number (integer), and reference_code (string), with strict types."
+    },
+    {
+      "id": "qualification-v3-positive-090",
+      "resource": "garages",
+      "fields": {
+        "short_title": "string",
+        "revision_number": "integer",
+        "is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard garages resource with short_title (string), revision_number (integer), and is_ready (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v3-positive-091",
+      "resource": "inspections",
+      "fields": {
+        "description_text": "string",
+        "priority_level": "integer",
+        "is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named inspections. Fields: is_archived boolean, description_text string, priority_level integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v3-positive-092",
+      "resource": "movies",
+      "fields": {
+        "owner_name": "string",
+        "total_count": "integer",
+        "is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold movies: total_count is an integer, is_public is a boolean, and owner_name is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v3-positive-093",
+      "resource": "organizations",
+      "fields": {
+        "category_name": "string",
+        "sort_rank": "integer",
+        "is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/organizations.py, tests/test_organizations.py, and docs/organizations.md for a new standard organizations resource. Its exact fields are category_name: string, sort_rank: integer, is_available: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v3-positive-094",
+      "resource": "visitors",
+      "fields": {
+        "external_key": "string",
+        "retry_limit": "integer",
+        "is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add visitors with the string field external_key, integer field retry_limit, and boolean field is_active. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v3-positive-095",
+      "resource": "revisions",
+      "fields": {
+        "summary_text": "string",
+        "version_number": "integer",
+        "is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new revisions resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly is_complete (boolean), version_number (integer), and summary_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v3-positive-096",
+      "resource": "conferences",
+      "fields": {
+        "display_label": "string",
+        "capacity": "integer",
+        "is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard conferences resource with display_label (string), capacity (integer), and is_enabled (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v3-positive-097",
+      "resource": "systems",
+      "fields": {
+        "reference_code": "string",
+        "sequence_number": "integer",
+        "is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named systems. Fields: is_visible boolean, reference_code string, sequence_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v3-positive-098",
+      "resource": "entries",
+      "fields": {
+        "short_title": "string",
+        "revision_number": "integer",
+        "is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold entries: revision_number is an integer, is_ready is a boolean, and short_title is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v3-positive-099",
+      "resource": "payments",
+      "fields": {
+        "description_text": "string",
+        "priority_level": "integer",
+        "is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/payments.py, tests/test_payments.py, and docs/payments.md for a new standard payments resource. Its exact fields are description_text: string, priority_level: integer, is_archived: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v3-positive-100",
+      "resource": "awards",
+      "fields": {
+        "owner_name": "string",
+        "total_count": "integer",
+        "is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add awards with the string field owner_name, integer field total_count, and boolean field is_public. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v3-positive-101",
+      "resource": "instruments",
+      "fields": {
+        "category_name": "string",
+        "sort_rank": "integer",
+        "is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new instruments resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly is_available (boolean), sort_rank (integer), and category_name (string), with strict types."
+    },
+    {
+      "id": "qualification-v3-positive-102",
+      "resource": "crews",
+      "fields": {
+        "external_key": "string",
+        "retry_limit": "integer",
+        "is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard crews resource with external_key (string), retry_limit (integer), and is_active (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v3-positive-103",
+      "resource": "spaces",
+      "fields": {
+        "summary_text": "string",
+        "version_number": "integer",
+        "is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named spaces. Fields: is_complete boolean, summary_text string, version_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v3-positive-104",
+      "resource": "fields",
+      "fields": {
+        "display_label": "string",
+        "capacity": "integer",
+        "is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold fields: capacity is an integer, is_enabled is a boolean, and display_label is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v3-positive-105",
+      "resource": "permissions",
+      "fields": {
+        "reference_code": "string",
+        "sequence_number": "integer",
+        "is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/permissions.py, tests/test_permissions.py, and docs/permissions.md for a new standard permissions resource. Its exact fields are reference_code: string, sequence_number: integer, is_visible: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v3-positive-106",
+      "resource": "purchases",
+      "fields": {
+        "short_title": "string",
+        "revision_number": "integer",
+        "is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add purchases with the string field short_title, integer field revision_number, and boolean field is_ready. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v3-positive-107",
+      "resource": "stations",
+      "fields": {
+        "description_text": "string",
+        "priority_level": "integer",
+        "is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new stations resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly is_archived (boolean), priority_level (integer), and description_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v3-positive-108",
+      "resource": "carriers",
+      "fields": {
+        "owner_name": "string",
+        "total_count": "integer",
+        "is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard carriers resource with owner_name (string), total_count (integer), and is_public (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v3-positive-109",
+      "resource": "series",
+      "fields": {
+        "category_name": "string",
+        "sort_rank": "integer",
+        "is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named series. Fields: is_available boolean, category_name string, sort_rank integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v3-positive-110",
+      "resource": "stores",
+      "fields": {
+        "external_key": "string",
+        "retry_limit": "integer",
+        "is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold stores: retry_limit is an integer, is_active is a boolean, and external_key is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v3-positive-111",
+      "resource": "proposals",
+      "fields": {
+        "summary_text": "string",
+        "version_number": "integer",
+        "is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/proposals.py, tests/test_proposals.py, and docs/proposals.md for a new standard proposals resource. Its exact fields are summary_text: string, version_number: integer, is_complete: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v3-positive-112",
+      "resource": "contacts",
+      "fields": {
+        "display_label": "string",
+        "capacity": "integer",
+        "is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add contacts with the string field display_label, integer field capacity, and boolean field is_enabled. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v3-positive-113",
+      "resource": "headlines",
+      "fields": {
+        "reference_code": "string",
+        "sequence_number": "integer",
+        "is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new headlines resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly is_visible (boolean), sequence_number (integer), and reference_code (string), with strict types."
+    },
+    {
+      "id": "qualification-v3-positive-114",
+      "resource": "currencies",
+      "fields": {
+        "short_title": "string",
+        "revision_number": "integer",
+        "is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard currencies resource with short_title (string), revision_number (integer), and is_ready (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v3-positive-115",
+      "resource": "facilities",
+      "fields": {
+        "description_text": "string",
+        "priority_level": "integer",
+        "is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named facilities. Fields: is_archived boolean, description_text string, priority_level integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v3-positive-116",
+      "resource": "materials",
+      "fields": {
+        "owner_name": "string",
+        "total_count": "integer",
+        "is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold materials: total_count is an integer, is_public is a boolean, and owner_name is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v3-positive-117",
+      "resource": "employees",
+      "fields": {
+        "category_name": "string",
+        "sort_rank": "integer",
+        "is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/employees.py, tests/test_employees.py, and docs/employees.md for a new standard employees resource. Its exact fields are category_name: string, sort_rank: integer, is_available: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v3-positive-118",
+      "resource": "resources",
+      "fields": {
+        "external_key": "string",
+        "retry_limit": "integer",
+        "is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add resources with the string field external_key, integer field retry_limit, and boolean field is_active. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v3-positive-119",
+      "resource": "clients",
+      "fields": {
+        "summary_text": "string",
+        "version_number": "integer",
+        "is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new clients resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly is_complete (boolean), version_number (integer), and summary_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v3-negative-00",
+      "expected": "",
+      "request": "Describe a standard medals resource with caption string, ranking integer and visible boolean. Explain the module, tests and docs; do not change files."
+    },
+    {
+      "id": "qualification-v3-negative-01",
+      "expected": "",
+      "request": "Review my idea for a standard mosaics resource with title string, width integer and public boolean. Give feedback without making changes."
+    },
+    {
+      "id": "qualification-v3-negative-02",
+      "expected": "",
+      "request": "Show a plan for standard lanterns with label string, brightness integer and lit boolean. Do not create the implementation, tests or docs."
+    },
+    {
+      "id": "qualification-v3-negative-03",
+      "expected": "",
+      "request": "Add a standard vineyards resource with owner string, area integer and active boolean, persisting every record in SQLite across App restarts."
+    },
+    {
+      "id": "qualification-v3-negative-04",
+      "expected": "",
+      "request": "Scaffold scholarships with title string, amount integer and open boolean, requiring an authorization token on all resource requests."
+    },
+    {
+      "id": "qualification-v3-negative-05",
+      "expected": "",
+      "request": "Create a standard envelopes resource with label string, count integer and sealed boolean, plus a DELETE route to remove records."
+    },
+    {
+      "id": "qualification-v3-negative-06",
+      "expected": "",
+      "request": "Generate the waterfalls resource with title string, height integer and accessible boolean, including a PATCH route for editing records."
+    },
+    {
+      "id": "qualification-v3-negative-07",
+      "expected": "",
+      "request": "Add standard terminals with label string, lanes integer and open boolean. Also replace the health response with a readiness report."
+    },
+    {
+      "id": "qualification-v3-negative-08",
+      "expected": "",
+      "request": "Create both oaks and pines resources, each with label string, age integer and healthy boolean, including both modules, tests and docs."
+    },
+    {
+      "id": "qualification-v3-negative-09",
+      "expected": "",
+      "request": "Scaffold a standard turbines resource with label string, output integer, running boolean and manufacturer string. Include module, tests and docs."
+    },
+    {
+      "id": "qualification-v3-negative-10",
+      "expected": "",
+      "request": "Create standard recipes with title string, servings integer and ingredients list of strings. Add implementation, tests and documentation."
+    },
+    {
+      "id": "qualification-v3-negative-11",
+      "expected": "",
+      "request": "Generate a standard reservoirs resource with label string, volume floating point and open boolean, plus its tests and API docs."
+    },
+    {
+      "id": "qualification-v3-negative-12",
+      "expected": "",
+      "request": "Add standard sculptures with title string and displayed boolean. Generate the resource module, request tests and API documentation."
+    },
+    {
+      "id": "qualification-v3-negative-13",
+      "expected": "",
+      "request": "Create a standard cranes resource, module, tests and docs. Pick the field names and types yourself."
+    },
+    {
+      "id": "qualification-v3-negative-14",
+      "expected": "",
+      "request": "Scaffold standard paddocks with id string, capacity integer and open boolean. Keep the exact names in its module, tests and docs."
+    },
+    {
+      "id": "qualification-v3-negative-15",
+      "expected": "",
+      "request": "Create a standard fountains resource with title string, id integer and running boolean. Preserve these exact field names in all artifacts."
+    },
+    {
+      "id": "qualification-v3-negative-16",
+      "expected": "",
+      "request": "Add a standard piers resource with label string, length integer and id boolean. Include its module, tests and docs without renaming fields."
+    },
+    {
+      "id": "qualification-v3-negative-17",
+      "expected": "",
+      "request": "Create a standard hammocks resource with value string, value integer and occupied boolean. Preserve both value fields in module, tests and docs."
+    },
+    {
+      "id": "qualification-v3-negative-18",
+      "expected": "",
+      "request": "Scaffold standard aquariums with label string, open integer and open boolean. Keep those exact names in the implementation, tests and docs."
+    },
+    {
+      "id": "qualification-v3-negative-19",
+      "expected": "",
+      "request": "Generate standard awnings with name string, span integer and name boolean. Do not rename the fields; add module, tests and docs."
+    },
+    {
+      "id": "qualification-v3-negative-20",
+      "expected": "",
+      "request": "Create the standard UpperShelves resource with label string, slots integer and open boolean. Preserve its exact uppercase spelling in module, tests and docs."
+    },
+    {
+      "id": "qualification-v3-negative-21",
+      "expected": "",
+      "request": "Add a standard 4seasons resource with title string, rank integer and current boolean. Keep that identifier exactly and include module, tests and docs."
+    },
+    {
+      "id": "qualification-v3-negative-22",
+      "expected": "",
+      "request": "Scaffold standard flower-pots with label string, volume integer and full boolean. Retain the hyphenated resource name in module, tests and documentation."
+    },
+    {
+      "id": "qualification-v3-negative-23",
+      "expected": "",
+      "request": "Create the standard ../parent resource with title string, rank integer and enabled boolean. Preserve that exact resource path in its three artifacts."
+    },
+    {
+      "id": "qualification-v3-negative-24",
+      "expected": "",
+      "request": "Add standard sailboats with owner-name string, length integer and moored boolean. Keep the hyphenated field name exactly in module, tests and docs."
+    },
+    {
+      "id": "qualification-v3-negative-25",
+      "expected": "",
+      "request": "Scaffold a standard kayaks resource with label string, 3seats integer and rented boolean. Preserve those exact field names in all three artifacts."
+    },
+    {
+      "id": "qualification-v3-negative-26",
+      "expected": "",
+      "request": "Create standard canoes with title string, seats integer and is-rented boolean. Keep that exact boolean field name in implementation, tests and docs."
+    },
+    {
+      "id": "qualification-v3-negative-27",
+      "expected": "",
+      "request": "Generate standard ladders_v3 with label string, height integer and safe boolean, add tests and docs, then run python3 -m unittest discover -s tests."
+    },
+    {
+      "id": "qualification-v3-negative-28",
+      "expected": "",
+      "request": "Add standard terraces with title string, area integer and public boolean, including module, tests and docs; update the project dependency list too."
+    },
+    {
+      "id": "qualification-v3-negative-29",
+      "expected": "",
+      "request": "Migrate the HTTP host to an external framework and create standard gazebos with label string, seats integer and available boolean, tests and docs."
+    }
+  ]
+}

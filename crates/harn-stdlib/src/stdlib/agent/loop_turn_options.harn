@@ -8,6 +8,7 @@ import { __agent_stall_verification_dispatch } from "std/agent/stall_checkpoint"
 import { AgentStallState } from "std/agent/stall_types"
 import { __agent_stall_fold_verify_state } from "std/agent/stall_verification"
 pub import { __turn_end_judge_hit } from "std/agent/turn_end"
+import { LocalGenerationOrigin } from "std/llm/caller_types"
 
 pub type AgentLoopCompletedDispatchStall = {state: AgentStallState, no_information_gain: bool}
 
@@ -32,6 +33,7 @@ pub type AgentIterationInfo = {
   cost_usd?: float,
   wall_clock_ms?: int,
   run_usage?: dict,
+  generation_origin?: LocalGenerationOrigin,
   ...rest,
 }
 
@@ -366,6 +368,12 @@ pub fn __iteration_info_payload(
     0
   }
   const extra = aggregates ?? {}
+  const origin = llm_result?.generation_origin
+  const generation = if origin != nil {
+    {generation_origin: schema_expect(origin, schema_of(LocalGenerationOrigin))}
+  } else {
+    {}
+  }
   // Absence stays absent: an unreported serving fingerprint must not read as
   // an empty build id that compares equal across two different servers.
   const serving_fingerprint = telemetry?.serving_fingerprint
@@ -409,6 +417,7 @@ pub fn __iteration_info_payload(
     + first_frame_latency
     + boundary_receipt
     + extra
+    + generation
 }
 
 pub fn __agent_loop_elapsed_ms(clock: HarnessClock, start_ms: any) {

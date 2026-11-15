@@ -2,6 +2,14 @@ import { LlmCallOptions } from "std/llm/options"
 
 pub type LlmCallerTurn = {iteration: int, session_id: string, attempt: int}
 
+/** A local planning result has provenance and no fabricated provider usage. */
+pub type LocalGenerationOrigin = {
+  kind: "local",
+  producer: string,
+  receipt: string,
+  details?: unknown,
+}
+
 /** One request through a caller stack, including its loop provenance. */
 pub type LlmCallerRequest = {
   prompt: unknown,

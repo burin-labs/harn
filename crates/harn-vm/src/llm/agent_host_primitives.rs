@@ -6,6 +6,7 @@ use crate::schema::json_to_vm_value;
 use crate::value::{VmError, VmValue};
 use harn_builtin_macros::harn_builtin;
 
+use self::tool_catalog::tag_mcp_tool;
 use super::agent_runtime::{current_agent_session_id, current_host_bridge};
 use super::agent_tool_governance::validate_registered_input;
 use super::{agent_runtime, agent_session_host, agent_tools, helpers, permissions, tools};
@@ -13,6 +14,7 @@ use super::{agent_runtime, agent_session_host, agent_tools, helpers, permissions
 mod cancelled_tool;
 mod denial_results;
 mod dispatch_approval;
+mod dispatch_guard;
 pub(super) mod event_capture;
 mod host_permission;
 mod prepared_consent;
@@ -531,7 +533,10 @@ async fn dispatch_tool_call_live(
         || crate::orchestration::execution_policy_active()
         || permissions::dynamic_permission_policy_active()
         || permissions::session_has_grants(&session_id)
-        || crate::orchestration::tool_precheck_active();
+        || crate::orchestration::tool_precheck_active()
+        || call
+            .get("execution_guard")
+            .is_some_and(|guard| !matches!(guard, VmValue::Nil));
     let _policy_guard = if policy_machinery_active {
         Some(agent_session_host::install_session_policy_guard(options)?)
     } else {
@@ -1069,6 +1074,13 @@ async fn dispatch_tool_call_live(
             emit_runtime_denied_activity(&session_id, &tool_id, &tool_name, &decision);
             Some((decision.terminal_denial(), Some(decision.receipt)))
         });
+    let final_denial = if final_denial.is_none()
+        && !dispatch_guard::permits(&ctx, call.get("execution_guard"), &tool_args).await?
+    {
+        Some((denial_results::execution_contract_changed(), None))
+    } else {
+        final_denial
+    };
     if let Some((denial, receipt)) = final_denial {
         let denied = Box::pin(deny_tool_call(
             Some(&ctx),
@@ -1372,63 +1384,6 @@ async fn dispatch_tool_call_live(
             Ok(json_to_vm_value(&result))
         }
     }
-}
-
-/// Connect to each MCP server in specs, list their tools (prefixed with
-/// server_name__), store handles keyed by session_id, and return
-/// Tag a single MCP tool descriptor for the agent tool surface.
-///
-/// Namespaces the tool name (`<server>__<tool>`), records the MCP
-/// executor wiring (`executor`/`mcp_server`/`_mcp_server`/
-/// `_mcp_tool_name`) so dispatch and the `tool_search` BM25 indexer can
-/// find it, and — unless `eager_schemas` is set on the spec — flags it
-/// `defer_loading: true`.
-///
-/// `defer_loading` is the progressive-disclosure default (harn#2649):
-/// the lightweight catalog (name + one-line description) ships up front,
-/// but the full JSON `inputSchema` is held back until the model surfaces
-/// the tool via `tool_search` or calls it directly. This keeps MCP
-/// servers with many tools from spending the whole tool budget on
-/// schemas the agent never reaches for. Callers opt back into eager
-/// schemas with `eager_schemas: true` on the server spec.
-fn tag_mcp_tool(
-    mut tool: serde_json::Value,
-    server_name: &str,
-    eager_schemas: bool,
-) -> serde_json::Value {
-    if let Some(obj) = tool.as_object_mut() {
-        let original_name = obj
-            .get("name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let prefixed_name = format!("{server_name}__{original_name}");
-        // Namespace to avoid conflicts between servers.
-        obj.insert("name".into(), serde_json::Value::String(prefixed_name));
-        obj.insert(
-            "executor".into(),
-            serde_json::Value::String("mcp_server".into()),
-        );
-        obj.insert(
-            "mcp_server".into(),
-            serde_json::Value::String(server_name.to_string()),
-        );
-        obj.insert(
-            "_mcp_server".into(),
-            serde_json::Value::String(server_name.to_string()),
-        );
-        obj.insert(
-            "_mcp_tool_name".into(),
-            serde_json::Value::String(original_name),
-        );
-        // Progressive disclosure on by default; opt out per-spec with
-        // `eager_schemas: true`. Never clobber an explicit per-tool
-        // `defer_loading` the server itself advertised.
-        if !eager_schemas && !obj.contains_key("defer_loading") {
-            obj.insert("defer_loading".into(), serde_json::Value::Bool(true));
-        }
-    }
-    tool
 }
 
 /// {tools_added, errors}.

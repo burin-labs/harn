@@ -1,0 +1,15 @@
+import { session_store_events } from "std/session-store"
+
+fn main(harness: Harness) {
+  const session = argv[0]
+  const root = argv[1]
+  const output = argv[2]
+  guard session != nil && root != nil && output != nil else {
+    throw "usage: events.harn SESSION STORE_ROOT OUTPUT.json"
+  }
+  const events = session_store_events(harness.agent, session, {root: root})
+  require events.state == "present", "trial session events are absent"
+  require len(events.value) > 0, "trial session events are empty"
+  harness.fs.write_text(output, json_stringify(events.value))
+  harness.stdio.println(json_stringify({session_id: session, events: len(events.value)}))
+}

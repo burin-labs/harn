@@ -1,0 +1,61 @@
+import {
+  LearnedAgentOptions,
+  LearnedAgentSetup,
+  LearnedTrialScope,
+  learned_agent_options,
+  learned_probe_agent_options,
+} from "std/agent/learned/middleware"
+import { agent_emit_event } from "std/agent/state"
+import { LlmCallerRequest } from "std/llm/caller"
+import { ToolRegistry } from "std/tools"
+
+pub type LearnedAgentResolution = {kind: "ready", setup: LearnedAgentSetup} \
+  | {kind: "unavailable", reason: string}
+
+/**
+ * Resolve against the live registry after MCP bootstrap. The host supplies
+ * reviewed package coordinates; Harn retains selection and execution policy.
+ * An unavailable resolution falls back once without requesting inference.
+ * @effects: [agent]
+ * @errors: []
+ */
+pub fn learned_agent_options_deferred(
+  harness: Harness,
+  fallback: LearnedAgentOptions,
+  resolve: fn(ToolRegistry) -> LearnedAgentResolution,
+  trial: LearnedTrialScope? = nil,
+) -> LearnedAgentOptions {
+  let attempted = false
+  let implementation: LearnedAgentOptions? = nil
+  return {
+    llm_caller: { call: LlmCallerRequest ->
+      if !attempted {
+        attempted = true
+        const registry = match schema_parse(call.opts?.tools, schema_of(ToolRegistry)) {
+          Ok(value) -> { value }
+          Err(_error) -> { return fallback.llm_caller(call) }
+        }
+        const resolution = resolve(registry)
+        if resolution.kind == "ready" {
+          implementation = trial == nil ? learned_agent_options(
+            harness,
+            resolution.setup,
+          ) : learned_probe_agent_options(harness, resolution.setup, trial)
+        } else if call.turn != nil {
+          agent_emit_event(
+            harness.agent,
+            call.turn.session_id,
+            "typed_checkpoint",
+            {kind: "learned_dispatch", phase: "fallback", reason: resolution.reason},
+          )
+        }
+      }
+      const current = implementation
+      return current == nil ? fallback.llm_caller(call) : current.llm_caller(call)
+    },
+    tool_caller: { call: dict, next: fn(dict) -> dict ->
+      const current = implementation
+      return current == nil ? fallback.tool_caller(call, next) : current.tool_caller(call, next)
+    },
+  }
+}

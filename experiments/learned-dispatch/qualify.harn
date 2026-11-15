@@ -1,0 +1,49 @@
+import {
+  LearnedIdentity,
+  LearnedTrial,
+  learned_qualification_issue,
+  learned_qualify,
+} from "std/agent/learned"
+
+type Evidence = {identity: LearnedIdentity, trials: list<LearnedTrial>}
+
+type RiskPolicy = {thresholds: list<float>, target_error: float, delta: float}
+
+type Protocol = {qualification: RiskPolicy}
+
+fn main(harness: Harness) {
+  const input = argv[0]
+  const output = argv[1]
+  const protocol_path = argv[2]
+  guard input != nil && output != nil else {
+    throw "usage: qualify.harn EVIDENCE.json REPORT.json [PROTOCOL.json]"
+  }
+  const evidence: Evidence = schema_expect(
+    json_parse(harness.fs.read_text(input)),
+    schema_of(Evidence),
+  )
+  const risk: RiskPolicy = if protocol_path == nil {
+    {thresholds: [0.8], target_error: 0.1, delta: 0.05}
+  } else {
+    schema_expect(json_parse(harness.fs.read_text(protocol_path)), schema_of(Protocol))
+      .qualification
+  }
+  const qualification = learned_qualify(evidence.identity, evidence.trials, {risk: risk})
+  const issue = learned_qualification_issue(evidence.identity, qualification)
+  harness.fs.write_text(output, json_stringify({issue: issue, qualification: qualification}))
+  harness.stdio.println(
+    json_stringify(
+      {
+        issue: issue,
+        trials: len(evidence.trials),
+        executed: qualification.executed,
+        failed: qualification.failed,
+        negatives: qualification.negatives,
+        report: qualification.report,
+      },
+    ),
+  )
+  if issue != "" {
+    throw "qualification refused: ${issue}"
+  }
+}

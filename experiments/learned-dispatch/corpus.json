@@ -1,0 +1,675 @@
+{
+  "contract": "harn.learned_dispatch_corpus.v1",
+  "development": [
+    {
+      "id": "development-positive-00",
+      "resource": "widgets",
+      "fields": {
+        "label": "string",
+        "quantity": "integer",
+        "active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard widgets resource with label (string), quantity (integer), active (boolean). Add the resource module, dispatch tests and API documentation using this application's existing App conventions."
+    },
+    {
+      "id": "development-positive-01",
+      "resource": "reading_groups",
+      "fields": {
+        "display_name": "string",
+        "member_count": "integer",
+        "is_open": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add a repository-standard in-memory reading_groups resource: is_open (boolean), member_count (integer), display_name (string). Generate its auto-mounted module, request tests, and API documentation. Preserve the host and dependencies."
+    },
+    {
+      "id": "development-positive-02",
+      "resource": "sensors",
+      "fields": {
+        "location": "string",
+        "revision": "integer",
+        "enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold sensors, including its module, tests and documentation. Its fields are location (string), revision (integer), enabled (boolean). Use the existing standard POST/GET App pattern with strict payload validation and per-App storage."
+    },
+    {
+      "id": "development-positive-03",
+      "resource": "stock_items",
+      "fields": {
+        "description": "string",
+        "remaining": "integer",
+        "available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need a standard stock_items resource for this App: available (boolean), remaining (integer), description (string). Create app/resources/stock_items.py, tests/test_stock_items.py and docs/stock_items.md, following the current in-memory resource contract."
+    },
+    {
+      "id": "development-positive-04",
+      "resource": "projects",
+      "fields": {
+        "title": "string",
+        "priority": "integer",
+        "archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard projects resource with title (string), priority (integer), archived (boolean). Add the resource module, dispatch tests and API documentation using this application's existing App conventions."
+    },
+    {
+      "id": "development-positive-05",
+      "resource": "tickets",
+      "fields": {
+        "summary": "string",
+        "severity": "integer",
+        "resolved": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add a repository-standard in-memory tickets resource: resolved (boolean), severity (integer), summary (string). Generate its auto-mounted module, request tests, and API documentation. Preserve the host and dependencies."
+    },
+    {
+      "id": "development-positive-06",
+      "resource": "notebooks",
+      "fields": {
+        "owner": "string",
+        "page_count": "integer",
+        "shared": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold notebooks, including its module, tests and documentation. Its fields are owner (string), page_count (integer), shared (boolean). Use the existing standard POST/GET App pattern with strict payload validation and per-App storage."
+    },
+    {
+      "id": "development-positive-07",
+      "resource": "locations",
+      "fields": {
+        "address": "string",
+        "capacity": "integer",
+        "accessible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need a standard locations resource for this App: accessible (boolean), capacity (integer), address (string). Create app/resources/locations.py, tests/test_locations.py and docs/locations.md, following the current in-memory resource contract."
+    },
+    {
+      "id": "development-negative-00",
+      "expected": "",
+      "request": "Explain how I could create a standard widgets resource with label string, quantity integer, and active boolean. Do not edit files."
+    },
+    {
+      "id": "development-negative-01",
+      "expected": "",
+      "request": "Create a widgets resource with label string, quantity integer, active boolean, and SQLite persistence."
+    },
+    {
+      "id": "development-negative-02",
+      "expected": "",
+      "request": "Create both widgets and labels resources, each with name string, count integer and enabled boolean."
+    },
+    {
+      "id": "development-negative-03",
+      "expected": "",
+      "request": "Modify the existing books resource to add an enabled boolean field."
+    },
+    {
+      "id": "development-negative-04",
+      "expected": "",
+      "request": "Create a widgets resource with label string, quantity integer and active boolean, and remove /health."
+    },
+    {
+      "id": "development-negative-05",
+      "expected": "",
+      "request": "Create a widgets resource with label string, description string and active boolean."
+    },
+    {
+      "id": "development-negative-06",
+      "expected": "",
+      "request": "Create a measurements resource with label string, value float and active boolean."
+    },
+    {
+      "id": "development-negative-07",
+      "expected": "",
+      "request": "Create a widgets resource with label string, quantity integer and active boolean, protected by authentication."
+    }
+  ],
+  "qualification": [
+    {
+      "id": "qualification-positive-00",
+      "resource": "orders",
+      "fields": {
+        "reference": "string",
+        "item_count": "integer",
+        "paid": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard orders resource with reference (string), item_count (integer), paid (boolean). Add the resource module, dispatch tests and API documentation using this application's existing App conventions."
+    },
+    {
+      "id": "qualification-positive-01",
+      "resource": "appointments",
+      "fields": {
+        "subject": "string",
+        "duration": "integer",
+        "confirmed": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add a repository-standard in-memory appointments resource: confirmed (boolean), duration (integer), subject (string). Generate its auto-mounted module, request tests, and API documentation. Preserve the host and dependencies."
+    },
+    {
+      "id": "qualification-positive-02",
+      "resource": "batches",
+      "fields": {
+        "description": "string",
+        "size": "integer",
+        "released": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold batches, including its module, tests and documentation. Its fields are description (string), size (integer), released (boolean). Use the existing standard POST/GET App pattern with strict payload validation and per-App storage."
+    },
+    {
+      "id": "qualification-positive-03",
+      "resource": "collections",
+      "fields": {
+        "title": "string",
+        "entry_count": "integer",
+        "public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need a standard collections resource for this App: public (boolean), entry_count (integer), title (string). Create app/resources/collections.py, tests/test_collections.py and docs/collections.md, following the current in-memory resource contract."
+    },
+    {
+      "id": "qualification-positive-04",
+      "resource": "deliveries",
+      "fields": {
+        "destination": "string",
+        "distance": "integer",
+        "dispatched": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard deliveries resource with destination (string), distance (integer), dispatched (boolean). Add the resource module, dispatch tests and API documentation using this application's existing App conventions."
+    },
+    {
+      "id": "qualification-positive-05",
+      "resource": "experiments",
+      "fields": {
+        "hypothesis": "string",
+        "trial_count": "integer",
+        "finished": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add a repository-standard in-memory experiments resource: finished (boolean), trial_count (integer), hypothesis (string). Generate its auto-mounted module, request tests, and API documentation. Preserve the host and dependencies."
+    },
+    {
+      "id": "qualification-positive-06",
+      "resource": "folders",
+      "fields": {
+        "display_name": "string",
+        "depth": "integer",
+        "visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold folders, including its module, tests and documentation. Its fields are display_name (string), depth (integer), visible (boolean). Use the existing standard POST/GET App pattern with strict payload validation and per-App storage."
+    },
+    {
+      "id": "qualification-positive-07",
+      "resource": "gardens",
+      "fields": {
+        "location": "string",
+        "area": "integer",
+        "watered": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need a standard gardens resource for this App: watered (boolean), area (integer), location (string). Create app/resources/gardens.py, tests/test_gardens.py and docs/gardens.md, following the current in-memory resource contract."
+    },
+    {
+      "id": "qualification-positive-08",
+      "resource": "halls",
+      "fields": {
+        "name": "string",
+        "seats": "integer",
+        "reserved": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard halls resource with name (string), seats (integer), reserved (boolean). Add the resource module, dispatch tests and API documentation using this application's existing App conventions."
+    },
+    {
+      "id": "qualification-positive-09",
+      "resource": "invoices",
+      "fields": {
+        "customer": "string",
+        "amount": "integer",
+        "settled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add a repository-standard in-memory invoices resource: settled (boolean), amount (integer), customer (string). Generate its auto-mounted module, request tests, and API documentation. Preserve the host and dependencies."
+    },
+    {
+      "id": "qualification-positive-10",
+      "resource": "journeys",
+      "fields": {
+        "destination": "string",
+        "stops": "integer",
+        "completed": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold journeys, including its module, tests and documentation. Its fields are destination (string), stops (integer), completed (boolean). Use the existing standard POST/GET App pattern with strict payload validation and per-App storage."
+    },
+    {
+      "id": "qualification-positive-11",
+      "resource": "kits",
+      "fields": {
+        "label": "string",
+        "piece_count": "integer",
+        "assembled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need a standard kits resource for this App: assembled (boolean), piece_count (integer), label (string). Create app/resources/kits.py, tests/test_kits.py and docs/kits.md, following the current in-memory resource contract."
+    },
+    {
+      "id": "qualification-positive-12",
+      "resource": "lessons",
+      "fields": {
+        "topic": "string",
+        "minutes": "integer",
+        "published": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard lessons resource with topic (string), minutes (integer), published (boolean). Add the resource module, dispatch tests and API documentation using this application's existing App conventions."
+    },
+    {
+      "id": "qualification-positive-13",
+      "resource": "meetings",
+      "fields": {
+        "agenda": "string",
+        "attendees": "integer",
+        "recorded": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add a repository-standard in-memory meetings resource: recorded (boolean), attendees (integer), agenda (string). Generate its auto-mounted module, request tests, and API documentation. Preserve the host and dependencies."
+    },
+    {
+      "id": "qualification-positive-14",
+      "resource": "notices",
+      "fields": {
+        "message": "string",
+        "priority": "integer",
+        "acknowledged": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold notices, including its module, tests and documentation. Its fields are message (string), priority (integer), acknowledged (boolean). Use the existing standard POST/GET App pattern with strict payload validation and per-App storage."
+    },
+    {
+      "id": "qualification-positive-15",
+      "resource": "observations",
+      "fields": {
+        "description": "string",
+        "sample_count": "integer",
+        "verified": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need a standard observations resource for this App: verified (boolean), sample_count (integer), description (string). Create app/resources/observations.py, tests/test_observations.py and docs/observations.md, following the current in-memory resource contract."
+    },
+    {
+      "id": "qualification-positive-16",
+      "resource": "parcels",
+      "fields": {
+        "tracking_code": "string",
+        "weight": "integer",
+        "delivered": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard parcels resource with tracking_code (string), weight (integer), delivered (boolean). Add the resource module, dispatch tests and API documentation using this application's existing App conventions."
+    },
+    {
+      "id": "qualification-positive-17",
+      "resource": "queues",
+      "fields": {
+        "label": "string",
+        "waiting": "integer",
+        "paused": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add a repository-standard in-memory queues resource: paused (boolean), waiting (integer), label (string). Generate its auto-mounted module, request tests, and API documentation. Preserve the host and dependencies."
+    },
+    {
+      "id": "qualification-positive-18",
+      "resource": "reports",
+      "fields": {
+        "heading": "string",
+        "page_count": "integer",
+        "approved": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold reports, including its module, tests and documentation. Its fields are heading (string), page_count (integer), approved (boolean). Use the existing standard POST/GET App pattern with strict payload validation and per-App storage."
+    },
+    {
+      "id": "qualification-positive-19",
+      "resource": "shipments",
+      "fields": {
+        "carrier": "string",
+        "box_count": "integer",
+        "insured": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need a standard shipments resource for this App: insured (boolean), box_count (integer), carrier (string). Create app/resources/shipments.py, tests/test_shipments.py and docs/shipments.md, following the current in-memory resource contract."
+    },
+    {
+      "id": "qualification-positive-20",
+      "resource": "teams",
+      "fields": {
+        "name": "string",
+        "members": "integer",
+        "active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard teams resource with name (string), members (integer), active (boolean). Add the resource module, dispatch tests and API documentation using this application's existing App conventions."
+    },
+    {
+      "id": "qualification-positive-21",
+      "resource": "updates",
+      "fields": {
+        "description": "string",
+        "revision": "integer",
+        "installed": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add a repository-standard in-memory updates resource: installed (boolean), revision (integer), description (string). Generate its auto-mounted module, request tests, and API documentation. Preserve the host and dependencies."
+    },
+    {
+      "id": "qualification-positive-22",
+      "resource": "vehicles",
+      "fields": {
+        "registration": "string",
+        "mileage": "integer",
+        "available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold vehicles, including its module, tests and documentation. Its fields are registration (string), mileage (integer), available (boolean). Use the existing standard POST/GET App pattern with strict payload validation and per-App storage."
+    },
+    {
+      "id": "qualification-positive-23",
+      "resource": "warehouses",
+      "fields": {
+        "address": "string",
+        "capacity": "integer",
+        "open": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need a standard warehouses resource for this App: open (boolean), capacity (integer), address (string). Create app/resources/warehouses.py, tests/test_warehouses.py and docs/warehouses.md, following the current in-memory resource contract."
+    },
+    {
+      "id": "qualification-positive-24",
+      "resource": "yards",
+      "fields": {
+        "location": "string",
+        "area": "integer",
+        "occupied": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard yards resource with location (string), area (integer), occupied (boolean). Add the resource module, dispatch tests and API documentation using this application's existing App conventions."
+    },
+    {
+      "id": "qualification-positive-25",
+      "resource": "zones",
+      "fields": {
+        "label": "string",
+        "level": "integer",
+        "restricted": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add a repository-standard in-memory zones resource: restricted (boolean), level (integer), label (string). Generate its auto-mounted module, request tests, and API documentation. Preserve the host and dependencies."
+    },
+    {
+      "id": "qualification-positive-26",
+      "resource": "audit_logs",
+      "fields": {
+        "event_name": "string",
+        "sequence_number": "integer",
+        "retained": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold audit_logs, including its module, tests and documentation. Its fields are event_name (string), sequence_number (integer), retained (boolean). Use the existing standard POST/GET App pattern with strict payload validation and per-App storage."
+    },
+    {
+      "id": "qualification-positive-27",
+      "resource": "build_jobs",
+      "fields": {
+        "branch_name": "string",
+        "attempt_count": "integer",
+        "successful": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need a standard build_jobs resource for this App: successful (boolean), attempt_count (integer), branch_name (string). Create app/resources/build_jobs.py, tests/test_build_jobs.py and docs/build_jobs.md, following the current in-memory resource contract."
+    },
+    {
+      "id": "qualification-positive-28",
+      "resource": "calendar_events",
+      "fields": {
+        "display_name": "string",
+        "duration_minutes": "integer",
+        "all_day": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard calendar_events resource with display_name (string), duration_minutes (integer), all_day (boolean). Add the resource module, dispatch tests and API documentation using this application's existing App conventions."
+    },
+    {
+      "id": "qualification-positive-29",
+      "resource": "device_groups",
+      "fields": {
+        "group_label": "string",
+        "device_count": "integer",
+        "managed": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add a repository-standard in-memory device_groups resource: managed (boolean), device_count (integer), group_label (string). Generate its auto-mounted module, request tests, and API documentation. Preserve the host and dependencies."
+    },
+    {
+      "id": "qualification-positive-30",
+      "resource": "email_campaigns",
+      "fields": {
+        "subject_line": "string",
+        "recipient_count": "integer",
+        "sent": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold email_campaigns, including its module, tests and documentation. Its fields are subject_line (string), recipient_count (integer), sent (boolean). Use the existing standard POST/GET App pattern with strict payload validation and per-App storage."
+    },
+    {
+      "id": "qualification-positive-31",
+      "resource": "feature_flags",
+      "fields": {
+        "flag_name": "string",
+        "rollout_percent": "integer",
+        "enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need a standard feature_flags resource for this App: enabled (boolean), rollout_percent (integer), flag_name (string). Create app/resources/feature_flags.py, tests/test_feature_flags.py and docs/feature_flags.md, following the current in-memory resource contract."
+    },
+    {
+      "id": "qualification-positive-32",
+      "resource": "guest_lists",
+      "fields": {
+        "event_title": "string",
+        "guest_count": "integer",
+        "closed": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard guest_lists resource with event_title (string), guest_count (integer), closed (boolean). Add the resource module, dispatch tests and API documentation using this application's existing App conventions."
+    },
+    {
+      "id": "qualification-positive-33",
+      "resource": "help_articles",
+      "fields": {
+        "article_title": "string",
+        "word_count": "integer",
+        "reviewed": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add a repository-standard in-memory help_articles resource: reviewed (boolean), word_count (integer), article_title (string). Generate its auto-mounted module, request tests, and API documentation. Preserve the host and dependencies."
+    },
+    {
+      "id": "qualification-positive-34",
+      "resource": "image_sets",
+      "fields": {
+        "collection_name": "string",
+        "image_count": "integer",
+        "processed": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold image_sets, including its module, tests and documentation. Its fields are collection_name (string), image_count (integer), processed (boolean). Use the existing standard POST/GET App pattern with strict payload validation and per-App storage."
+    },
+    {
+      "id": "qualification-positive-35",
+      "resource": "job_runs",
+      "fields": {
+        "job_name": "string",
+        "retry_count": "integer",
+        "finished": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need a standard job_runs resource for this App: finished (boolean), retry_count (integer), job_name (string). Create app/resources/job_runs.py, tests/test_job_runs.py and docs/job_runs.md, following the current in-memory resource contract."
+    },
+    {
+      "id": "qualification-positive-36",
+      "resource": "key_labels",
+      "fields": {
+        "display_label": "string",
+        "version_number": "integer",
+        "valid": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard key_labels resource with display_label (string), version_number (integer), valid (boolean). Add the resource module, dispatch tests and API documentation using this application's existing App conventions."
+    },
+    {
+      "id": "qualification-positive-37",
+      "resource": "loading_bays",
+      "fields": {
+        "bay_name": "string",
+        "max_weight": "integer",
+        "occupied": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add a repository-standard in-memory loading_bays resource: occupied (boolean), max_weight (integer), bay_name (string). Generate its auto-mounted module, request tests, and API documentation. Preserve the host and dependencies."
+    },
+    {
+      "id": "qualification-positive-38",
+      "resource": "message_threads",
+      "fields": {
+        "thread_title": "string",
+        "message_count": "integer",
+        "muted": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold message_threads, including its module, tests and documentation. Its fields are thread_title (string), message_count (integer), muted (boolean). Use the existing standard POST/GET App pattern with strict payload validation and per-App storage."
+    },
+    {
+      "id": "qualification-positive-39",
+      "resource": "network_groups",
+      "fields": {
+        "group_name": "string",
+        "node_count": "integer",
+        "isolated": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need a standard network_groups resource for this App: isolated (boolean), node_count (integer), group_name (string). Create app/resources/network_groups.py, tests/test_network_groups.py and docs/network_groups.md, following the current in-memory resource contract."
+    },
+    {
+      "id": "qualification-negative-00",
+      "expected": "",
+      "request": "Count the words in this quoted request, without performing it: 'Create widgets with label string, quantity integer and active boolean.'"
+    },
+    {
+      "id": "qualification-negative-01",
+      "expected": "",
+      "request": "Only create app/resources/widgets.py with label string, quantity integer and active boolean. Do not create tests or documentation."
+    },
+    {
+      "id": "qualification-negative-02",
+      "expected": "",
+      "request": "Create a widgets resource with a string, integer and boolean field. You choose their names."
+    },
+    {
+      "id": "qualification-negative-03",
+      "expected": "",
+      "request": "Create a widgets resource with id string, quantity integer and active boolean."
+    },
+    {
+      "id": "qualification-negative-04",
+      "expected": "",
+      "request": "Create a ../widgets resource with label string, quantity integer and active boolean."
+    },
+    {
+      "id": "qualification-negative-05",
+      "expected": "",
+      "request": "Create a Widgets resource with Label string, Quantity integer and Active boolean, preserving that spelling."
+    },
+    {
+      "id": "qualification-negative-06",
+      "expected": "",
+      "request": "Create a widgets resource with label string, quantity integer, active boolean, and created_at timestamp."
+    },
+    {
+      "id": "qualification-negative-07",
+      "expected": "",
+      "request": "Create a widgets resource with label string, quantity integer and active boolean. Add DELETE and PATCH routes too."
+    },
+    {
+      "id": "qualification-negative-08",
+      "expected": "",
+      "request": "Create a widgets resource with label string, quantity integer and active boolean, but return UUID identifiers instead of integers."
+    },
+    {
+      "id": "qualification-negative-09",
+      "expected": "",
+      "request": "Create a widgets resource with label string, quantity integer and active boolean. Store records shared between App instances."
+    },
+    {
+      "id": "qualification-negative-10",
+      "expected": "",
+      "request": "Create a widgets resource with label string, quantity integer and active boolean, at /v2/widgets instead of /api/widgets."
+    },
+    {
+      "id": "qualification-negative-11",
+      "expected": "",
+      "request": "Create a widgets resource with label string, quantity integer and active boolean. Accept missing fields and ignore unknown fields."
+    },
+    {
+      "id": "qualification-negative-12",
+      "expected": "",
+      "request": "Compare the books and devices examples and suggest which resource to add next. Do not write files."
+    },
+    {
+      "id": "qualification-negative-13",
+      "expected": "",
+      "request": "List the existing API routes and explain their response codes."
+    },
+    {
+      "id": "qualification-negative-14",
+      "expected": "",
+      "request": "Create a widgets resource with label string, quantity integer and active boolean, then send an email announcing it."
+    },
+    {
+      "id": "qualification-negative-15",
+      "expected": "",
+      "request": "Create a widgets resource using nested objects for label and arrays for quantity."
+    },
+    {
+      "id": "qualification-negative-16",
+      "expected": "",
+      "request": "Write a plan for a resource generator supporting string, integer and boolean schemas. Do not implement the plan."
+    },
+    {
+      "id": "qualification-negative-17",
+      "expected": "",
+      "request": "Create a widgets resource with name string, name integer and active boolean."
+    },
+    {
+      "id": "qualification-negative-18",
+      "expected": "",
+      "request": "Repair the HTTP host so booleans are rejected as integers everywhere."
+    },
+    {
+      "id": "qualification-negative-19",
+      "expected": "",
+      "request": "Add a GET-only widgets resource with label string, quantity integer and active boolean. Do not provide POST."
+    }
+  ]
+}

@@ -407,6 +407,32 @@ fn mcp_projection_prefers_annotation_title_and_bundles_components() {
 }
 
 #[test]
+fn mcp_preserves_untyped_object_results_without_inventing_a_schema() {
+    let mut value = valid_catalog_json();
+    value["tools"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("outputSchema");
+    let catalog: ToolCatalog = serde_json::from_value(value).unwrap();
+    let entry = &catalog.tools[0];
+    assert!(catalog
+        .mcp_tool(entry)
+        .unwrap()
+        .get("outputSchema")
+        .is_none());
+    let receipt = json!({"postcondition": {"status": "verified"}});
+    assert_eq!(
+        catalog
+            .mcp_structured_content(entry, receipt.clone())
+            .unwrap(),
+        Some(receipt)
+    );
+    for scalar in [json!("plain text"), json!(4), json!(null), json!([1])] {
+        assert_eq!(catalog.mcp_structured_content(entry, scalar).unwrap(), None);
+    }
+}
+
+#[test]
 fn wire_preserves_optional_and_false_compatibility() {
     let catalog: ToolCatalog = serde_json::from_value(valid_catalog_json()).unwrap();
     let wire = serde_json::to_value(&catalog).unwrap();

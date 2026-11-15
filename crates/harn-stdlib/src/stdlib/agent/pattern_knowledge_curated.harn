@@ -1,10 +1,13 @@
 // Internal normalization boundary for agent-authored crystallization proposals.
+import { learned_dispatch_declaration } from "std/agent/learned/sources"
 import {
   pl_short_hash,
   pl_slugify,
   pl_text,
   pl_validate_skill_name,
 } from "std/agent/pattern_knowledge_values"
+
+pub type CuratedCapabilityKind = "skill" | "harn_tool" | "harn_workflow" | "hybrid"
 
 fn pl_curated_evidence_ids(proposal: dict, allowed_ids: list) -> list {
   const raw = proposal?.evidence_ids ?? proposal?.evidence ?? []
@@ -40,9 +43,11 @@ pub fn pl_curated_proposal(
 ) -> dict {
   const name = pl_slugify(pl_text(proposal?.name))
   pl_validate_skill_name(name)
-  const kind = pl_text(proposal?.kind)
-  if !["skill", "harn_tool", "harn_workflow", "hybrid"].contains(kind) {
-    throw "HARN-PATTERN-003: curated proposal kind must be skill, harn_tool, harn_workflow, or hybrid"
+  const kind = match schema_parse(proposal?.kind, schema_of(CuratedCapabilityKind)) {
+    Ok(value) -> { value }
+    Err(_error) -> {
+      throw "HARN-PATTERN-003: curated proposal kind must be skill, harn_tool, harn_workflow, or hybrid"
+    }
   }
   const title = pl_text(proposal?.title)
   const description = pl_text(proposal?.description)
@@ -52,7 +57,7 @@ pub fn pl_curated_proposal(
     throw "HARN-PATTERN-003: curated proposals require title, description, when_to_use, and body"
   }
   const evidence_ids = pl_curated_evidence_ids(proposal, allowed_ids)
-  const artifact = proposal?.artifact ?? {}
+  let artifact = proposal?.artifact ?? {}
   if kind != "skill" {
     const entrypoint = pl_text(artifact?.entrypoint)
     const expected = kind == "harn_workflow" ? "workflow.harn" : "server.harn"
@@ -68,6 +73,10 @@ pub fn pl_curated_proposal(
         || len(artifact.tool_names)
           == 0) {
       throw "HARN-PATTERN-003: tool proposals require at least one artifact.tool_names entry"
+    }
+    if artifact?.dispatch != nil {
+      artifact = artifact
+        + {dispatch: learned_dispatch_declaration(artifact.dispatch, artifact?.tool_names ?? [])}
     }
   }
   let samples = []
@@ -99,5 +108,6 @@ pub fn pl_curated_proposal(
       created_at: now,
       last_seen_at: now,
       curator_session_id: agent.current_id(),
+      artifact: artifact,
     }
 }

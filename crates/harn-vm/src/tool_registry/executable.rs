@@ -26,7 +26,10 @@ pub async fn call_tool_handler(
         audience,
         super::preparation_scope::scope(
             None,
-            crate::tool_handler_scope::scope(vm.call_closure_pub(&tool.handler, &[input])),
+            super::scope_tool_handler(
+                Some(&tool.catalog),
+                vm.call_closure_pub(&tool.handler, &[input]),
+            ),
         ),
     )
     .await

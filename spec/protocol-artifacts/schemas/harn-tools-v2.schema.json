@@ -625,6 +625,10 @@
         },
         "side_effect_level": {
           "$ref": "#/$defs/SideEffectLevel"
+        },
+        "source": {
+          "$ref": "#/$defs/ToolPolicySource",
+          "default": "declared"
         }
       },
       "required": [
@@ -632,6 +636,14 @@
         "side_effect_level"
       ],
       "type": "object"
+    },
+    "ToolPolicySource": {
+      "description": "Whether a classification was declared or projected from legacy annotations.",
+      "enum": [
+        "declared",
+        "legacy_annotations"
+      ],
+      "type": "string"
     },
     "ToolPresentationAnnotations": {
       "additionalProperties": false,

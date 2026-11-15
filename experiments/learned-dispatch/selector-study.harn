@@ -1,0 +1,77 @@
+import { LearnedRequest } from "std/agent/learned"
+import { DecisionPolicy, DecisionRoute, router } from "std/decision"
+import { schema_contract } from "std/schema"
+
+type SelectorConfig = {selector: {id: string, instructions: string, policy: DecisionPolicy}}
+
+type PackageReceipt = {name: string, dispatch: {meaning: string, minimum_probability: float}}
+
+type Case = {id: string, request: string, expected: string}
+
+type Corpus = {development: list<Case>}
+
+fn main(harness: Harness) {
+  const project = argv[0]
+  const corpus_path = argv[1]
+  const output = argv[2]
+  guard project != nil && corpus_path != nil && output != nil else {
+    throw "usage: selector-study.harn PROJECT CORPUS OUTPUT.json"
+  }
+  const config: SelectorConfig = schema_expect(
+    json_parse(harness.fs.read_text(path_join(project, ".burin/learned-workflows.json"))),
+    schema_of(SelectorConfig),
+  )
+  const package: PackageReceipt = schema_expect(
+    json_parse(
+      harness.fs.read_text(
+        path_join(project, ".burin/capabilities/add-standard-resource/receipt.json"),
+      ),
+    ),
+    schema_of(PackageReceipt),
+  )
+  const corpus: Corpus = schema_expect(
+    json_parse(harness.fs.read_text(corpus_path)),
+    schema_of(Corpus),
+  )
+  const route: DecisionRoute<LearnedRequest, string> = {
+    name: package.name,
+    meaning: package.dispatch.meaning,
+    minimum_probability: package.dispatch.minimum_probability,
+    handle: { _harness: Harness, _request: LearnedRequest, _evidence -> package.name },
+  }
+  const selection = router(
+    {
+      id: config.selector.id,
+      input: schema_contract(schema_of(LearnedRequest), []),
+      instructions: config.selector.instructions,
+      routes: [route],
+      policy: config.selector.policy,
+    },
+  )
+  let rows: list = []
+  for sample in corpus.development {
+    for repetition in range(3) {
+      const assessment = selection.assess(harness.llm, {request: sample.request})
+      const evidence = match assessment.kind {
+        "matched" -> { assessment.evidence }
+        "unmatched" -> { assessment.evidence }
+        "uncertain" -> { assessment.evidence }
+        _ -> {
+          throw "selector study did not reach a model answer: ${json_stringify(assessment)}"
+        }
+      }
+      rows.push(
+        {
+          id: "${sample.id}-${repetition}",
+          expected: sample.expected,
+          evidence: evidence,
+          receipt: harness.llm.evaluation_receipt(evidence.receipt),
+        },
+      )
+    }
+  }
+  harness.fs.write_text(output, json_stringify({definition: selection.definition, rows: rows}))
+  harness.stdio.println(
+    json_stringify({definition_digest: selection.definition.digest, trials: len(rows)}),
+  )
+}

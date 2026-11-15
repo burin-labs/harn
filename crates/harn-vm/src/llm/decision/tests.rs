@@ -994,7 +994,7 @@ fn native_policy() -> VmValue {
     ])
 }
 
-fn run_native() -> (VmValue, super::receipt::EvaluationReceipt, u32) {
+pub(crate) fn run_native() -> (VmValue, super::receipt::EvaluationReceipt, u32) {
     let route = DecisionContract {
         protocol: DecisionProtocol::OpenrouterDecisions,
         structured_output_strategy: None,
@@ -1009,6 +1009,10 @@ fn run_native() -> (VmValue, super::receipt::EvaluationReceipt, u32) {
         vec![Ok(answering(0.95))],
     );
     (outcome.into_value(), receipt, requests)
+}
+
+pub(crate) fn record_native_fixture(receipt: &mut super::receipt::EvaluationReceipt) {
+    super::accounting::record_native(receipt);
 }
 
 fn field(value: &VmValue, key: &str) -> String {

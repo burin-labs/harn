@@ -57,7 +57,12 @@ pub(crate) fn enforce_contract(
 }
 
 pub(crate) async fn preparation<F: Future>(future: F) -> F::Output {
-    INVOCATION.scope(None, PREPARING.scope((), future)).await
+    INVOCATION.scope(None, read_only(future)).await
+}
+
+/// A handler's effect ceiling retains its already-bound invocation facts.
+pub(crate) async fn read_only<F: Future>(future: F) -> F::Output {
+    PREPARING.scope((), future).await
 }
 
 pub(crate) async fn scope<F: Future>(

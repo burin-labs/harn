@@ -89,7 +89,9 @@ export type ToolIcon = { src: string, mimeType?: string | null, sizes?: Array<st
 
 export type ToolExecution = { taskSupport: ToolTaskSupport, };
 
-export type ToolPolicy = { kind: ToolKind, side_effect_level: SideEffectLevel, };
+export type ToolPolicySource = "declared" | "legacy_annotations";
+
+export type ToolPolicy = { kind: ToolKind, side_effect_level: SideEffectLevel, source: ToolPolicySource, };
 
 export type ToolCatalogComponents = { schemas: Readonly<Record<string, JsonSchema202012>>, };
 

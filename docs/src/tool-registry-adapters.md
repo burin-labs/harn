@@ -90,7 +90,8 @@ The registry's `annotations` record also carries Harn runtime metadata. The
 portable catalog selects only `title` and the four MCP presentation hints;
 lifecycle, inline-result, and artifact-emission annotations remain runtime-only.
 Legacy `kind` and `side_effect_level` values normalize into the typed `policy`
-field rather than presentation metadata.
+field with `source: "legacy_annotations"` rather than presentation metadata.
+They retain their routing classification without imposing a new handler ceiling.
 
 ## Runtime value conversion
 
@@ -348,7 +349,7 @@ and other cross-entry invariants.
 - `ToolAudience`: `"cli" | "mcp" | "catalog" | "dashboard" | "agent"`
 - `ToolGovernance`: `{audiences: list<ToolAudience>}`
 - `ToolSource`: `{kind: string, id?: string, binding?: dict}`
-- `ToolPolicy`: canonical `kind` and `side_effect_level` literals
+- `ToolPolicy`: canonical `kind`, `side_effect_level`, and declaration `source`
 - `ToolExecution`: `{taskSupport: "forbidden" | "optional" | "required"}`
 - `ToolIcon`: `{src, mimeType?, sizes?, theme?}`
 
@@ -356,6 +357,12 @@ Set a tool definition's typed classification with `execution_policy`. The
 static catalog exposes that classification as `policy`. The older `policy`
 definition field remains the runtime's routing and argument policy and is not
 mistaken for an execution classification.
+
+Explicit execution policies carry `source: "declared"`; canonical JSON policies
+that omit `source` default to declared. A declared `read_only` policy enforces
+the handler's read-only ceiling on ordinary local dispatch and served MCP calls.
+Legacy annotation projections and MCP presentation hints remain advisory and
+cannot satisfy the learned-preflight contract. Adapters preserve policy provenance.
 
 `source.binding` is the protocol-specific escape hatch. `_meta` remains the
 namespaced extension point for presentation protocols. Put behavior and policy

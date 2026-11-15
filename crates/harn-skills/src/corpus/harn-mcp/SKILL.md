@@ -81,16 +81,23 @@ client reads fixture state when the inbound request arrives.
 ## Serve a Harn pipeline over MCP
 
 ```harn
+type GreetingInput = {name: string}
+
 pipeline main(harness: Harness) {
   let tools = tool_registry()
   tools = tool_define(tools, "greet", "Greet someone", {
-    parameters: {name: "string"},
-    handler: { args -> "Hello, ${args.name}!" },
+    inputSchema: schema_to_json_schema(schema_of(GreetingInput)) + {additionalProperties: false},
+    handler: { args: GreetingInput -> "Hello, ${args.name}!" },
     annotations: {title: "Greeter", readOnlyHint: true},
   })
   harness.tools.mcp_tools(tools)
 }
 ```
+
+Keep required arguments in the advertised input schema. Derive it from a named
+input type with `schema_to_json_schema(schema_of(Input))`; use
+`additionalProperties: false` to refuse extra arguments. An `arg_schema` value
+inside annotations does not define the tool's input contract.
 
 Add `harness.tools.mcp_resource(...)`, `harness.tools.mcp_resource_template(...)`,
 and `harness.tools.mcp_prompt(...)` for the other surfaces. Run the script with
@@ -104,6 +111,47 @@ and `harness.tools.mcp_prompt(...)` for the other surfaces. Run the script with
 - Out-of-scope features fail with `error.data.type = "mcp.unsupportedFeature"`.
 - Set `readOnlyHint` and `destructiveHint` honestly. Clients gate approval on
   them.
+
+## Write and verify workspace files
+
+For a generated tool package, `harness.fs.project_root()` names the package.
+Use `harness.fs.cwd()` for the consumer workspace. Validate parameters, project
+assumptions, and every output path before the first write. Render content in
+pure helpers so authored tests can check exact output for new inputs.
+
+Use `replace_text` from `std/fs` to create a file without replacing an existing
+target. Its `create: true` option permits creation; `overwrite: false` prevents
+replacement. Read the file back before issuing a postcondition:
+
+```harn,ignore
+import { agent_tool_handler_result, agent_tool_postcondition } from "std/agent/tool_lifecycle"
+import { replace_text } from "std/fs"
+
+fn create_checked_file(fs: HarnessFs, relative: string, content: string) {
+  // The caller has validated a normalized repository-relative path.
+  const path = path_join(fs.cwd(), relative)
+  const receipt = replace_text(fs, path, content, {create: true, overwrite: false})
+  require receipt.status == "created", "target was not created"
+  require fs.read_text(path) == content, "written content differs"
+  return agent_tool_handler_result(
+    "Created and checked ${relative}.",
+    {
+      mutation_status: "applied",
+      changed_paths: [relative],
+      verification: agent_tool_postcondition([relative]),
+    },
+  )
+}
+```
+
+Annotate a writing tool with `kind: "edit"` and
+`side_effect_level: "workspace_write"`. For multiple outputs, preflight all
+targets and include every changed path in the result. Partial failure must
+remain an error. Never issue a successful postcondition for unchecked files.
+Tests should dispatch the tool through its public registry, check the typed
+result with `agent_tool_result_data`, and read the actual files. Use
+`with_temp_dir(harness.fs, { root: string -> ... })` from `std/testing` for
+isolated fixtures; pass the fixture root into your registry factory.
 
 ## Test without a network
 

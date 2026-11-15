@@ -133,8 +133,14 @@ async fn testing_with_evaluation_fixtures_impl(
     vm.set_evaluation_replay(scope.clone());
     let result = vm.call_callable_owned(&body, call_args).await;
     ctx.forward_output(&vm.take_output());
-    scope.finish()?;
-    result
+    let replay_result = scope.finish();
+    match result {
+        Err(error) => Err(error),
+        Ok(value) => {
+            replay_result?;
+            Ok(value)
+        }
+    }
 }
 
 /// Test-only recursion allowance for mocked delegated-agent fixtures.

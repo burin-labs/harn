@@ -189,6 +189,7 @@ pub fn pattern_learning_import_session_records(harness: Harness, options: any = 
           {
             source_id: evidence_key,
             session_id: session_id,
+            session_store_root: pl_text(options?.session_store_root),
             run_id: run_id,
             prompt: prompt,
             tool_sequence: pl_session_tool_sequence(run_events),
@@ -787,6 +788,7 @@ pub fn pattern_learning_record_curated_batch(
   return {
     accepted: true,
     decision: len(accepted) == 0 ? "no_candidate" : "proposed",
+    decline_reason: pl_text(batch?.decline_reason),
     proposal_count: len(accepted),
     proposals: accepted,
   }

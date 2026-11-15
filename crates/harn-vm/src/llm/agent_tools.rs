@@ -46,7 +46,12 @@ async fn run_tool_handler(
     let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
     let outcome = crate::tool_registry::preparation_scope::audience(
         audience,
-        crate::tool_handler_scope::scope(vm.call_closure_pub(handler, &[args_vm])),
+        crate::tool_registry::scope_tool_handler(
+            prepared
+                .as_ref()
+                .and_then(|catalog| catalog.entry(tool_name)),
+            vm.call_closure_pub(handler, &[args_vm]),
+        ),
     )
     .await;
     let captured = vm.take_output();

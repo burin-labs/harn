@@ -201,6 +201,7 @@ impl DecisionBackend for NativeDecisionBackend {
         for (name, value) in privacy_plan(&request).headers {
             pending = pending.header(name, value);
         }
+        crate::llm::provider_dispatch::record_dispatch();
         let response =
             pending
                 .send()
