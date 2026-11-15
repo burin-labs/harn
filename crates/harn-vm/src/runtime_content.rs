@@ -10,6 +10,8 @@ use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
+mod artifact;
+
 const FINGERPRINT_SCHEMA: &str = "harn.runtime_content_fingerprint.v1";
 const CONTENT_DIGEST_DOMAIN: &[u8] = b"harn.runtime-content.v1\0";
 pub(crate) const MCP_RUNTIME_CONTENT_META_KEY: &str = "dev.harn/runtime-content";
@@ -136,9 +138,7 @@ fn fingerprint_from_parts(
     compatibility: RuntimeCompatibilityFingerprint,
     source_revision: Option<String>,
 ) -> RuntimeContentFingerprint {
-    let artifact_id = buildid::build_id()
-        .filter(|id| !id.is_empty())
-        .map(hex::encode);
+    let artifact_id = artifact::linked_id();
     fingerprint_from_artifact(
         harn_version,
         embedded_stdlib_digest,
@@ -372,12 +372,7 @@ mod tests {
             RuntimeBuildFeatures::linked()
         );
         assert_eq!(actual.content_sha256.len(), 64);
-        assert_eq!(
-            actual.artifact_id,
-            buildid::build_id()
-                .filter(|id| !id.is_empty())
-                .map(hex::encode)
-        );
+        assert_eq!(actual.artifact_id, artifact::linked_id());
         assert!(
             actual.artifact_id.as_ref().is_some_and(|id| !id.is_empty()),
             "this native test must measure the running artifact"
