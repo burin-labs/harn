@@ -74,13 +74,11 @@ pub(super) fn declared_workspace_roots(policy: &CapabilityPolicy) -> Vec<PathBuf
 }
 
 pub(super) fn normalized_declared_read_only_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    let mut roots: Vec<PathBuf> = Vec::new();
-    for root in &policy.read_only_roots {
-        let root = normalize_for_policy(&super::resolve_policy_path(root));
-        if !roots.contains(&root) {
-            roots.push(root);
-        }
-    }
+    let mut roots = super::policy_projection::host_resolved_roots(
+        policy,
+        policy.read_only_roots.iter().map(PathBuf::from),
+        super::policy_projection::RootUse::Read,
+    );
     // Read-only mounts the host added to the session read like a declared
     // read-only root: same scope for the file builtins and the child profile.
     for mounted in crate::agent_sessions::current_session_mounts() {
