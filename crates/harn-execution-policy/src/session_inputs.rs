@@ -361,17 +361,25 @@ impl SessionInputs {
 
     /// Copy unmatched bytes unchanged, including non-text command output.
     pub fn redact_bytes(&self, text: &[u8]) -> Vec<u8> {
+        self.redact_bytes_from(text, 0)
+    }
+
+    /// Redact `text` but return only the output for bytes at `from` and after,
+    /// for a stream whose first `from` bytes were already released. A secret
+    /// that began in the released bytes still has the rest of its value
+    /// replaced by one marker.
+    pub fn redact_bytes_from(&self, text: &[u8], from: usize) -> Vec<u8> {
         let Some(spans) = secret_spans(&self.secret_values(), text) else {
             return b"[redacted]".to_vec();
         };
-        let mut result = Vec::with_capacity(text.len());
-        let mut cursor = 0;
-        for span in spans {
-            result.extend_from_slice(&text[cursor..span.start]);
+        let mut result = Vec::with_capacity(text.len().saturating_sub(from));
+        let mut cursor = from;
+        for span in spans.into_iter().filter(|span| span.end > from) {
+            result.extend_from_slice(&text[cursor..span.start.max(cursor)]);
             result.extend_from_slice(b"[redacted]");
             cursor = span.end;
         }
-        result.extend_from_slice(&text[cursor..]);
+        result.extend_from_slice(&text[cursor.min(text.len())..]);
         result
     }
 

@@ -134,16 +134,25 @@ impl OutputFilter {
         StreamRedactor {
             filter: self.0.clone(),
             pending: Vec::new(),
+            released: 0,
         }
     }
 }
 
-/// Redacts one output stream before anything reads or stores it. A tail that
-/// begins a filtered value is held until the next chunk or the end of the
-/// stream, so a value split across reads is still caught whole.
+/// Redacts one output stream before anything reads or stores it. A tail of two
+/// or more bytes that begins a filtered value is held until the next chunk or
+/// the end of the stream, so a value split across reads is still caught whole.
+///
+/// A one-byte tail is released at once: a prompt that happens to end in a
+/// value's first byte must reach an output wait while its program waits for
+/// input. The byte is kept as context, so if later output completes the value,
+/// the rest of it is still replaced and only that first byte was shown.
 pub struct StreamRedactor {
     filter: Store,
+    /// Bytes not yet settled. The first `released` of them were already
+    /// emitted and are kept only so a value they begin is still recognized.
     pending: Vec<u8>,
+    released: usize,
 }
 
 impl StreamRedactor {
@@ -153,19 +162,35 @@ impl StreamRedactor {
         self.pending.extend_from_slice(chunk);
         let store = self.filter.lock();
         if !store.has_secret_filters() {
-            return std::mem::take(&mut self.pending);
+            let fresh = self.pending.split_off(self.released);
+            self.pending.clear();
+            self.released = 0;
+            return fresh;
         }
         let settled = store.settled_len(&self.pending);
-        let redacted = store.redact_bytes(&self.pending[..settled]);
+        let shown = if self.pending.len() - settled == 1 {
+            self.pending.len()
+        } else {
+            settled
+        };
+        if shown <= self.released {
+            return Vec::new();
+        }
+        let redacted = store.redact_bytes_from(&self.pending[..shown], self.released);
         drop(store);
         self.pending.drain(..settled);
+        self.released = shown - settled;
         redacted
     }
 
     /// The redacted held tail, once the stream has ended.
     pub fn finish(&mut self) -> Vec<u8> {
+        let released = std::mem::take(&mut self.released);
         let pending = std::mem::take(&mut self.pending);
-        self.filter.lock().redact_bytes(&pending)
+        if pending.len() <= released {
+            return Vec::new();
+        }
+        self.filter.lock().redact_bytes_from(&pending, released)
     }
 }
 

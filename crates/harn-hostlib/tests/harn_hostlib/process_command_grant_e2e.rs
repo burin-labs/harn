@@ -77,6 +77,10 @@ case "$1 $2" in
     pad=$(head -c 8186 /dev/zero | tr '\0' x)
     printf '%s%s\n' "$pad" "$token"
     echo ready; sleep 2; exit 0 ;;
+  "api prompt")
+    printf 'continue? %s' "$(printf '%s' "$token" | cut -c1)"; sleep 3
+    printf '%s\n' "$(printf '%s' "$token" | cut -c2-)"
+    exit 0 ;;
 esac
 if [ -n "$1" ] && [ -f "$config" ]; then
   value=$(sed -n "s/^[[:space:]]*$1:[[:space:]]*//p" "$config" | head -n 1 | sed "s/^'//; s/'\$//")
@@ -559,6 +563,47 @@ fn a_backgrounded_granted_command_is_redacted_for_every_live_reader() {
             "part of a granted value reached a reader:\n{text}"
         );
     }
+}
+
+/// A prompt that ends in the first byte of a granted value reaches an output
+/// wait while its program is still waiting, instead of being held until the
+/// program exits. When the program then prints the rest of the value, that
+/// rest is still redacted: only the one byte the prompt ended in was shown.
+#[test]
+fn a_prompt_ending_in_a_granted_values_first_byte_reaches_an_output_wait() {
+    let _env_guard = super::process_tools_e2e::lock_env();
+    let fixture = Fixture::new();
+    let _session = in_session();
+
+    let mut request = fixture.request(fixture.workspace.path());
+    request.put(
+        "argv",
+        VmValue::list(["gh", "api", "prompt"].map(vm_string).to_vec()),
+    );
+    request.put_int("background_after_ms", 100);
+    let started = run_dict(request).unwrap();
+    assert_eq!(require_str(&started, "status"), "running", "{started:?}");
+    let handle_id = require_str(&started, "handle_id");
+    let completion = harn_hostlib::tools::long_running::register_completion_notifier(&handle_id)
+        .expect("a live handle");
+
+    let prompt = format!("continue? {}", &PROBE[..1]);
+    let waited = wait_for_output(&handle_id, &prompt, false, 2_000);
+    assert!(
+        require_bool(&waited, "matched"),
+        "the prompt was withheld while its program waited: {waited:?}"
+    );
+
+    completion.recv().expect("the command finishes");
+    let stdout = std::fs::read_to_string(require_str(&started, "stdout_path")).unwrap();
+    assert!(
+        stdout.ends_with(&format!("{prompt}[redacted]\n")),
+        "the rest of the value was not redacted: {stdout}"
+    );
+    assert!(
+        !stdout.contains(&PROBE[1..]),
+        "a granted value leaked: {stdout}"
+    );
 }
 
 #[test]

@@ -227,11 +227,40 @@ fn a_streamed_value_is_redacted_wherever_a_read_splits_it() {
             }
             let mut joined = chunks.concat();
             joined.extend(stream.finish());
-            assert_eq!(joined, whole, "split at {first}/{second}");
+            // A read that ends on a value's first byte releases that byte,
+            // and the rest of the value still redacts.
+            let joined = String::from_utf8(joined)
+                .unwrap()
+                .replace("s[redacted]", "[redacted]");
+            assert_eq!(
+                joined.as_bytes(),
+                whole.as_slice(),
+                "split at {first}/{second}"
+            );
         }
     }
     let mut stream = filter.stream();
     assert_eq!(stream.push(b"ready\n"), b"ready\n");
     assert_eq!(stream.push(b"token=stream-sec"), b"token=");
     assert_eq!(stream.finish(), b"stream-sec");
+}
+
+/// A prompt ending in a filtered value's first byte is not held, so an output
+/// wait sees it while its program waits for input. If the value then
+/// completes, everything after that byte is still redacted.
+#[test]
+fn a_one_byte_tail_is_released_and_the_value_it_begins_still_redacts() {
+    let store = super::Store::default();
+    assert!(store.lock().add_filter("stream-secret-value"));
+    let filter = super::OutputFilter(store);
+    let mut stream = filter.stream();
+    assert_eq!(stream.push(b"continue? s"), b"continue? s");
+    assert_eq!(stream.push(b"tream-secret-value!"), b"[redacted]!");
+    assert_eq!(stream.finish(), b"");
+
+    let mut stream = filter.stream();
+    assert_eq!(stream.push(b"x s"), b"x s");
+    assert_eq!(stream.push(b"t"), b"");
+    assert_eq!(stream.push(b"op"), b"top");
+    assert_eq!(stream.finish(), b"");
 }
