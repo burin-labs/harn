@@ -61,12 +61,26 @@ fn file_group_crash_fixture() {
 }
 
 fn interrupted_move(creation_first: bool, staged: bool) -> tempfile::TempDir {
+    interrupted_move_with_cached_reader(creation_first, staged, false)
+}
+
+fn interrupted_move_with_cached_reader(
+    creation_first: bool,
+    staged: bool,
+    cache_reader: bool,
+) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().canonicalize().unwrap();
     let old = root.join(if creation_first { "Z.java" } else { "A.java" });
     std::fs::write(&old, b"class Old {}").unwrap();
     std::fs::set_permissions(&old, std::fs::Permissions::from_mode(0o755)).unwrap();
     std::fs::write(root.join("M.java"), b"Old reference").unwrap();
+    if cache_reader {
+        let _locks = scope_conditional_replace_lock_root(root.join("locks"));
+        let session = recovery_session(&root);
+        crate::fs::configure_session_root(&session, &root);
+        assert!(staged_status(&session).unwrap().pending_writes.is_empty());
+    }
     let child = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
@@ -100,6 +114,50 @@ fn interrupted_move(creation_first: bool, staged: bool) -> tempfile::TempDir {
         b"Old reference"
     );
     dir
+}
+
+#[test]
+fn cached_readers_reload_interrupted_groups_before_reads_status_or_root_changes() {
+    let _env = crate::process::test_support::declare_inherited();
+    for staged in [false, true] {
+        for first in ["read", "read_dir", "status", "configure"] {
+            let dir = interrupted_move_with_cached_reader(true, staged, true);
+            let root = dir.path().canonicalize().unwrap();
+            let _locks = scope_conditional_replace_lock_root(root.join("locks"));
+            let session = recovery_session(&root);
+            match first {
+                "read" => {
+                    let error = read(&root.join("A.java"), Some(&session))
+                        .expect("pending recovery must not fall through to physical disk")
+                        .unwrap_err();
+                    assert!(error.to_string().contains("incomplete file transaction"));
+                }
+                "read_dir" => {
+                    let error = crate::fs::read_dir(&root, Some(&session))
+                        .expect("pending recovery must not fall through to physical enumeration")
+                        .unwrap_err();
+                    assert!(error.to_string().contains("incomplete file transaction"));
+                }
+                "status" => assert_eq!(staged_status(&session).unwrap().pending_writes.len(), 3),
+                "configure" => {
+                    let unrelated = tempfile::tempdir().unwrap();
+                    crate::fs::configure_session_root(&session, unrelated.path());
+                    assert_eq!(
+                        crate::fs::configured_session_root(&session),
+                        Some(root.clone())
+                    );
+                }
+                _ => unreachable!(),
+            }
+            assert_eq!(staged_status(&session).unwrap().pending_writes.len(), 3);
+            assert!(commit_staged(&session, &[])
+                .unwrap_err()
+                .to_string()
+                .contains("recovered an incomplete file transaction"));
+            assert!(!root.join("A.java").exists());
+            assert_eq!(std::fs::read(root.join("Z.java")).unwrap(), b"class Old {}");
+        }
+    }
 }
 
 #[test]

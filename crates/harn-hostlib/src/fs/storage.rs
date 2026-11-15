@@ -15,18 +15,26 @@ use super::{
 pub(super) fn load_state(session_id: &str, root: Option<PathBuf>) -> Result<SessionState, String> {
     let root = root.unwrap_or_else(default_root);
     let manifest_path = manifest_path(&root, session_id);
-    if manifest_path.exists() {
-        let text = fs::read_to_string(&manifest_path)
-            .map_err(|err| format!("read {}: {err}", manifest_path.display()))?;
+    let text = match fs::read_to_string(&manifest_path) {
+        Ok(text) => Some(text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(format!("read {}: {error}", manifest_path.display())),
+    };
+    if let Some(text) = text {
         let manifest: Manifest = serde_json::from_str(&text)
             .map_err(|err| format!("parse {}: {err}", manifest_path.display()))?;
-        if manifest.version != MANIFEST_VERSION {
-            return Err(format!(
-                "unsupported staged fs manifest version {} in {}",
-                manifest.version,
-                manifest_path.display()
-            ));
-        }
+        let atomic_groups = match manifest.version {
+            1 if manifest.atomic_groups.is_none() => BTreeMap::new(),
+            MANIFEST_VERSION => manifest
+                .atomic_groups
+                .ok_or("staged fs manifest is missing its mandatory file-group census")?,
+            version => {
+                return Err(format!(
+                    "unsupported staged fs manifest version {version} in {}",
+                    manifest_path.display()
+                ))
+            }
+        };
         if manifest.session_id != session_id {
             return Err(format!(
                 "staged fs manifest session id mismatch in {}",
@@ -37,14 +45,14 @@ pub(super) fn load_state(session_id: &str, root: Option<PathBuf>) -> Result<Sess
         if manifest_root != root {
             return Err("staged fs manifest root does not match its configured root".into());
         }
-        for group in manifest.atomic_groups.values() {
+        for group in atomic_groups.values() {
             group.validate(&manifest_root)?;
         }
         return Ok(SessionState {
             session_id: manifest.session_id,
             mode: manifest.mode,
             root: manifest_root,
-            atomic_groups: manifest.atomic_groups,
+            atomic_groups,
             entries: manifest
                 .entries
                 .into_iter()
@@ -74,7 +82,7 @@ pub(super) fn persist_state(
         session_id: state.session_id.clone(),
         mode: state.mode,
         root: state.root.to_string_lossy().into_owned(),
-        atomic_groups: state.atomic_groups.clone(),
+        atomic_groups: Some(state.atomic_groups.clone()),
         entries: state
             .entries
             .iter()
@@ -167,3 +175,6 @@ fn prune_unreferenced_bodies(state: &SessionState) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

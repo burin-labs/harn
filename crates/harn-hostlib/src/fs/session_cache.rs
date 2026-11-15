@@ -3,43 +3,48 @@ use std::path::{Path, PathBuf};
 
 use super::{default_root, load_state, lock_sessions, manifest_path, HostlibError, SessionState};
 
-type LockedMutation = (
+type LockedSession = (
     std::sync::MutexGuard<'static, SessionCache>,
     SessionState,
     Vec<harn_vm::conditional_replace::ConditionalReplaceLock>,
 );
 
-pub(super) fn mutation_state(
+pub(super) fn locked_state(
     session_id: &str,
     proposed_root: Option<PathBuf>,
     builtin: &'static str,
-) -> Result<LockedMutation, HostlibError> {
-    let guard = lock_sessions();
-    let current = guard
-        .get(session_id)
-        .map_err(|message| HostlibError::Backend { builtin, message })?;
-    let current_root = current
-        .map(|state| state.root.clone())
+) -> Result<LockedSession, HostlibError> {
+    let mut guard = lock_sessions();
+    let current_root = guard
+        .root(session_id)
+        .map(Path::to_path_buf)
         .or_else(|| proposed_root.clone())
         .unwrap_or_else(default_root);
     let mut manifests = vec![manifest_path(&current_root, session_id)];
     if let Some(root) = &proposed_root {
         manifests.push(manifest_path(root, session_id));
     }
-    let locks = harn_vm::conditional_replace::acquire_locks(&manifests).map_err(|error| {
-        HostlibError::Backend {
-            builtin,
-            message: format!("lock staged manifest: {error}"),
+    let locks = match harn_vm::conditional_replace::acquire_locks(&manifests) {
+        Ok(locks) => locks,
+        Err(error) => {
+            let message = format!("lock staged manifest: {error}");
+            guard.unavailable(session_id, current_root, message.clone());
+            return Err(HostlibError::Backend { builtin, message });
         }
-    })?;
-    let mut state = load_state(session_id, Some(current_root))
-        .map_err(|message| HostlibError::Backend { builtin, message })?;
+    };
+    let mut load = |root: PathBuf| {
+        load_state(session_id, Some(root.clone())).map_err(|message| {
+            guard.unavailable(session_id, root, message.clone());
+            HostlibError::Backend { builtin, message }
+        })
+    };
+    let mut state = load(current_root)?;
     if state.entries.is_empty() && state.atomic_groups.is_empty() {
         if let Some(root) = proposed_root.filter(|root| *root != state.root) {
-            state = load_state(session_id, Some(root))
-                .map_err(|message| HostlibError::Backend { builtin, message })?;
+            state = load(root)?;
         }
     }
+    guard.insert(session_id.to_string(), state.clone());
     Ok((guard, state, locks))
 }
 
@@ -56,12 +61,9 @@ impl SessionCache {
         self.0.insert(id, CachedSession::Loaded(state));
     }
 
-    pub(super) fn get(&self, id: &str) -> Result<Option<&SessionState>, String> {
-        match self.0.get(id) {
-            Some(CachedSession::Loaded(state)) => Ok(Some(state)),
-            Some(CachedSession::Unavailable { reason, .. }) => Err(reason.clone()),
-            None => Ok(None),
-        }
+    fn unavailable(&mut self, id: &str, root: PathBuf, reason: String) {
+        self.0
+            .insert(id.to_string(), CachedSession::Unavailable { root, reason });
     }
 
     pub(super) fn remove(&mut self, id: &str) -> Result<Option<SessionState>, String> {
@@ -79,23 +81,6 @@ impl SessionCache {
         match self.0.get(id)? {
             CachedSession::Loaded(state) => Some(&state.root),
             CachedSession::Unavailable { root, .. } => Some(root),
-        }
-    }
-
-    pub(super) fn configure(&mut self, id: &str, root: PathBuf) {
-        match self.0.get_mut(id) {
-            Some(CachedSession::Loaded(state)) => {
-                if state.entries.is_empty() && state.atomic_groups.is_empty() {
-                    state.root = root;
-                }
-            }
-            Some(CachedSession::Unavailable { .. }) | None => {
-                let slot = match load_state(id, Some(root.clone())) {
-                    Ok(state) => CachedSession::Loaded(state),
-                    Err(reason) => CachedSession::Unavailable { root, reason },
-                };
-                self.0.insert(id.to_string(), slot);
-            }
         }
     }
 }

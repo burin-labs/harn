@@ -191,7 +191,7 @@ pub(crate) fn apply_changes(
     before_effects: impl FnOnce(FsMode) -> Result<(), crate::error::HostlibError>,
 ) -> Result<(), crate::error::HostlibError> {
     use super::paths::{active_session_id, normalize_logical};
-    use super::{mutation_state, persist_state, write_body, StagedEntry};
+    use super::{locked_state, persist_state, write_body, StagedEntry};
     use harn_vm::process_sandbox::{check_fs_path_scope, FsAccess};
     use std::collections::BTreeSet;
 
@@ -202,8 +202,7 @@ pub(crate) fn apply_changes(
     let root = normalize_logical(root);
     let session = active_session_id(session).unwrap_or_else(|| "file-refactor".into());
     let snapshot = {
-        let (_cache, state, _manifest_locks) =
-            mutation_state(&session, Some(root.clone()), builtin)?;
+        let (_cache, state, _manifest_locks) = locked_state(&session, Some(root.clone()), builtin)?;
         state
     };
     if snapshot.root != root {
@@ -264,7 +263,7 @@ pub(crate) fn apply_changes(
     }
     {
         let (mut cache, mut state, _manifest_locks) =
-            mutation_state(&session, Some(root.clone()), builtin)?;
+            locked_state(&session, Some(root.clone()), builtin)?;
         let pending: Vec<_> = state
             .atomic_groups
             .iter()
@@ -293,8 +292,7 @@ pub(crate) fn apply_changes(
     }
     input_images(&snapshot, &root, changes, false).map_err(reject)?;
     before_effects(snapshot.mode)?;
-    let (mut cache, state, _manifest_locks) =
-        mutation_state(&session, Some(root.clone()), builtin)?;
+    let (mut cache, state, _manifest_locks) = locked_state(&session, Some(root.clone()), builtin)?;
     if state.mode != snapshot.mode || state.root != root {
         return Err(reject(
             "file transaction session changed while preparing; retry".into(),

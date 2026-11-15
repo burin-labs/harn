@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use super::{effects, Group, Image, Images};
 use crate::fs::{
-    check_fs_path_scope, commit_entry, emit_staged_update, mutation_state, persist_state,
+    check_fs_path_scope, commit_entry, emit_staged_update, locked_state, persist_state,
     selected_paths, to_agent_path, write_body, CommitResult, DiscardResult, FsAccess, FsMode,
     HostlibError, SessionState, StagedEntry, COMMIT_BUILTIN, DISCARD_BUILTIN,
 };
@@ -89,7 +89,7 @@ pub(in crate::fs) fn commit(
         message,
     };
     let snapshot = {
-        let (_cache, state, _manifest_locks) = mutation_state(session_id, None, COMMIT_BUILTIN)?;
+        let (_cache, state, _manifest_locks) = locked_state(session_id, None, COMMIT_BUILTIN)?;
         state
     };
     let selected = selected(&snapshot, paths);
@@ -99,7 +99,7 @@ pub(in crate::fs) fn commit(
     if _file_locks.len() != locked.len() {
         return Err(reject("staged paths alias the same destination".into()));
     }
-    let (mut cache, mut state, _manifest_locks) = mutation_state(session_id, None, COMMIT_BUILTIN)?;
+    let (mut cache, mut state, _manifest_locks) = locked_state(session_id, None, COMMIT_BUILTIN)?;
     if state.root != snapshot.root
         || state.entries != snapshot.entries
         || state.atomic_groups != snapshot.atomic_groups
@@ -231,15 +231,14 @@ pub(in crate::fs) fn discard(
         message,
     };
     let snapshot = {
-        let (_cache, state, _manifest_locks) = mutation_state(session_id, None, DISCARD_BUILTIN)?;
+        let (_cache, state, _manifest_locks) = locked_state(session_id, None, DISCARD_BUILTIN)?;
         state
     };
     let selected = selected(&snapshot, paths);
     let locked: Vec<_> = lock_paths(&snapshot, &selected).into_iter().collect();
     let _file_locks = harn_vm::conditional_replace::acquire_locks(&locked)
         .map_err(|error| reject(error.to_string()))?;
-    let (mut cache, mut state, _manifest_locks) =
-        mutation_state(session_id, None, DISCARD_BUILTIN)?;
+    let (mut cache, mut state, _manifest_locks) = locked_state(session_id, None, DISCARD_BUILTIN)?;
     if state.root != snapshot.root
         || state.entries != snapshot.entries
         || state.atomic_groups != snapshot.atomic_groups
