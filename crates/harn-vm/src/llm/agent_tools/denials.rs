@@ -4,51 +4,24 @@ use crate::agent_events::SideEffectCeilingDetails;
 
 pub(super) fn denied_tool_result(tool_name: &str, reason: impl Into<String>) -> serde_json::Value {
     let reason = reason.into();
-    // A bare `{"error":"permission_denied", ...}` tells the model what was
-    // blocked but not what to do instead, so it tends to retry the same denied
-    // call. Add a generic, capability-gate-appropriate next step: don't repeat
-    // the call, find another way to make progress, or ask for the permission.
-    //
-    // RESERVED FOR TRUE POLICY/PERMISSION DENIALS (capability gate, sandbox /
-    // command policy, host rejection). The "Do not retry the same call" wording
-    // is *correct* there — the call is blocked and re-issuing it identically
-    // will be blocked again. Recoverable rejections (bad/missing arguments, an
-    // empty tool name) must NOT use this body: see `recoverable_tool_result`,
-    // which coaches a retry *with the correction* instead.
-    // Name permission-approved alternatives so the model can self-correct in one
-    // turn instead of re-issuing the denied call or guessing another unlisted
-    // name (live fw-gpt-oss-120b transcripts: cheap models emit Codex/container
-    // vocab they were never shown, read a bare denial, and thrash). The active
-    // policy's allowlist is the source of truth for permission, not schema
-    // disclosure. Deferred tools may be named here before their arguments have
-    // been loaded. Label this inventory accordingly rather than inviting the
-    // model to guess those arguments. Omit the clause when the
-    // surface is unbounded (allow-all) so we never assert a misleading list.
-    //
-    // The registry allowlist is only ONE of the gates that can produce this
-    // denial — an approval policy, a sandbox rule, or a host rejection can
-    // block a tool the registry still lists. So the denied tool routinely
-    // appeared in the "available" list of its own denial, telling the model in
-    // one breath that the call is not permitted and that the tool is callable.
-    // Drop it: whatever gate fired, this tool is not available for this call.
-    let allowed: Vec<String> = crate::orchestration::current_allowed_tool_names()
-        .into_iter()
-        .filter(|name| name != tool_name)
-        .collect();
+    // Argument and resource checks can reject a name the policy permits.
+    // Describe this invocation without projecting a new tool-availability policy.
+    let allowed = crate::orchestration::current_allowed_tool_names();
     let permission_hints = if allowed.is_empty() {
         String::new()
     } else {
         format!(
             " Allowed tool names (permission hints): {}. These names do not disclose schemas. \
+             Name permission does not approve these arguments or bypass other checks. \
              Use the advertised tool-search capability before calling a name whose schema has not \
              been supplied; without tool search, choose a tool with a supplied schema.",
             allowed.join(", ")
         )
     };
     let next_step = format!(
-        "The `{tool_name}` tool is not permitted right now. Do not retry the same call. \
-         Make progress with the tools you are allowed to use, or if this capability is \
-         essential, briefly tell the user what you need permission for and why.\
+        "This `{tool_name}` invocation was denied. Do not retry this invocation unchanged. \
+         Address the specific reason before retrying, or choose a permitted approach. \
+         Ask for permission only if resolving that reason requires new permission.\
          {permission_hints}"
     );
     serde_json::json!({
@@ -90,12 +63,12 @@ mod tests {
     use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
 
     #[test]
-    fn a_denied_tool_is_excluded_from_its_permission_hints() {
+    fn an_argument_denial_preserves_the_authoritative_name_permissions() {
         push_execution_policy(CapabilityPolicy {
             tools: vec!["denied".into(), "usable".into()],
             ..Default::default()
         });
-        let result = denied_tool_result("denied", "blocked by approval policy");
+        let result = denied_tool_result("denied", "path is outside the workspace");
         pop_execution_policy();
 
         let available = result["next_step"]
@@ -104,7 +77,34 @@ mod tests {
             .split_once("Allowed tool names (permission hints):")
             .unwrap()
             .1;
-        assert!(!available.contains("denied"));
+        assert!(available.contains("denied"));
         assert!(available.contains("usable"));
+        assert_eq!(result["reason"], "path is outside the workspace");
+        assert!(result["next_step"]
+            .as_str()
+            .unwrap()
+            .contains("invocation was denied"));
+        assert!(!result["next_step"]
+            .as_str()
+            .unwrap()
+            .contains("tool is not permitted"));
+    }
+
+    #[test]
+    fn a_name_denial_does_not_offer_the_disallowed_name() {
+        push_execution_policy(CapabilityPolicy {
+            tools: vec!["usable".into()],
+            ..Default::default()
+        });
+        let result = denied_tool_result("denied", "name is not allowed by the tool policy");
+        pop_execution_policy();
+        let hints = result["next_step"]
+            .as_str()
+            .unwrap()
+            .split_once("Allowed tool names (permission hints):")
+            .unwrap()
+            .1;
+        assert!(!hints.contains("denied"));
+        assert!(hints.contains("usable"));
     }
 }

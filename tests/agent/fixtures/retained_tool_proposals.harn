@@ -194,6 +194,14 @@ fn assert_served_proposals(
     }
   }
   if variant == "resume" || variant == "replay" {
+    const confirmed_result = calls[2].messages.find(
+      { message -> message?.tool_call_id == "confirm" },
+    )
+    assert(
+      confirmed_result != nil,
+      "the next served request must include the real resolution result",
+    )
+    assert_eq(confirmed_result.name, RESOLVE, "provider results must answer the invoked contract")
     assert_eq(original_bodies, 1, "confirmation must not regenerate the stored edit body")
     assert(confirmation_bytes < body_bytes / 3, "confirmation must be shorter than the stored body")
   }
@@ -341,6 +349,13 @@ pub fn retained_proposal_trial(harness: Harness, variant: string) -> RetainedPro
                   assert(
                     type_of(proposal_id) == "string" && proposal_id != "",
                     "the returned proposal must be actionable without retyping its arguments",
+                  )
+                  const observation = to_string(retained.observation)
+                  assert(observation.contains("retained, not executed"), observation)
+                  assert(observation.contains("proposal_id=${proposal_id}"), observation)
+                  assert(
+                    len(observation) < 160,
+                    "a retained receipt carries facts, not repeated tool instructions",
                   )
                   archived_at_proposal = archived
                   if variant == "new_direction" {

@@ -177,13 +177,7 @@ fn __tool_batch_deferred_result(
     proposal_id,
   )
   const name = __tool_registry_name(entry.call)
-  const observation = "[`" + name + "` retained, not executed]\n"
-    + "Review the observation results before deciding whether this proposal is still correct. "
-    + "Its original arguments are stored as proposal_id="
-    + proposal_id
-    + ". "
-    + "Use __harn_resolve_tool_call with that proposal_id and action=resume or action=discard. "
-    + "To change the arguments, discard this proposal and issue a corrected tool call."
+  const observation = "[`${name}` retained, not executed]\nproposal_id=${proposal_id}"
   const result = {
     ok: false,
     status: "deferred",

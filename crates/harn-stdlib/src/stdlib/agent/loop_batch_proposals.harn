@@ -169,7 +169,7 @@ pub fn tool_batch_inject_resolution_tool(options: dict) -> ToolBatchToolProjecti
   const tools = tool_define(
     options?.tools ?? tool_registry(),
     TOOL_BATCH_RESOLUTION_TOOL,
-    "After reading the new results, resume a retained proposal with its original arguments or discard it. Use one call per proposal. Resuming still applies current tool policy.",
+    "Review new observations before choosing whether to resume a retained, unexecuted proposal with its stored original arguments or discard it. Use one call per proposal_id from the retained result. To change arguments, discard and issue a corrected ordinary tool call. Resuming still applies current tool policy.",
     {
       parameters: {
         proposal_id: {type: "string"},
