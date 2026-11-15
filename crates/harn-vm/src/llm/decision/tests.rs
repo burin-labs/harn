@@ -1011,6 +1011,10 @@ pub(crate) fn run_native() -> (VmValue, super::receipt::EvaluationReceipt, u32) 
     (outcome.into_value(), receipt, requests)
 }
 
+pub(crate) fn record_native_fixture(receipt: &mut super::receipt::EvaluationReceipt) {
+    super::accounting::record_native(receipt);
+}
+
 fn field(value: &VmValue, key: &str) -> String {
     value
         .as_dict()

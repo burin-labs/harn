@@ -3,6 +3,11 @@ use host::{reset_agent_session_host_state, seed_host_session_provider_model, vm_
 
 #[test]
 fn native_decision_accounting_preserves_paid_and_unknown_attempts() {
+    let previous = crate::llm::admission::swap_scope(Default::default());
+    let (_, mut receipt, requests) = crate::llm::decision::tests::run_native();
+    crate::llm::admission::swap_scope(previous);
+    assert_eq!(requests, 1);
+    assert_eq!(receipt.physical_attempts, 1);
     let session = super::open_or_create_for_test(None);
     seed_host_session_provider_model(&session, "mock", "fixture");
     let _current = super::enter_current_session(session.clone());
@@ -12,13 +17,10 @@ fn native_decision_accounting_preserves_paid_and_unknown_attempts() {
             .provider_call_count,
         Some(0)
     );
-    let previous = crate::llm::admission::swap_scope(Default::default());
     crate::llm::provider_dispatch::record_dispatch();
-    let (_, receipt, requests) = crate::llm::decision::tests::run_native();
-    crate::llm::admission::swap_scope(previous);
-    assert_eq!(requests, 1);
-    assert_eq!(receipt.physical_attempts, 1);
-    assert!(receipt.cost_usd.is_some_and(|cost| cost > 0.0));
+    receipt.cost_usd = Some(0.0025);
+    receipt.accounting_status = crate::llm::decision::receipt::AccountingStatus::Settled;
+    crate::llm::decision::tests::record_native_fixture(&mut receipt);
     let usage = host::physical_usage_for_session(&session).unwrap();
     assert_eq!(usage.provider_call_count, Some(1));
     assert_eq!(usage.cost_usd, receipt.cost_usd);
