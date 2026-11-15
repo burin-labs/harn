@@ -42,7 +42,10 @@ mod tests {
             ])]),
         )]);
         for (source, granted) in [("true", true), ("false", false), ("nil", false)] {
-            let guard = compiled_closure("guard", &format!("fn guard() {{ return {source} }}"));
+            let guard = compiled_closure(
+                "may_execute",
+                &format!("fn may_execute() {{ return {source} }}"),
+            );
             let call = VmValue::dict([
                 ("id", VmValue::string(format!("guard-{source}"))),
                 ("name", VmValue::string("guarded")),
