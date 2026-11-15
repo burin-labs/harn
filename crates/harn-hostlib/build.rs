@@ -10,6 +10,11 @@ fn main() {
         &fs::read_to_string(schemas.join("edit-proof.json")).expect("read edit proof schema"),
     )
     .expect("parse edit proof schema");
+    let stage_output: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(schemas.join("command-stage-output.json"))
+            .expect("read stage output schema"),
+    )
+    .expect("parse stage output schema");
     let mut entries = discover(&schemas);
     entries.sort();
     let mut pairs = BTreeMap::<(String, String), u8>::new();
@@ -44,6 +49,15 @@ fn main() {
         {
             schema["properties"]["proof"]["$ref"] = serde_json::json!("#/$defs/edit_proof");
             schema["$defs"]["edit_proof"] = proof.clone();
+        }
+        if schema
+            .pointer("/properties/stage_output/$ref")
+            .and_then(serde_json::Value::as_str)
+            == Some("https://harnlang.com/schemas/hostlib/command-stage-output.json")
+        {
+            schema["properties"]["stage_output"]["$ref"] =
+                serde_json::json!("#/$defs/command_stage_output");
+            schema["$defs"]["command_stage_output"] = stage_output.clone();
         }
         let body = serde_json::to_string(&schema).expect("serialize schema");
         generated.push_str(&format!(

@@ -15,6 +15,21 @@ pub type CommandSandboxReport = {
   network: CommandNetworkGrants,
 }
 
+/** Final-stage output observed by the runner, or the reason it was not measured. */
+pub type CommandStageOutput = {status: "unmeasured", reason: string} \
+  | {
+  status: "captured",
+  argv: list<string>,
+  stdout: string,
+  stderr: string,
+  stdout_truncated: bool,
+  stderr_truncated: bool,
+  output_path: string,
+  stdout_path: string,
+  stderr_path: string,
+  line_count: int,
+}
+
 /** Common fields guaranteed by normalized command results. */
 pub type CommandResult = {
   success: bool,
@@ -25,6 +40,7 @@ pub type CommandResult = {
   stdout: string,
   stderr: string,
   sandbox?: CommandSandboxReport,
+  stage_output?: CommandStageOutput,
   ...rest,
 }
 

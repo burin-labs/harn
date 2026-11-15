@@ -34,6 +34,7 @@ use crate::tools::args::to_agent_path;
 use crate::tools::response::ResponseBuilder;
 
 mod artifacts;
+pub(crate) mod stage_output;
 mod toolchain_path;
 
 pub(crate) use self::artifacts::{
@@ -63,6 +64,7 @@ pub(crate) struct SpawnRequest {
 /// Result of running a subprocess to completion (or to the deadline).
 #[derive(Debug, Clone)]
 pub(crate) struct SpawnOutcome {
+    pub(crate) stage_output: Option<stage_output::StageOutput>,
     pub(crate) verifier_receipt: Option<harn_vm::verifier_provenance::VerifierExecutionReceipt>,
     pub(crate) command_id: String,
     pub(crate) cwd: PathBuf,
@@ -99,6 +101,7 @@ pub(crate) struct CaptureConfig {
     pub(crate) merge_stderr: bool,
     pub(crate) max_inline_bytes: usize,
     pub(crate) transport: CaptureTransport,
+    pub(crate) final_stage: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,6 +118,7 @@ impl Default for CaptureConfig {
             merge_stderr: false,
             max_inline_bytes: DEFAULT_MAX_INLINE_BYTES,
             transport: CaptureTransport::Pipe,
+            final_stage: false,
         }
     }
 }
@@ -244,6 +248,7 @@ pub(crate) fn run_with_filter(
     if let Some(granted) = &granted {
         apply_command_grant(granted, &mut spec);
     }
+    let mut stage_capture = stage_output::StageCapture::for_spawn(&mut spec, req.capture)?;
     let call = crate::host_call::HostCallContext::current();
     let scope = call.process_scope();
     let launch_permit = match scope {
@@ -277,6 +282,14 @@ pub(crate) fn run_with_filter(
 
     let (out_rx, stdout_thread) = spawn_reader_thread(handle.take_stdout());
     let (err_rx, stderr_thread) = spawn_reader_thread(handle.take_stderr());
+    let stage_readers = stage_capture
+        .as_mut()
+        .and_then(|stage| stage.take_readers());
+    let (stage_stdout, stage_stderr) = stage_readers
+        .map(|readers| (Some(readers.stdout), Some(readers.stderr)))
+        .unwrap_or((None, None));
+    let (stage_out_rx, stage_stdout_thread) = spawn_reader_thread(stage_stdout);
+    let (stage_err_rx, stage_stderr_thread) = spawn_reader_thread(stage_stderr);
 
     // Poll `harn_vm::op_interrupt::requested` alongside the child wait so
     // scope cancellation, `deadline` expiry, and VM drop terminate the
@@ -316,11 +329,30 @@ pub(crate) fn run_with_filter(
         );
         (stdout_drain, stderr_drain)
     };
+    let stage_stdout_drain = drain_output(
+        stage_out_rx,
+        deadline,
+        wait_killed
+            || stdout_drain.process_cleanup.is_some()
+            || stderr_drain.process_cleanup.is_some(),
+        &killer,
+    );
+    let stage_stderr_drain = drain_output(
+        stage_err_rx,
+        deadline,
+        wait_killed
+            || stdout_drain.process_cleanup.is_some()
+            || stderr_drain.process_cleanup.is_some()
+            || stage_stdout_drain.process_cleanup.is_some(),
+        &killer,
+    );
     // Do not join unconditionally: a descendant that inherited stdout/stderr can
     // keep the pipe open after the direct child exits. The drain helper enforces
     // the same command deadline/interrupt and kills the cleanup-token family.
     drop(stdout_thread);
     drop(stderr_thread);
+    drop(stage_stdout_thread);
+    drop(stage_stderr_thread);
 
     let (stdout_bytes, stderr_bytes) = match file_capture.as_ref() {
         Some(files) => files.read(req.builtin)?,
@@ -328,14 +360,30 @@ pub(crate) fn run_with_filter(
     };
     let stdout_bytes = private_filter.redact_bytes(&stdout_bytes);
     let stderr_bytes = private_filter.redact_bytes(&stderr_bytes);
-    let drain_timed_out = stdout_drain.timed_out || stderr_drain.timed_out;
-    let drain_interrupted = stdout_drain.interrupted || stderr_drain.interrupted;
-    let mut drain_cleanup = stdout_drain.process_cleanup;
-    if let Some(stderr_cleanup) = stderr_drain.process_cleanup {
+    let stage_stdout_bytes = private_filter.redact_bytes(&stage_stdout_drain.bytes);
+    let stage_stderr_bytes = private_filter.redact_bytes(&stage_stderr_drain.bytes);
+    let drain_timed_out = stdout_drain.timed_out
+        || stderr_drain.timed_out
+        || stage_stdout_drain.timed_out
+        || stage_stderr_drain.timed_out;
+    let drain_interrupted = stdout_drain.interrupted
+        || stderr_drain.interrupted
+        || stage_stdout_drain.interrupted
+        || stage_stderr_drain.interrupted;
+    let mut drain_cleanup = None::<process_handle::ProcessCleanupReport>;
+    for cleanup in [
+        stdout_drain.process_cleanup,
+        stderr_drain.process_cleanup,
+        stage_stdout_drain.process_cleanup,
+        stage_stderr_drain.process_cleanup,
+    ]
+    .into_iter()
+    .flatten()
+    {
         if let Some(existing) = drain_cleanup.as_mut() {
-            existing.merge(stderr_cleanup);
+            existing.merge(cleanup);
         } else {
-            drain_cleanup = Some(stderr_cleanup);
+            drain_cleanup = Some(cleanup);
         }
     }
 
@@ -433,6 +481,33 @@ pub(crate) fn run_with_filter(
     if let Some(refusal) = sandbox_assessment.refusal.as_ref() {
         refusal.emit();
     }
+    let stage_output = stage_capture
+        .as_ref()
+        .map(|stage| {
+            if stdout_drain.read_failed
+                || stderr_drain.read_failed
+                || stage_stdout_drain.read_failed
+                || stage_stderr_drain.read_failed
+            {
+                return Ok(stage_output::StageOutput::Unmeasured {
+                    reason: "capture_read_failed",
+                });
+            }
+            stage.finish(
+                &command_id,
+                stage_output::StageOutputBytes {
+                    relay_complete: handle.stage_output_complete(),
+                    stdout: &stdout_bytes,
+                    stderr: &stderr_bytes,
+                    stage_stdout: &stage_stdout_bytes,
+                    stage_stderr: &stage_stderr_bytes,
+                },
+                command_status == CommandStatus::Completed && signal.is_none(),
+                req.capture,
+                &private_filter,
+            )
+        })
+        .transpose()?;
     let artifacts = persist_artifacts(&command_id, &stdout_bytes, &stderr_bytes, None)?;
     let inline = inline_output(&stdout_bytes, &stderr_bytes, req.capture);
 
@@ -445,6 +520,7 @@ pub(crate) fn run_with_filter(
             })?;
     }
     Ok(SpawnOutcome {
+        stage_output,
         verifier_receipt: (!timed_out && !drain_interrupted)
             .then(|| handle.verifier_execution_receipt())
             .flatten(),
@@ -478,6 +554,7 @@ pub(crate) fn run_with_filter(
 #[derive(Debug)]
 struct DrainResult {
     bytes: Vec<u8>,
+    read_failed: bool,
     timed_out: bool,
     interrupted: bool,
     process_cleanup: Option<process_handle::ProcessCleanupReport>,
@@ -487,6 +564,7 @@ impl DrainResult {
     fn empty() -> Self {
         Self {
             bytes: Vec::new(),
+            read_failed: false,
             timed_out: false,
             interrupted: false,
             process_cleanup: None,
@@ -538,24 +616,32 @@ impl FileCapture {
     }
 }
 
+struct ReadCapture {
+    bytes: Vec<u8>,
+    failed: bool,
+}
+
 fn spawn_reader_thread(
     reader: Option<Box<dyn Read + Send>>,
-) -> (mpsc::Receiver<Vec<u8>>, Option<thread::JoinHandle<()>>) {
-    let (tx, rx) = mpsc::channel::<Vec<u8>>();
+) -> (mpsc::Receiver<ReadCapture>, Option<thread::JoinHandle<()>>) {
+    let (tx, rx) = mpsc::channel();
     let Some(mut reader) = reader else {
-        drop(tx);
+        let _ = tx.send(ReadCapture {
+            bytes: Vec::new(),
+            failed: false,
+        });
         return (rx, None);
     };
     let handle = harn_parser::runtime_stack::spawn(move || {
         let mut buf = Vec::new();
-        let _ = reader.read_to_end(&mut buf);
-        let _ = tx.send(buf);
+        let failed = reader.read_to_end(&mut buf).is_err();
+        let _ = tx.send(ReadCapture { bytes: buf, failed });
     });
     (rx, Some(handle))
 }
 
 fn drain_output(
-    rx: mpsc::Receiver<Vec<u8>>,
+    rx: mpsc::Receiver<ReadCapture>,
     deadline: Option<std::time::Instant>,
     already_killed: bool,
     killer: &Arc<dyn ProcessKiller>,
@@ -565,6 +651,7 @@ fn drain_output(
     if already_killed {
         return DrainResult {
             bytes: collect_available_output(&rx, Duration::from_millis(100)),
+            read_failed: true,
             timed_out: false,
             interrupted: false,
             process_cleanup: None,
@@ -579,6 +666,7 @@ fn drain_output(
             let cleanup = killer.kill();
             return DrainResult {
                 bytes: collect_available_output(&rx, Duration::from_millis(100)),
+                read_failed: true,
                 timed_out,
                 interrupted,
                 process_cleanup: Some(cleanup),
@@ -592,13 +680,16 @@ fn drain_output(
             })
             .unwrap_or_else(|| Duration::from_millis(20));
         match rx.recv_timeout(wait) {
-            Ok(bytes) => {
-                let mut all_bytes = bytes;
+            Ok(read) => {
+                let mut all_bytes = read.bytes;
+                let mut read_failed = read.failed;
                 for next in rx.try_iter() {
-                    all_bytes.extend(next);
+                    all_bytes.extend(next.bytes);
+                    read_failed |= next.failed;
                 }
                 return DrainResult {
                     bytes: all_bytes,
+                    read_failed,
                     timed_out: false,
                     interrupted: false,
                     process_cleanup: None,
@@ -607,6 +698,7 @@ fn drain_output(
             Err(RecvTimeoutError::Disconnected) => {
                 return DrainResult {
                     bytes: Vec::new(),
+                    read_failed: true,
                     timed_out: false,
                     interrupted: false,
                     process_cleanup: None,
@@ -617,13 +709,13 @@ fn drain_output(
     }
 }
 
-fn collect_available_output(rx: &mpsc::Receiver<Vec<u8>>, first_wait: Duration) -> Vec<u8> {
+fn collect_available_output(rx: &mpsc::Receiver<ReadCapture>, first_wait: Duration) -> Vec<u8> {
     let mut bytes = match rx.recv_timeout(first_wait) {
-        Ok(bytes) => bytes,
+        Ok(read) => read.bytes,
         Err(_) => return Vec::new(),
     };
     for next in rx.try_iter() {
-        bytes.extend(next);
+        bytes.extend(next.bytes);
     }
     bytes
 }
@@ -748,6 +840,14 @@ pub(crate) fn build_response(
             "verifier_receipt",
             harn_vm::value::json::json_to_vm_value(
                 &serde_json::to_value(receipt).expect("typed verifier receipt"),
+            ),
+        );
+    }
+    if let Some(stage) = outcome.stage_output {
+        builder = builder.value(
+            "stage_output",
+            harn_vm::value::json::json_to_vm_value(
+                &serde_json::to_value(stage).expect("typed stage output"),
             ),
         );
     }
@@ -1114,6 +1214,33 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
+    #[test]
+    fn output_reader_preserves_read_failure_beside_partial_bytes() {
+        struct PartialFailure(bool);
+        impl Read for PartialFailure {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                if std::mem::replace(&mut self.0, true) {
+                    return Err(std::io::Error::other("controlled read failure"));
+                }
+                buffer[..5].copy_from_slice(b"ready");
+                Ok(5)
+            }
+        }
+        let (receiver, thread) = spawn_reader_thread(Some(Box::new(PartialFailure(false))));
+        let captured =
+            harn_clock::test_support::recv_within("partial reader terminal result", &receiver);
+        thread.unwrap().join().unwrap();
+        assert_eq!(captured.bytes, b"ready");
+        assert!(captured.failed);
+        let (receiver, thread) =
+            spawn_reader_thread(Some(Box::new(std::io::Cursor::new(b"ready"))));
+        let captured =
+            harn_clock::test_support::recv_within("successful reader terminal result", &receiver);
+        thread.unwrap().join().unwrap();
+        assert_eq!(captured.bytes, b"ready");
+        assert!(!captured.failed);
+    }
+
     struct RecordingKiller {
         calls: AtomicUsize,
     }
@@ -1290,7 +1417,7 @@ mod tests {
 
     #[test]
     fn drain_output_kills_immediately_when_deadline_already_elapsed() {
-        let (_tx, rx) = mpsc::channel::<Vec<u8>>();
+        let (_tx, rx) = mpsc::channel::<ReadCapture>();
         let killer = recording_killer();
         let killer_trait: Arc<dyn ProcessKiller> = killer.clone();
         let expired_deadline = std::time::Instant::now()
@@ -1308,9 +1435,17 @@ mod tests {
 
     #[test]
     fn drain_output_collects_all_available_chunks() {
-        let (tx, rx) = mpsc::channel::<Vec<u8>>();
-        tx.send(b"alpha".to_vec()).unwrap();
-        tx.send(b"beta".to_vec()).unwrap();
+        let (tx, rx) = mpsc::channel::<ReadCapture>();
+        tx.send(ReadCapture {
+            bytes: b"alpha".to_vec(),
+            failed: false,
+        })
+        .unwrap();
+        tx.send(ReadCapture {
+            bytes: b"beta".to_vec(),
+            failed: false,
+        })
+        .unwrap();
         drop(tx);
         let killer = recording_killer();
         let killer_trait: Arc<dyn ProcessKiller> = killer.clone();

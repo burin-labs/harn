@@ -464,6 +464,11 @@ pub(super) fn configure_output_capture(
             command.stdout(Stdio::piped());
             command.stderr(Stdio::piped());
         }
+        #[cfg(unix)]
+        OutputCapture::PipeWithStage { .. } => {
+            command.stdout(Stdio::piped());
+            command.stderr(Stdio::piped());
+        }
         OutputCapture::File {
             stdout_path,
             stderr_path,
@@ -622,6 +627,7 @@ pub fn replace_current_process(spec: SpawnSpec) -> Result<std::convert::Infallib
 
 struct RealProcess {
     cleanup_report: Option<ProcessCleanupReport>,
+    stage_output_complete: bool,
     #[cfg(unix)]
     cleanup_receipt: Option<super::owner_death::ReceiptReader>,
     verifier_receipt: Option<harn_vm::verifier_provenance::VerifierExecutionReceipt>,
@@ -692,6 +698,7 @@ fn real_process(
     });
     RealProcess {
         cleanup_report: None,
+        stage_output_complete: false,
         #[cfg(unix)]
         cleanup_receipt: None,
         verifier_witness: None,
@@ -722,6 +729,7 @@ impl RealProcess {
         #[cfg(unix)]
         if let Some(receipt) = self.cleanup_receipt.take() {
             self.cleanup_report = receipt.finish();
+            self.stage_output_complete = receipt.stage_output_complete();
         }
         if let Some(witness) = self.verifier_witness.as_ref() {
             self.verifier_receipt = Some(witness.receipt()?);
@@ -768,6 +776,10 @@ impl ProcessHandle for RealProcess {
 
     fn cleanup_report(&self) -> Option<ProcessCleanupReport> {
         self.cleanup_report.clone()
+    }
+
+    fn stage_output_complete(&self) -> bool {
+        self.stage_output_complete
     }
 
     fn verifier_execution_receipt(

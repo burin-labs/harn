@@ -164,9 +164,9 @@ pub use crate::stdlib::sandbox::linux::keep_ruleset_across_exec;
 #[cfg(target_os = "linux")]
 pub(crate) use crate::stdlib::sandbox::linux::sealed_launch_bytes;
 #[cfg(target_os = "linux")]
-pub use crate::stdlib::sandbox::linux::DescriptorTransfer;
-#[cfg(target_os = "linux")]
 pub use crate::stdlib::sandbox::linux::{command_for_reexec, ReexecConfinement};
+#[cfg(unix)]
+pub use crate::stdlib::sandbox::unix_descriptors::DescriptorTransfer;
 /// Confinement an embedder builds here and enters in a process it re-execs.
 ///
 /// An embedder that spawns the payload directly never needs this: `pre_exec`

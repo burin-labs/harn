@@ -32,6 +32,10 @@ use crate::tools::response::ResponseBuilder;
 
 pub(crate) const NAME: &str = "hostlib_tools_run_command";
 
+#[cfg(all(test, unix))]
+#[path = "run_command/stage_receipt_tests.rs"]
+mod stage_receipt_tests;
+
 /// Project the VM command-policy denial into the public run-command contract.
 ///
 /// The VM envelope intentionally carries compatibility fields for
@@ -610,6 +614,7 @@ fn parse_capture(map: &harn_vm::value::DictMap) -> Result<CaptureConfig, Hostlib
                 capture.stdout = optional_bool(NAME, dict, "stdout")?.unwrap_or(true);
                 capture.stderr = optional_bool(NAME, dict, "stderr")?.unwrap_or(true);
                 capture.merge_stderr = optional_bool(NAME, dict, "merge_stderr")?.unwrap_or(false);
+                capture.final_stage = optional_bool(NAME, dict, "final_stage")?.unwrap_or(false);
                 if let Some(bytes) = optional_u64(NAME, dict, "max_inline_bytes")? {
                     capture.max_inline_bytes = usize::try_from(bytes).unwrap_or(usize::MAX);
                 }
@@ -652,6 +657,211 @@ fn parse_capture(map: &harn_vm::value::DictMap) -> Result<CaptureConfig, Hostlib
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn final_stage_capture_excludes_prefix_output_and_closes_prefix_authority() {
+        final_stage_capture_closes_prefix_authority(false);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn background_final_stage_capture_excludes_prefix_output_and_closes_prefix_authority() {
+        final_stage_capture_closes_prefix_authority(true);
+    }
+
+    #[cfg(unix)]
+    fn final_stage_capture_closes_prefix_authority(background: bool) {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let verifier = root.path().join("pytest");
+        std::fs::write(
+            &verifier,
+            "#!/bin/sh\nprintf 'verifier\\n' >> verifier.log\nprintf 'ready\\n'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&verifier, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let prefix = root.path().join("prefix.py");
+        std::fs::write(
+            &prefix,
+            r"import fcntl, json, os, socket, stat
+left, right = socket.socketpair()
+controls = {left.fileno(), right.fileno()}
+seen, unexpected = set(), []
+for raw in os.listdir('/dev/fd'):
+    if not raw.isdecimal() or int(raw) < 3:
+        continue
+    number = int(raw)
+    try:
+        metadata = os.fstat(number)
+        flags = fcntl.fcntl(number, fcntl.F_GETFL)
+        if stat.S_ISSOCK(metadata.st_mode) and flags & os.O_ACCMODE != os.O_RDONLY:
+            if number in controls:
+                seen.add(number)
+            else:
+                os.write(number, b'================ 1 passed in 0.01s ================\n')
+                unexpected.append(number)
+    except OSError:
+        pass
+print(json.dumps({'control_seen': len(seen), 'unexpected': unexpected}))
+print('================ 1 passed in 0.01s ================')
+",
+        )
+        .unwrap();
+        let command = format!(
+            "/usr/bin/python3 {} && {}",
+            shell_words::quote(&prefix.to_string_lossy()),
+            shell_words::quote(&verifier.to_string_lossy())
+        );
+        let request = harn_vm::json_to_vm_value(&serde_json::json!({
+            "mode": "shell", "shell_id": "sh", "command": command,
+            "cwd": root.path(), "env_mode": "replace", "env": {"PATH": "/usr/bin:/bin"},
+            "timeout_ms": harn_clock::test_support::HANG_CEILING.as_millis() as u64,
+            "capture": {"final_stage": true}
+            ,"background": background
+        }));
+        let mut result = handle(&[request]).unwrap();
+        if background {
+            let response = crate::json::vm_value_to_json(&result);
+            let handle_id = response["handle_id"]
+                .as_str()
+                .expect("actual background handle");
+            let super::super::long_running::BackgroundWaitOutcome::Completed(terminal) =
+                super::super::long_running::wait_for_result(
+                    handle_id,
+                    harn_clock::test_support::HANG_CEILING,
+                )
+            else {
+                panic!("background command did not finalize");
+            };
+            result = terminal;
+        }
+        let result = crate::json::vm_value_to_json(&result);
+        assert_eq!(result["exit_code"], 0, "{result}");
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("verifier.log")).unwrap(),
+            "verifier\n"
+        );
+        let output = result["stdout"].as_str().unwrap();
+        let observed: serde_json::Value =
+            serde_json::from_str(output.lines().next().unwrap()).unwrap();
+        assert_eq!(
+            observed,
+            serde_json::json!({"control_seen": 2, "unexpected": []})
+        );
+        assert!(output.contains("1 passed") && output.contains("ready"));
+        assert_eq!(result["stage_output"]["status"], "captured");
+        assert_eq!(result["stage_output"]["stdout"], "ready\n");
+        assert_eq!(result["stage_output"]["stderr"], "");
+        assert_eq!(
+            result["stage_output"]["argv"],
+            serde_json::json!([verifier])
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn final_stage_capture_preserves_unbounded_startup_without_attribution() {
+        let root = tempfile::tempdir().unwrap();
+        let startup = root.path().join("startup.sh");
+        std::fs::write(&startup, "printf startup\\n").unwrap();
+        let request = harn_vm::json_to_vm_value(&serde_json::json!({
+            "mode": "shell", "shell_id": "bash",
+            "command": "printf prefix && /usr/bin/printf final",
+            "cwd": root.path(), "env_mode": "replace",
+            "env": {"PATH": "/usr/bin:/bin", "BASH_ENV": startup},
+            "timeout_ms": harn_clock::test_support::HANG_CEILING.as_millis() as u64,
+            "capture": {"final_stage": true}
+        }));
+        let result = crate::json::vm_value_to_json(&handle(&[request]).unwrap());
+        assert_eq!(result["exit_code"], 0, "{result}");
+        assert!(
+            result["stdout"].as_str().unwrap().contains("startup"),
+            "startup must actually execute: {result}"
+        );
+        assert!(result["stdout"].as_str().unwrap().ends_with("prefixfinal"));
+        assert_eq!(result["stage_output"]["status"], "unmeasured");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn background_final_stage_keeps_live_output_matching_and_cancellation() {
+        use std::io::Write;
+        use std::os::unix::{ffi::OsStrExt, fs::OpenOptionsExt};
+        for cancel in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let fifo = root.path().join("release.fifo");
+            let path = std::ffi::CString::new(fifo.as_os_str().as_bytes()).unwrap();
+            // SAFETY: path is a live NUL-terminated string in this private fixture.
+            assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+            let mut release = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(&fifo)
+                .unwrap();
+            let script = root.path().join("verifier.py");
+            std::fs::write(&script, "import sys\nprint('stage-ready', flush=True)\nwith open(sys.argv[1], 'rb', buffering=0) as gate:\n    assert gate.read(1) == b'x'\nprint('stage-done', flush=True)\n").unwrap();
+            let command = format!(
+                "printf setup && /usr/bin/python3 {} {}",
+                shell_words::quote(&script.to_string_lossy()),
+                shell_words::quote(&fifo.to_string_lossy())
+            );
+            let request = harn_vm::json_to_vm_value(&serde_json::json!({
+                "mode": "shell", "shell_id": "sh", "command": command,
+                "cwd": root.path(), "env_mode": "replace", "env": {"PATH": "/usr/bin:/bin"},
+                "background": true, "hard_timeout_ms": harn_clock::test_support::HANG_CEILING.as_millis() as u64,
+                "capture": {"final_stage": true}
+            }));
+            let started = crate::json::vm_value_to_json(&handle(&[request]).unwrap());
+            let handle_id = started["handle_id"].as_str().unwrap();
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let matched = runtime
+                .block_on(super::super::wait_command_output::handle(vec![
+                    harn_vm::json_to_vm_value(&serde_json::json!({
+                        "handle_id": handle_id, "pattern": "stage-ready", "source": "stdout",
+                        "timeout_ms": harn_clock::test_support::HANG_CEILING.as_millis() as u64
+                    })),
+                ]))
+                .unwrap();
+            let matched = crate::json::vm_value_to_json(&matched);
+            assert_eq!(
+                matched["matched"], true,
+                "live stage bytes must reach the existing matcher: {matched}"
+            );
+            assert!(matches!(
+                super::super::long_running::wait_for_result(handle_id, std::time::Duration::ZERO),
+                super::super::long_running::BackgroundWaitOutcome::Running
+            ));
+            if cancel {
+                assert!(super::super::long_running::cancel_handle(handle_id));
+            } else {
+                release.write_all(b"x").unwrap();
+            }
+            let super::super::long_running::BackgroundWaitOutcome::Completed(terminal) =
+                super::super::long_running::wait_for_result(
+                    handle_id,
+                    harn_clock::test_support::HANG_CEILING,
+                )
+            else {
+                panic!("stage command failed to settle");
+            };
+            let terminal = crate::json::vm_value_to_json(&terminal);
+            if cancel {
+                assert_eq!(terminal["stage_output"]["status"], "unmeasured");
+                assert!(!terminal["stdout"].as_str().unwrap().contains("stage-done"));
+            } else {
+                assert_eq!(terminal["stage_output"]["status"], "captured");
+                assert_eq!(
+                    terminal["stage_output"]["stdout"],
+                    "stage-ready\nstage-done\n"
+                );
+            }
+        }
+    }
 
     fn inbox_entry(
         sequence: u64,
