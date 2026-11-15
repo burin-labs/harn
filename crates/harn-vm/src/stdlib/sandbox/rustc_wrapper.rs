@@ -136,7 +136,7 @@ pub(super) fn record_application(
     policy: &CapabilityPolicy,
     decision: RustcWrapperDecision,
 ) -> RustcWrapperDecision {
-    if crate::run_events::sink_active() {
+    if crate::run_events::enabled(crate::run_events::RunEventKind::CompilerWrapperApplied) {
         let application = RustcWrapperApplication {
             program: program.to_string(),
             sandbox_profile: policy.sandbox_profile,

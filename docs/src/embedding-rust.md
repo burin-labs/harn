@@ -169,6 +169,44 @@ Check-result caching uses the same mechanism for the CLI, linter, and package
 resolver. Build scripts watch existing local inputs, so extracted packages do
 not rebuild because a workspace sibling directory is absent.
 
+## Observe selected execution events
+
+Implement `RunEventSink::enabled` to observe selected event kinds within
+`harn_vm::run_events::scope`. Existing sinks consume every kind by default,
+including program stdout and stderr. Declining either output kind leaves that
+stream on its ordinary VM or host output path.
+
+```rust
+use std::sync::Arc;
+use harn_vm::run_events::{self, RunEvent, RunEventKind, RunEventSink};
+
+struct WrapperObserver;
+
+impl RunEventSink for WrapperObserver {
+    fn enabled(&self, kind: RunEventKind) -> bool {
+        kind == RunEventKind::CompilerWrapperApplied
+    }
+
+    fn emit(&self, event: RunEvent) {
+        if let RunEvent::CompilerWrapperApplied { payload } = event {
+            // Store the centrally redacted application in the host's receipt.
+            let _ = payload;
+        }
+    }
+}
+
+# async fn observe() {
+run_events::scope(Arc::new(WrapperObserver), async {
+    // Execute the VM or embedded agent inside this scope.
+}).await;
+# }
+```
+
+The scope follows inherited execution work and restores the outer sink when it
+ends. Unrelated executions don't inherit the observer. Callbacks run inline and
+should return promptly. A compiler-wrapper application records command
+preparation; it doesn't prove execution or a compiler-cache hit.
+
 ## Resolve connector credentials
 
 Use `harn_serve::try_load_provider_connectors` with the project directory or

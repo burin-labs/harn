@@ -702,7 +702,7 @@ async fn append_persona_event(
 /// field carries the suffix (`started`, `completed`, `handoff_started`,
 /// `failed`, ...) and `stage` carries the named stage when present.
 fn forward_persona_run_event(persona: &str, kind: &str, payload: &serde_json::Value) {
-    if !crate::run_events::sink_active() {
+    if !crate::run_events::enabled(crate::run_events::RunEventKind::PersonaStage) {
         return;
     }
     let transition = kind

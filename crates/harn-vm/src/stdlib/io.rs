@@ -146,7 +146,7 @@ pub fn take_stderr_buffer() -> String {
 }
 
 pub(crate) fn write_stderr(line: &str) {
-    if crate::run_events::sink_active() {
+    if crate::run_events::enabled(crate::run_events::RunEventKind::Stderr) {
         crate::run_events::emit(crate::run_events::RunEvent::Stderr {
             payload: line.to_string(),
         });
@@ -161,7 +161,7 @@ pub(crate) fn write_stderr(line: &str) {
 }
 
 pub fn write_stdout(out: &mut String, text: &str) {
-    if crate::run_events::sink_active() {
+    if crate::run_events::enabled(crate::run_events::RunEventKind::Stdout) {
         crate::run_events::emit(crate::run_events::RunEvent::Stdout {
             payload: text.to_string(),
         });
