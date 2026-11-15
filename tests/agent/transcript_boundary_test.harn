@@ -2,6 +2,7 @@ import {
   agent_transcript_normalize,
   agent_transcript_normalize_report,
   agent_transcript_tool_call,
+  agent_transcript_tool_call_args,
 } from "std/agent/transcript"
 
 pipeline test_transcript_raw_containers_preserve_extra_fields(harness: Harness) {
@@ -67,10 +68,18 @@ pipeline test_transcript_malformed_values_remain_reported_and_preserved(harness:
   assert(!report.ok)
   assert(report.issues.any({ issue -> issue.code == "tool_call_args_unparsed" }))
   assert(report.issues.any({ issue -> issue.code == "row_schema_invalid" }))
-  assert_eq(report.rows[0].raw, raw)
-  assert_eq(report.rows[0].text, "")
-  assert_eq(report.rows[0].usage.input_tokens, "invalid count")
-  assert_eq(report.rows[0].tool_calls[0].args, {_raw: "not JSON"})
+  const row = report.rows[0]
+  if row == nil || row.kind != "assistant" {
+    throw "the malformed assistant row must remain available"
+  }
+  assert_eq(row.raw, raw)
+  assert_eq(row.text, "")
+  assert_eq(row.usage.input_tokens, "invalid count")
+  const call = row.tool_calls[0]
+  if call == nil {
+    throw "the malformed call must remain available"
+  }
+  assert_eq(call.args, {_raw: "not JSON"})
   const invalid_text = try {
     agent_transcript_normalize([{role: "assistant", text: false}])
   }
@@ -101,4 +110,23 @@ pipeline test_transcript_tool_result_preserves_storage_metadata(harness: Harness
   assert_eq(row.data.provenance.stage, "fixture")
   assert_eq(row.data.extension, [1, 2])
   assert_eq(row.raw._harn.extension.keep, true)
+}
+
+pipeline test_transcript_argument_decode_state_does_not_use_payload_markers(harness: Harness) {
+  for args in [{_raw: 7, extension: true}, "{\"_raw\":7,\"extension\":true}"] {
+    const call = {name: "look", arguments: args}
+    const report = agent_transcript_normalize_report([{role: "assistant", tool_calls: [call]}])
+    assert(report.ok, "a valid argument object can own its _raw key")
+    assert_eq(agent_transcript_tool_call_args(call), {_raw: 7, extension: true})
+    assert_eq(len(report.rows), 1)
+  }
+  const call = {name: "look", arguments: "null"}
+  const report = agent_transcript_normalize_report([{role: "assistant", tool_calls: [call]}])
+  assert(!report.ok, "an encoded null is not an argument object")
+  assert_eq(report.issues.map({ issue -> issue.code }).to_list(), ["tool_call_args_not_object"])
+  assert_eq(agent_transcript_tool_call_args(call), {_raw: nil})
+  assert_eq(len(report.rows), 1, "the malformed row remains available for inspection")
+  const absent = {name: "look", arguments: nil}
+  assert_eq(agent_transcript_tool_call_args(absent), {})
+  assert(agent_transcript_normalize_report([{role: "assistant", tool_calls: [absent]}]).ok)
 }

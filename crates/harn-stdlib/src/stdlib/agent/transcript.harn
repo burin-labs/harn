@@ -197,6 +197,11 @@ type TranscriptRawHarn = {
 
 type TranscriptRawCalls = list<unknown>
 
+type TranscriptDecodedArguments = {
+  args: dict<string, unknown>,
+  issue: "unparsed_json" | "not_object" | nil,
+}
+
 /** Preserve legacy non-record fallbacks and defer scalar validation to field normalizers. */
 fn __transcript_record_field(record: dict?, key: string) -> dict? {
   if type_of(record) != "dict" {
@@ -447,25 +452,22 @@ pub fn agent_transcript_text(value: AgentTranscriptTextValue) -> string {
   return ""
 }
 
-fn __json_or_raw(raw: unknown) -> unknown {
-  if type_of(raw) != "string" {
-    return raw ?? {}
+fn __decode_tool_arguments(raw: unknown) -> TranscriptDecodedArguments {
+  let value: unknown = raw ?? {}
+  if type_of(raw) == "string" {
+    const parsed = try {
+      json_parse(raw)
+    }
+    if is_err(parsed) {
+      return {args: {_raw: raw}, issue: "unparsed_json"}
+    }
+    value = unwrap(parsed)
   }
-  const parsed = try {
-    json_parse(raw)
+  const decoded = value
+  if type_of(decoded) == "dict" {
+    return {args: decoded, issue: nil}
   }
-  if is_ok(parsed) {
-    return unwrap(parsed)
-  }
-  return {_raw: raw}
-}
-
-fn __args_dict_or_raw(raw: unknown) -> dict<string, unknown> {
-  const value = __json_or_raw(raw)
-  if type_of(value) == "dict" {
-    return value
-  }
-  return {_raw: value}
+  return {args: {_raw: decoded}, issue: "not_object"}
 }
 
 /**
@@ -511,17 +513,7 @@ pub fn agent_transcript_tool_call_args(call: dict) -> dict<string, unknown> {
   if type_of(call) != "dict" {
     return {}
   }
-  if call?.args != nil {
-    return __args_dict_or_raw(call.args)
-  }
-  if call?.arguments != nil {
-    return __args_dict_or_raw(call.arguments)
-  }
-  const function = __record_function(call)
-  if function?.arguments != nil {
-    return __args_dict_or_raw(function.arguments)
-  }
-  return {}
+  return __decode_tool_arguments(__tool_call_raw_args(call)).args
 }
 
 /**
@@ -589,7 +581,7 @@ fn __known_record_shape(record: dict) -> bool {
     || role == "user"
 }
 
-fn __tool_call_raw_args(call: dict) {
+fn __tool_call_raw_args(call: dict) -> unknown {
   if type_of(call) != "dict" {
     return nil
   }
@@ -650,34 +642,18 @@ fn __tool_call_record_issues(record: dict, index: int) -> list {
           ),
         ]
     }
-    const raw_args = __tool_call_raw_args(call)
-    const args = agent_transcript_tool_call_args(call)
-    if args["_raw"] != nil && type_of(raw_args) == "string" {
-      const parsed = try {
-        json_parse(raw_args)
-      }
-      if is_ok(parsed) {
-        issues = issues
-          + [
-            __issue(
-              "tool_call_args_not_object",
-              "tool call arguments did not normalize to an object",
-              index,
-              {call_index: call_index},
-            ),
-          ]
-      } else {
-        issues = issues
-          + [
-            __issue(
-              "tool_call_args_unparsed",
-              "tool call arguments are not valid JSON",
-              index,
-              {call_index: call_index},
-            ),
-          ]
-      }
-    } else if args["_raw"] != nil {
+    const decoded = __decode_tool_arguments(__tool_call_raw_args(call))
+    if decoded.issue == "unparsed_json" {
+      issues = issues
+        + [
+          __issue(
+            "tool_call_args_unparsed",
+            "tool call arguments are not valid JSON",
+            index,
+            {call_index: call_index},
+          ),
+        ]
+    } else if decoded.issue == "not_object" {
       issues = issues
         + [
           __issue(

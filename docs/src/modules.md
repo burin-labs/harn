@@ -1574,6 +1574,9 @@ Agent message readers preserve extension fields in `raw`. Legacy message,
 function, usage and storage values that are not records behave as absent optional fields;
 field normalizers still decide which scalar values are accepted. Decode tool
 arguments against the caller's schema before relying on their field types.
+Argument parse state is separate from those values: an object may contain its
+own `_raw` key, while a JSON string containing `null` reports
+`tool_call_args_not_object` and retains `{_raw: nil}` for inspection.
 
 Normalize raw records once, then pass the typed list to `provider_call_census`.
 The runtime writes a `provider_call_measurement` after each provider attempt
