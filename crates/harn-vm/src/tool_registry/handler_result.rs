@@ -5,6 +5,31 @@ use crate::value::{ErrorCategory, VmError, VmValue};
 /// The versioned result discriminator consumed by the runtime and linter.
 pub const AGENT_TOOL_HANDLER_RESULT_SCHEMA: &str = "harn.agent_tool_handler_result.v2";
 
+fn literal_strings<'a>(
+    graph: &'a crate::wire::PreparedWireGraph,
+    root: &crate::wire::WireTypeId,
+) -> Option<std::collections::BTreeSet<&'a str>> {
+    use crate::wire::{WireLiteral, WireShape};
+    let mut values = std::collections::BTreeSet::new();
+    let mut visited = std::collections::BTreeSet::new();
+    let mut pending = vec![root];
+    while let Some(id) = pending.pop() {
+        if !visited.insert(id) {
+            return None;
+        }
+        match &graph.unaliased(id).ok()?.shape {
+            WireShape::Literal {
+                value: WireLiteral::String { value },
+            } => {
+                values.insert(value.as_str());
+            }
+            WireShape::Union { members } => pending.extend(members),
+            _ => return None,
+        }
+    }
+    Some(values)
+}
+
 pub(crate) fn wire_handler_output_schema(
     wire: &crate::wire::PreparedWireType,
 ) -> serde_json::Value {
@@ -24,25 +49,16 @@ pub(crate) fn wire_handler_output_schema(
             &graph.unaliased(&field("schema")?.type_id).ok()?.shape,
             WireShape::Literal { value: WireLiteral::String { value } }
                 if value == AGENT_TOOL_HANDLER_RESULT_SCHEMA
-        ) || !matches!(
-            graph.unaliased(&field("text")?.type_id).ok()?.shape,
-            WireShape::String
         ) {
             return None;
         }
-        let WireShape::Union { members } = &graph.unaliased(&field("outcome")?.type_id).ok()?.shape
-        else {
+        let text = &field("text")?.type_id;
+        if !matches!(graph.unaliased(text).ok()?.shape, WireShape::String)
+            && literal_strings(graph, text).is_none()
+        {
             return None;
-        };
-        let alternatives = members
-            .iter()
-            .map(|member| match &graph.unaliased(member).ok()?.shape {
-                WireShape::Literal {
-                    value: WireLiteral::String { value },
-                } => Some(value.as_str()),
-                _ => None,
-            })
-            .collect::<Option<std::collections::BTreeSet<_>>>()?;
+        }
+        let alternatives = literal_strings(graph, &field("outcome")?.type_id)?;
         if alternatives != std::collections::BTreeSet::from(["ok", "error", "rejected"]) {
             return None;
         }
@@ -201,6 +217,23 @@ type Payload = {label: string}
             !validator.is_valid(&json!({"schema":AGENT_TOOL_HANDLER_RESULT_SCHEMA,
             "outcome":"ok", "text":"feedback", "data":{"label":"wrapped"}}))
         );
+        for source in [
+            source.replace("text: string", "text: \"known feedback\""),
+            source.replace("text: string", "text: \"first\" | \"second\""),
+            format!(
+                "type Status = \"ok\" | \"error\"\n{}",
+                source.replace("\"ok\" | \"error\" | \"rejected\"", "Status | \"rejected\"")
+            ),
+        ] {
+            let program = harn_parser::parse_source(&source).unwrap();
+            let resolver = crate::TypeSchemaResolver::from_program(&program);
+            let schema = resolver
+                .json_schema_for_tool_output_type_expr(&result)
+                .unwrap();
+            let validator = jsonschema::validator_for(&schema).unwrap();
+            assert!(validator.is_valid(&json!({"label":"known payload"})));
+            assert!(!validator.is_valid(&json!({"label":17})));
+        }
         for (from, to) in [
             ("schema:", "schema?:"),
             ("outcome:", "outcome?:"),
