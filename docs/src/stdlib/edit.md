@@ -823,12 +823,13 @@ The enclosing `applied` and `dry_run` fields describe whether files were written
 or only planned. A staged filesystem session can defer persistence until commit.
 
 Supported languages (first batch): Harn, Rust, TypeScript/TSX, JavaScript/JSX,
-Python, Swift, Go, and Java methods. Other languages return `result ==
+Python, Swift, Go, and Java. Java type and constructor renames require a Unix host
+and Eclipse JDT LS. Other languages return `result ==
 "unsupported_language"` instead of silently misrewriting.
 
 The host must prove that every occurrence belongs to the selected declaration
 before it writes. Cross-file import resolution currently covers Rust,
-TypeScript/JavaScript and Python. Harn, Swift and Go references in another
+TypeScript/JavaScript, Python, and Java through JDT LS. Harn, Swift and Go references in another
 file are refused when that binding cannot be proved. Same-spelled locals,
 unresolved imports, receiver members, dynamic class namespaces, macros and
 escaped or normalized identifiers can also require a binding-aware LSP rename.
@@ -843,7 +844,25 @@ server and return `ambiguous_symbol` before any write. A definition selector
 chooses the method; it does not prove these unresolved caller bindings.
 Java rename also requires a final declaring type or a private method, and
 refuses new names that may change an Object method contract.
-Java type and constructor renames return `unsupported_language` without writing.
+For Java types and constructors, install Eclipse JDT LS and its required Java
+runtime. Put `jdtls` on `PATH` or set `HARN_LSP_SERVER_JDTLS` to its absolute
+launcher path. Harn gives each server connection private data and configuration
+directories and removes them after the server is reaped. Maven and Gradle
+project imports are disabled; configure the project's classpath metadata before
+renaming types that depend on external libraries.
+
+Type and constructor renames use `backend: "auto"` or `"language_server"`.
+They never fall back to syntax-only rewriting. Missing semantic support returns
+`backend_unavailable`; `"syntax_tree"`, literal replacement mode, and non-Unix
+hosts return `unsupported_language` without changing source files.
+
+Required public-type filename moves and reference edits share one file
+transaction. A destination collision or stale input refuses the entire change.
+With `dry_run: true`, `touched_files` records the proposed move using `before_path`
+and `after_path`; `path` names the destination. Staged sessions commit or discard
+the complete move even when a caller selects only one of its paths. Recovery
+restores recorded before-images after an interrupted publication and preserves
+an unattributed edit for inspection instead of overwriting it.
 Ambiguous results include declaration metadata in `warnings`: `symbol`,
 `qualified_name`, `path`, `line`, `col`, and `kind`. In every language
 `symbol` equals `qualified_name`, such as `First.load`, so it can be passed
@@ -1029,7 +1048,7 @@ extraction needs a per-language extractor.
 | Capability | Languages |
 |---|---|
 | `apply_node`, `insert_at_anchor` | **all** registered grammars |
-| `rename_symbol` | Rust, TypeScript/TSX, JavaScript/JSX, Python, Go, Swift |
+| `rename_symbol` | Rust, TypeScript/TSX, JavaScript/JSX, Python, Go, Swift, Java (types and constructors require Unix and JDT LS) |
 | `symbols` / `outline` | every general-purpose language (not the data/markup grammars) |
 | `move_symbol` | Rust, TypeScript/TSX, JavaScript/JSX, Python |
 | `extract_function` | Rust, TypeScript/TSX, JavaScript/JSX, Python |

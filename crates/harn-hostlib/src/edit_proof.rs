@@ -35,6 +35,8 @@ struct ChangedSite {
 #[derive(Debug, Serialize)]
 struct FileProof {
     path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    before_path: Option<String>,
     site_kind: &'static str,
     site_count: usize,
     sites: Vec<ChangedSite>,
@@ -125,6 +127,7 @@ impl EditProof {
         let omitted_sites = site_count - sites.len();
         self.files.push(FileProof {
             path: path.to_owned(),
+            before_path: None,
             site_kind,
             site_count,
             sites,
@@ -133,6 +136,21 @@ impl EditProof {
         });
         self.file_count += 1;
         self.site_count += site_count;
+    }
+
+    pub(crate) fn add_file_move(
+        &mut self,
+        paths: (&str, &str),
+        before: &str,
+        after: &str,
+        language: Option<Language>,
+        edits: Option<Vec<EditRegion<'_>>>,
+    ) {
+        self.add_file(paths.1, before, after, language, edits);
+        self.files
+            .last_mut()
+            .expect("add_file records one file")
+            .before_path = Some(paths.0.to_owned());
     }
 
     pub(crate) fn preserved(&mut self, sites: Vec<PreservedSite>) {

@@ -41,6 +41,12 @@ pub(crate) enum RootRule {
     },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ServerWorkspace {
+    Stateless,
+    JdtLs,
+}
+
 /// One way to start a server for a language.
 pub(crate) struct Launch {
     /// Stable identifier reported in tool results.
@@ -67,6 +73,7 @@ pub(crate) struct ServerSpec {
     pub launches: &'static [Launch],
     pub language_id: fn(Language) -> &'static str,
     pub root: RootRule,
+    pub workspace: ServerWorkspace,
     initialization: fn() -> Value,
     /// Answer to every `workspace/configuration` item.
     /// Answer to a `workspace/configuration` item for `section`.
@@ -74,6 +81,16 @@ pub(crate) struct ServerSpec {
 }
 
 impl ServerSpec {
+    pub(crate) fn workspace_edit_capabilities(&self) -> Value {
+        match self.workspace {
+            ServerWorkspace::Stateless => json!({"documentChanges": true}),
+            ServerWorkspace::JdtLs => json!({
+                "documentChanges": true,
+                "resourceOperations": ["create", "rename", "delete"],
+            }),
+        }
+    }
+
     pub(crate) fn initialization_options(&self) -> Value {
         (self.initialization)()
     }
@@ -329,6 +346,7 @@ const RUST_ANALYZER: ServerSpec = ServerSpec {
     }],
     language_id: |_| "rust",
     root: RootRule::Outermost(&["Cargo.toml"]),
+    workspace: ServerWorkspace::Stateless,
     initialization: rust_analyzer_settings,
     // rust-analyzer re-reads its settings from `workspace/configuration`.
     settings: |section| match section {
@@ -385,6 +403,7 @@ const TYPESCRIPT: ServerSpec = ServerSpec {
         _ => "typescript",
     },
     root: RootRule::NearestOrIndexRoot(&["tsconfig.json", "jsconfig.json", "package.json"]),
+    workspace: ServerWorkspace::Stateless,
     // An agent's rename means the new name everywhere in the workspace, so
     // shorthand properties and re-exports are renamed rather than aliased
     // to their old spelling (`export { TextSpan as Span }`).
@@ -430,6 +449,7 @@ const PYRIGHT: ServerSpec = ServerSpec {
         "setup.py",
         "setup.cfg",
     ]),
+    workspace: ServerWorkspace::Stateless,
     initialization: || Value::Null,
     settings: |_| Value::Null,
 };
@@ -452,7 +472,37 @@ const GOPLS: ServerSpec = ServerSpec {
         workspace: &["go.work"],
         module: &["go.mod"],
     },
+    workspace: ServerWorkspace::Stateless,
     initialization: || Value::Null,
+    settings: |_| Value::Null,
+};
+
+const JDT_LS: ServerSpec = ServerSpec {
+    id: "java",
+    launches: &[Launch {
+        id: "jdtls",
+        programs: &["jdtls"],
+        program_env: "HARN_LSP_SERVER_JDTLS",
+        args: &[],
+        project_bin: None,
+        readiness: Readiness::Initialized,
+        hidden_path_safe_root: false,
+    }],
+    language_id: |_| "java",
+    root: RootRule::NearestOrIndexRoot(&[
+        "pom.xml",
+        "build.gradle",
+        "build.gradle.kts",
+        ".project",
+    ]),
+    workspace: ServerWorkspace::JdtLs,
+    initialization: || {
+        json!({
+            "settings": {"java": {
+                "import": {"gradle": {"enabled": false}, "maven": {"enabled": false}},
+            }},
+        })
+    },
     settings: |_| Value::Null,
 };
 
@@ -465,6 +515,7 @@ pub(crate) fn for_language(language: Language) -> Option<&'static ServerSpec> {
         }
         Language::Python => Some(&PYRIGHT),
         Language::Go => Some(&GOPLS),
+        Language::Java if cfg!(unix) => Some(&JDT_LS),
         _ => None,
     }
 }

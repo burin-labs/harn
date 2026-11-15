@@ -436,6 +436,7 @@ pub(super) fn rename(
             }
         }
         let path = file.path.clone();
+        let rename_to = file.rename_to;
         match plan_file(
             file.path,
             file_language,
@@ -443,7 +444,10 @@ pub(super) fn rename(
             file.edits,
             request.validate,
         ) {
-            Ok(plan) => plans.push(plan),
+            Ok(mut plan) => {
+                plan.rename_to = rename_to;
+                plans.push(plan);
+            }
             Err(detail) => {
                 return Ok(Answer::Response(syntax_error_response(
                     env,
@@ -471,7 +475,10 @@ pub(super) fn rename(
             Err(stopped) => return Ok(Answer::Response(stopped)),
         };
         if request.session_id.is_none() {
-            let written: Vec<String> = plans.iter().map(|plan| plan.path.clone()).collect();
+            let written: Vec<String> = plans
+                .iter()
+                .flat_map(|plan| std::iter::once(plan.path.clone()).chain(plan.rename_to.clone()))
+                .collect();
             lsp::files_written(&request.state.root, &written);
         }
         failed
@@ -677,6 +684,7 @@ fn add_edit(
             let source = read_source(BUILTIN, &request.state.root, &site.path, request.session_id)?;
             changeset.push(FileEdits {
                 path: site.path.clone(),
+                rename_to: None,
                 source,
                 edits: Vec::new(),
             });
