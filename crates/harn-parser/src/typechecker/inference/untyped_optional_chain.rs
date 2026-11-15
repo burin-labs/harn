@@ -8,6 +8,14 @@ use super::super::{is_gradual_type_name, TypeChecker};
 
 const RULE: &str = "untyped-optional-chain";
 
+fn optional_field_name(node: &SNode) -> Option<&str> {
+    match &node.node {
+        Node::OptionalPropertyAccess { property, .. } => Some(property),
+        Node::OptionalSubscriptAccess { index, .. } => TypeChecker::literal_index_key(index),
+        _ => None,
+    }
+}
+
 impl TypeChecker {
     /// Warn on the second `?.` link of a chain whose first optional receiver
     /// is untyped (`any`, `unknown`, an open `dict`, or nothing inferred), or
@@ -30,16 +38,11 @@ impl TypeChecker {
         let mut cursor = object;
         loop {
             match &cursor.node {
-                Node::OptionalPropertyAccess { object, property } => {
+                Node::OptionalPropertyAccess { object, .. }
+                | Node::OptionalSubscriptAccess { object, .. } => {
                     links += 1;
                     innermost_receiver = Some(object.as_ref());
-                    innermost_property = Some(property.as_str());
-                    cursor = object;
-                }
-                Node::OptionalSubscriptAccess { object, .. } => {
-                    links += 1;
-                    innermost_receiver = Some(object.as_ref());
-                    innermost_property = None;
+                    innermost_property = optional_field_name(cursor);
                     cursor = object;
                 }
                 Node::PropertyAccess { object, .. } | Node::SubscriptAccess { object, .. } => {
@@ -62,8 +65,9 @@ impl TypeChecker {
         // `?.` after it still hedges an untyped value. A first link with no
         // inferred type is not evidence either way, so it stays quiet.
         let first_link_typed = || {
-            self.infer_type(object, scope)
-                .is_none_or(|ty| !self.type_is_untyped_record(&ty, None, scope))
+            self.infer_type(object, scope).is_none_or(|ty| {
+                !self.type_is_untyped_record(&ty, optional_field_name(snode), scope)
+            })
         };
         if receiver_typed && first_link_typed() {
             return;

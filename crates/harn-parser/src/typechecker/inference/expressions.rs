@@ -944,6 +944,13 @@ impl TypeChecker {
         natural
     }
 
+    pub(super) fn literal_index_key(index: &SNode) -> Option<&str> {
+        match &index.node {
+            Node::StringLiteral(value) | Node::RawStringLiteral(value) => Some(value),
+            _ => None,
+        }
+    }
+
     pub(super) fn infer_subscript_type_from_type(
         &self,
         ty: &TypeExpr,
@@ -1032,11 +1039,19 @@ impl TypeChecker {
             },
             TypeExpr::DictType(_, value) => Some(Self::index_slot_type((**value).clone(), mode)),
             TypeExpr::Shape(fields) => {
-                if let Node::StringLiteral(key) = &index.node {
-                    Self::shape_property_type(fields, key, optional)
-                } else {
-                    None
+                let key = Self::literal_index_key(index)?;
+                Self::shape_property_type(fields, key, optional)
+            }
+            TypeExpr::OpenShape { fields, rests } => {
+                let key = Self::literal_index_key(index)?;
+                if fields.iter().any(|field| field.name == key) {
+                    return Self::shape_property_type(fields, key, optional);
                 }
+                let inferred = rests
+                    .iter()
+                    .map(|rest| self.subscript_slot_type(rest, index, scope, optional, mode))
+                    .collect::<Option<Vec<_>>>()?;
+                (!inferred.is_empty()).then(|| simplify_union(inferred))
             }
             // A `string` index is a one-character `string`, absent (`nil`) when
             // the index is out of bounds — the same optionality rule as `list`.
