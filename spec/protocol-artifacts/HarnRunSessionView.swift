@@ -166,39 +166,6 @@ public struct HarnProjectionInfo: Codable, Sendable, Equatable {
     public init() {}
 }
 
-public struct HarnReportedCacheTotals: Codable, Sendable, Equatable {
-    public var reportedCalls: Int
-    public var readReportedCalls: Int
-    public var writeReportedCalls: Int
-    public var readTokens: Int
-    public var writeTokens: Int
-
-    enum CodingKeys: String, CodingKey {
-        case reportedCalls = "reported_calls"
-        case readReportedCalls = "read_reported_calls"
-        case writeReportedCalls = "write_reported_calls"
-        case readTokens = "read_tokens"
-        case writeTokens = "write_tokens"
-    }
-
-    public init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        reportedCalls = try values.decode(Int.self, forKey: .reportedCalls)
-        readReportedCalls = try values.decode(Int.self, forKey: .readReportedCalls)
-        writeReportedCalls = try values.decode(Int.self, forKey: .writeReportedCalls)
-        readTokens = try values.decode(Int.self, forKey: .readTokens)
-        writeTokens = try values.decode(Int.self, forKey: .writeTokens)
-    }
-
-    public init(reportedCalls: Int, readReportedCalls: Int, writeReportedCalls: Int, readTokens: Int, writeTokens: Int) {
-        self.reportedCalls = reportedCalls
-        self.readReportedCalls = readReportedCalls
-        self.writeReportedCalls = writeReportedCalls
-        self.readTokens = readTokens
-        self.writeTokens = writeTokens
-    }
-}
-
 public struct HarnRunEvidenceGapRecord: Codable, Sendable, Equatable {
     public var code: String = ""
     public var component: String = ""
