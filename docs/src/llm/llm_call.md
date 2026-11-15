@@ -421,6 +421,11 @@ The saved transcript pointer reports `available: false`,
 `verification_status: "unavailable"`, and a reason code in `verification_error`.
 A failed snapshot doesn't reuse an older transcript as current evidence.
 
+Persisted transcript descriptors accept relative paths and legacy absolute paths
+inside the run directory. Resolution follows aliases within that directory and
+rejects parent traversal or symlinks that lead outside it. Missing or unreadable
+paths report an unavailable transcript.
+
 #### Generation
 
 | Key | Type | Meaning |

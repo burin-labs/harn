@@ -425,50 +425,45 @@ fn resolve_descriptor_path(
     let parent = run_record_path.parent().ok_or_else(|| {
         LlmTranscriptDescriptorError::new("invalid_run_path", "run record path has no parent")
     })?;
-    if let Some(relative) = descriptor
+    let relative = descriptor
         .relative_path
         .as_deref()
-        .filter(|value| !value.is_empty())
-    {
-        let relative_path = Path::new(relative);
-        if relative_path.is_absolute()
-            || relative_path
-                .components()
-                .any(|component| matches!(component, Component::ParentDir))
-        {
-            return Err(LlmTranscriptDescriptorError::new(
-                "path_traversal",
-                "descriptor relative_path must stay inside the run directory",
-            ));
-        }
-        return Ok(parent.join(relative_path));
-    }
-    let fallback_path = Path::new(&descriptor.path);
-    if descriptor.path.is_empty() {
+        .filter(|value| !value.is_empty());
+    let supplied = relative.unwrap_or(&descriptor.path);
+    if supplied.is_empty() {
         return Err(LlmTranscriptDescriptorError::new(
             "missing_path",
             "llm_jsonl descriptor has no path",
         ));
     }
-    if fallback_path.is_absolute() {
-        if fallback_path.strip_prefix(parent).is_err() {
-            return Err(LlmTranscriptDescriptorError::new(
-                "path_traversal",
-                "descriptor path must stay inside the run directory",
-            ));
-        }
-        return Ok(fallback_path.to_path_buf());
-    }
-    if fallback_path
-        .components()
-        .any(|component| matches!(component, Component::ParentDir))
+    let supplied = Path::new(supplied);
+    if (relative.is_some() && supplied.is_absolute())
+        || supplied
+            .components()
+            .any(|component| matches!(component, Component::ParentDir))
     {
         return Err(LlmTranscriptDescriptorError::new(
             "path_traversal",
             "descriptor path must stay inside the run directory",
         ));
     }
-    Ok(parent.join(fallback_path))
+    let parent = if parent.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        parent
+    };
+    let contained =
+        crate::workspace_path::canonicalize_existing_workspace_path_checked(supplied, parent)
+            .map_err(|_| {
+                LlmTranscriptDescriptorError::new("unavailable", "descriptor path is unavailable")
+            })?;
+    let contained = contained.ok_or_else(|| {
+        LlmTranscriptDescriptorError::new(
+            "path_traversal",
+            "descriptor path must stay inside the run directory",
+        )
+    })?;
+    Ok(parent.join(contained))
 }
 
 #[cfg(test)]
