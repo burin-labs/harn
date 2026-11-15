@@ -843,6 +843,8 @@ mod http_stream_error_tests;
 #[cfg(test)]
 pub(crate) use http_stream_error_tests::response as test_http_stream_response;
 #[cfg(test)]
+mod conditional_usage_tests;
+#[cfg(test)]
 mod liveness_tests;
 #[cfg(test)]
 mod non_stream_body_error_tests;

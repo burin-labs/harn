@@ -350,6 +350,131 @@ fn isolated_environment(
 
 #[cfg(unix)]
 #[test]
+fn corepack_installation_follows_the_session_snapshot_and_remains_read_only() {
+    let workspace = tempfile::tempdir().unwrap();
+    let installed = tempfile::tempdir().unwrap();
+    let cases = [
+        (
+            "COREPACK_HOME",
+            installed.path().join("explicit"),
+            PathBuf::new(),
+        ),
+        (
+            "XDG_CACHE_HOME",
+            installed.path().join("original-cache"),
+            PathBuf::from("node/corepack"),
+        ),
+        (
+            "HOME",
+            installed.path().join("session-home"),
+            PathBuf::from(".cache/node/corepack"),
+        ),
+    ];
+    for (key, value, suffix) in cases {
+        let manager = if suffix.as_os_str().is_empty() {
+            value.clone()
+        } else {
+            value.join(suffix)
+        };
+        std::fs::create_dir_all(&manager).unwrap();
+        let marker = manager.join("installed-manager");
+        std::fs::write(&marker, "INSTALLED-COREPACK").unwrap();
+        let environment = crate::security::SessionEnvironment::launch_from_snapshot(
+            if key == "COREPACK_HOME" {
+                crate::security::EnvironmentPolicyKind::Inherited
+            } else {
+                crate::security::EnvironmentPolicyKind::Isolated
+            },
+            Vec::new(),
+            BTreeMap::from([(key.to_string(), value.display().to_string())]),
+            &|_| None,
+        )
+        .unwrap();
+        assert_eq!(
+            environment.launcher_value(key),
+            Some(value.to_str().unwrap())
+        );
+        let _guard = enter_policy_with_environment(workspace.path(), environment);
+        let mut policy = crate::orchestration::current_execution_policy().unwrap();
+        pop_execution_policy();
+        policy
+            .process_sandbox
+            .read_roots
+            .push(manager.display().to_string());
+        push_execution_policy(policy);
+        let env: BTreeMap<_, _> = super::workspace_env::active_workspace_process_env_for("/bin/sh")
+            .into_iter()
+            .collect();
+        assert_eq!(
+            env.get("COREPACK_HOME"),
+            Some(&manager.display().to_string())
+        );
+        assert_ne!(
+            env.get("XDG_CACHE_HOME"),
+            Some(&value.display().to_string())
+        );
+        let run = |source: &str| {
+            command_output(
+                "/bin/sh",
+                &["-c".to_string(), source.to_string()],
+                &ProcessCommandConfig {
+                    cwd: Some(workspace.path().to_path_buf()),
+                    ..Default::default()
+                },
+            )
+        };
+        let read = run("cat \"$COREPACK_HOME/installed-manager\"");
+        if crate::sandbox_host::assert_unavailable_result(&read) {
+            return;
+        }
+        let read = read.unwrap();
+        assert!(read.status.success(), "{key}: {read:?}");
+        assert_eq!(read.stdout, b"INSTALLED-COREPACK");
+        let write = run("printf poisoned > \"$COREPACK_HOME/installed-manager\"");
+        assert!(
+            matches!(
+                &write,
+                Err(crate::VmError::CategorizedError {
+                    category: crate::value::ErrorCategory::ToolRejected,
+                    ..
+                })
+            ),
+            "{key}: {write:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(marker).unwrap(),
+            "INSTALLED-COREPACK"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn corepack_defaults_do_not_restore_settings_an_isolated_session_dropped() {
+    let workspace = tempfile::tempdir().unwrap();
+    let environment = isolated_environment([(
+        "COREPACK_HOME".to_string(),
+        workspace
+            .path()
+            .join("unadmitted-installation")
+            .display()
+            .to_string(),
+    )]);
+    assert_eq!(environment.launcher_value("COREPACK_HOME"), None);
+    assert_eq!(environment.launcher_value("HOME"), None);
+    let _guard = enter_policy_with_environment(workspace.path(), environment);
+    let env: BTreeMap<_, _> = super::workspace_env::active_workspace_process_env_for("/bin/sh")
+        .into_iter()
+        .collect();
+    assert!(
+        env.contains_key("XDG_CACHE_HOME"),
+        "workspace defaults were not reached"
+    );
+    assert!(!env.contains_key("COREPACK_HOME"));
+}
+
+#[cfg(unix)]
+#[test]
 fn a_confined_child_keeps_the_installed_pnpm_home_read_only() {
     let workspace = tempfile::tempdir().unwrap();
     let installed = tempfile::tempdir().unwrap();

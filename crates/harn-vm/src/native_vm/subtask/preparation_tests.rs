@@ -70,6 +70,42 @@ async fn prepared_verify_independent_session_cannot_reuse_invocation() {
 }
 
 struct BridgeGuard(Option<Arc<HostBridge>>);
+
+#[tokio::test]
+async fn read_only_handlers_retain_bound_facts_but_preparation_does_not() {
+    let fixture = Fixture::new();
+    let (ctx, registry) = fixture.registry(false).await;
+    let binding = preparation_dispatch::prepare(
+        &ctx,
+        Some(&registry),
+        "verify",
+        &json!({}),
+        "test-session",
+        crate::tool_registry::ToolAudience::Agent,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    scope(Some(binding.clone()), async {
+        crate::orchestration::scope_read_only_effects(async {
+            assert!(Arc::ptr_eq(&current_invocation().unwrap(), &binding));
+            assert!(enforce_contract("unknown_host_effect", None).is_err());
+            Ok(())
+        })
+        .await
+        .unwrap();
+        crate::orchestration::scope_read_only_invocation("test-session", async {
+            assert!(current_invocation().is_none());
+            assert!(enforce_contract("unknown_host_effect", None).is_err());
+            Ok(())
+        })
+        .await
+        .unwrap();
+        assert!(Arc::ptr_eq(&current_invocation().unwrap(), &binding));
+    })
+    .await;
+}
+
 impl Drop for BridgeGuard {
     fn drop(&mut self) {
         crate::llm::swap_current_host_bridge(self.0.take());

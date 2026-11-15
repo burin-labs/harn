@@ -54,6 +54,13 @@ impl ProviderDispatchLedger {
         }
     }
 
+    pub(crate) fn record_for_session(&self, session_id: Option<&str>) {
+        self.record();
+        if let Some(session_id) = session_id {
+            super::agent_session_host::record_provider_dispatch(session_id);
+        }
+    }
+
     /// An attempt keeps its own measurement and the enclosing call's counter
     /// when transport moves to a spawned task.
     pub(crate) fn for_current_attempt() -> Self {
@@ -132,12 +139,11 @@ pub(crate) fn measured_dispatches() -> Option<i64> {
 
 /// Record one physical provider dispatch against the open scope.
 ///
-/// A dispatch with no scope open is deliberately not counted anywhere: the
-/// absence of a scope is the absence of a measurement, and callers that need
-/// one open it.
-#[cfg(test)]
+/// An active agent also receives the dispatch. Without an agent or an open
+/// scope there is no retained measurement; callers needing one open a scope.
 pub(crate) fn record_dispatch() {
-    let _ = PROVIDER_DISPATCH_LEDGER.try_with(ProviderDispatchLedger::record);
+    ProviderDispatchLedger::for_current_attempt()
+        .record_for_session(super::agent_runtime::current_agent_session_id().as_deref());
 }
 
 #[cfg(test)]

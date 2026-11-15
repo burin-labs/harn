@@ -1,0 +1,23 @@
+{
+  "contract": "harn.learned_dispatch_study_result.v1",
+  "protocol": "protocol.json",
+  "corpus": "corpus.json",
+  "qualification": {
+    "verdict": "risk_not_certified",
+    "trials": 60,
+    "assessment_selected": 38,
+    "verified_outputs": 30,
+    "accepted_errors": 8,
+    "positive_binding_refusals": 4,
+    "negative_requests_reaching_the_tool_and_refused": 4,
+    "accepted_error_upper_bound": 0.3479113513467443,
+    "target_error": 0.1,
+    "delta": 0.05,
+    "threshold": 0.8,
+    "provider_cost_usd": 0.142849107,
+    "report_sha256": "efd75427089866ba4219995e13380d8bcb13ed578a89af8cf1e54953c0e6e08b",
+    "candidate_freeze_sha256": "e3cd0dcc5f562e91fd3c36dd589972bb937a7e72616d75ec07c36661700145ec"
+  },
+  "interpretation": "The original assessment-based qualification failed and was not admitted. Four incompatible requests reached the mutating handler, which refused them. A subsequent engineering study adds an enforced read-only preflight and measures a prespecified combined dispatch path on fresh cases. It does not relabel these rows or change this result.",
+  "limits": "Synthetic application and corpus; no production accuracy or IID deployment claim. Verified outputs passed the independent application's request-path grader. Ordinary fallback work is not credited as learned execution."
+}

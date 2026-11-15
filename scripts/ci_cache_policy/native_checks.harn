@@ -186,7 +186,7 @@ pub fn windows_release_certify_warm_errors(
   const restore_steps = matching_run_steps(job, WINDOWS_WARM_RESTORE_MARKER)
   if len(restore_steps) != 1
     || trim(restore_steps[0]?.if ?? "") != WINDOWS_WARM_RELEASE_CERTIFY_GUARD
-    || restore_steps[0]?.["continue-on-error"]
+    || step_continue_on_error(restore_steps[0])
       != true {
     errors = errors
       + [
@@ -309,7 +309,7 @@ pub fn macos_warm_errors(
   if len(nightly_restores) != 1
     || trim(nightly_restores[0]?.if ?? "")
       != MACOS_WARM_HOSTED_RESTORE_GUARD
-    || nightly_restores[0]?.["continue-on-error"]
+    || step_continue_on_error(nightly_restores[0])
       != true {
     errors = errors
       + [
@@ -355,7 +355,7 @@ pub fn macos_warm_errors(
   const ci_restores = matching_run_steps(ci_job, MACOS_WARM_RESTORE_MARKER)
   if len(ci_restores) != 1
     || trim(ci_restores[0]?.id ?? "") != MACOS_WARM_RESTORE_STEP_ID
-    || ci_restores[0]?.["continue-on-error"]
+    || step_continue_on_error(ci_restores[0])
       != true {
     errors = errors
       + [
@@ -447,7 +447,7 @@ fn ci_native_windows_job_errors(
   }
   let errors: list<string> = []
   for name in ci_jobs.keys().sorted() {
-    if contains(lowercase(to_string(ci_jobs[name]?.["runs-on"] ?? "")), "windows") {
+    if contains(lowercase(to_string(job_runner(ci_jobs[name]) ?? "")), "windows") {
       errors = errors
         + [
           "ci.yml:${name} runs on a native Windows runner; native Windows belongs to ${warm.workflow} (nightly, dispatch, and release pull requests), not pull-request or merge-group admission",
@@ -461,12 +461,8 @@ fn windows_nightly_trigger_errors(
   warm: WindowsWorkspaceWarmPolicy,
   nightly_workflow: CiWorkflow?,
 ) -> list<string> {
-  const nightly_on = nightly_workflow?.["on"] ?? {}
-  const triggers = if type_of(nightly_on) == "dict" {
-    nightly_on.keys()
-  } else {
-    []
-  }
+  const nightly_on = workflow_events(nightly_workflow)
+  const triggers = nightly_on.keys()
   let errors: list<string> = []
   if triggers.contains("merge_group") {
     errors = errors + ["${warm.workflow} must not run on merge_group"]
@@ -479,7 +475,7 @@ fn windows_nightly_trigger_errors(
   }
   const pull_request = nightly_on.pull_request ?? {}
   if type_of(pull_request) == "dict"
-    && (pull_request?.paths != nil || pull_request?.["paths-ignore"] != nil) {
+    && (pull_request?.paths != nil || trigger_ignored_paths(pull_request) != nil) {
     errors = errors
       + [
         "${warm.workflow} pull_request trigger must carry no path filter; the release route alone decides which pull requests run",
@@ -526,7 +522,7 @@ fn windows_nightly_producer_errors(
   producer: CiJob,
 ) -> list<string> {
   let errors: list<string> = []
-  if trim(producer["runs-on"] ?? "") != HOSTED_WINDOWS_RUNNER {
+  if trim(to_string(job_runner(producer) ?? "")) != HOSTED_WINDOWS_RUNNER {
     errors = errors
       + ["${warm.workflow}:${warm.job} must use free standard ${HOSTED_WINDOWS_RUNNER}"]
   }
@@ -659,8 +655,8 @@ pub fn macos_shared_cache_errors(
   }
   const kinds = matrix_include_rows(lint_job).map({ entry -> trim(entry?.kind ?? "") }).to_list()
   const expected_name = "Rust on macOS strict lint ($" + "{{ matrix.kind }})"
-  if kinds != RUST_LINT_LEGS || lint_job?.strategy?.["fail-fast"] != false
-    || lint_job?.["runs-on"] != "macos-latest"
+  if kinds != RUST_LINT_LEGS || strategy_fail_fast(lint_job) != false
+    || job_runner(lint_job) != "macos-latest"
     || lint_job?.name != expected_name
     || lint_job?.env?.RUSTFLAGS != "-D warnings" {
     errors = errors
@@ -674,7 +670,7 @@ pub fn macos_shared_cache_errors(
     || job_needs(aggregate) != ["changes", "macos-lint"]
     || len(aggregate_steps) != 1
     || aggregate?.permissions != {contents: "read"}
-    || aggregate?.["timeout-minutes"] != 5
+    || job_timeout(aggregate) != 5
     || aggregate_steps[0]?.env?.MATRIX_RESULT != "$" + "{{ needs.macos-lint.result }}"
     || aggregate_steps[0]?.env?.LINT_PROOFS != "$" + "{{ toJSON(needs.macos-lint.outputs) }}" {
     errors = errors
@@ -686,7 +682,7 @@ pub fn macos_shared_cache_errors(
 }
 
 fn macos_lint_receipt_errors(job: CiJob?, lint_steps: list<CiStep>) -> list<string> {
-  let expected_outputs: dict = {}
+  let expected_outputs: dict<string, string> = {}
   for leg in RUST_LINT_LEGS {
     expected_outputs[leg] = "$" + "{{ steps.lint-proof.outputs['${leg}'] }}"
   }
@@ -707,11 +703,11 @@ fn macos_lint_receipt_errors(job: CiJob?, lint_steps: list<CiStep>) -> list<stri
     || publication[0]?.env?.LINT_OUTCOME != "$" + "{{ steps.strict-lint.outcome }}"
     || last != publication[0]
     || lint_steps[0]?.id != "strict-lint"
-    || lint_steps[0]?.["continue-on-error"] == true
+    || step_continue_on_error(lint_steps[0]) == true
     || len(parity) != 1
     || parity[0]?.if != "matrix.kind == 'workspace'"
     || trim(parity[0]?.run ?? "") != parity_command
-    || parity[0]?.["continue-on-error"] == true {
+    || step_continue_on_error(parity[0]) == true {
     return [
       "ci.yml:macos-lint must publish distinct role receipts only after successful strict lint and parity",
     ]

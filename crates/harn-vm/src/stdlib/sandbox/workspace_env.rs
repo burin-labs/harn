@@ -9,6 +9,8 @@ use super::{base_workspace_roots, normalize_for_policy, path_is_within, warn_onc
 #[path = "pinned_pnpm.rs"]
 mod pinned_pnpm;
 
+#[path = "corepack_home.rs"]
+mod corepack_home;
 #[path = "gh_config.rs"]
 pub(crate) mod gh_config;
 #[cfg(unix)]
@@ -828,6 +830,9 @@ fn toolchain_env_at(
     // ordinary on a shared or containerized machine.
     for (name, path) in rust_toolchain_homes() {
         env.push((name.to_string(), path.display().to_string()));
+    }
+    if let Some(path) = corepack_home::installed_root() {
+        env.push(("COREPACK_HOME".to_string(), path));
     }
     if let Some(home) = crate::user_dirs::home_dir().filter(|home| home.is_absolute()) {
         for (key, candidate) in [

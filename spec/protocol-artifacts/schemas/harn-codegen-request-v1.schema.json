@@ -614,6 +614,10 @@
         },
         "side_effect_level": {
           "$ref": "#/$defs/SideEffectLevel"
+        },
+        "source": {
+          "$ref": "#/$defs/ToolPolicySource",
+          "default": "declared"
         }
       },
       "required": [
@@ -621,6 +625,14 @@
         "side_effect_level"
       ],
       "type": "object"
+    },
+    "ToolPolicySource": {
+      "description": "Whether a classification was declared or projected from legacy annotations.",
+      "enum": [
+        "declared",
+        "legacy_annotations"
+      ],
+      "type": "string"
     },
     "ToolTaskSupport": {
       "description": "Whether one tool may be invoked as a task, as `tools/list` reports it.\n\nMCP lets a server declare this per tool rather than server-wide, which is\nwhat makes an honest partial implementation possible: a server can serve the\nextension for the tools it can actually run that way and say `forbidden` for\nthe rest, instead of advertising a blanket capability and failing whichever\ncalls it cannot honor.",

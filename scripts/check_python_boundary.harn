@@ -20,6 +20,30 @@ const SKIP_SEGMENTS = [
 
 const PYTHON_ALLOWLIST = [
   {
+    kind: "prefix",
+    pattern: "experiments/learned-dispatch/project/",
+    category: "subprocess-fixture",
+    owner: "Learned workflow execution qualification",
+    reason:
+      "The Python HTTP application and unittest suite are the foreign project exercised by the reviewed executable.",
+  },
+  {
+    kind: "exact",
+    pattern: "experiments/learned-dispatch/grade.py",
+    category: "foreign-runtime-adapter",
+    owner: "Learned workflow execution qualification",
+    reason:
+      "Imports the generated Python resource and runs its real App handlers and stock unittest discovery; Harn owns qualification.",
+  },
+  {
+    kind: "exact",
+    pattern: "experiments/learned-dispatch/calibrate_grader.py",
+    category: "subprocess-fixture",
+    owner: "Learned workflow execution qualification",
+    reason:
+      "Checks real Python implementations and a boolean-as-integer mutant against the independent foreign-runtime grader.",
+  },
+  {
     kind: "exact",
     pattern: "scripts/lib/target_gc_incremental.py",
     category: "foreign-runtime-bootstrap",
@@ -106,6 +130,14 @@ const PYTHON_ALLOWLIST = [
     owner: "Target-cache collector",
     reason:
       "Holds real descriptors, mappings, working directories and Cargo locks against disposable targets to verify the Linux process-table census.",
+  },
+  {
+    kind: "exact",
+    pattern: "scripts/tests/prune_stale_targets_clone_owner_test.py",
+    category: "subprocess-fixture",
+    owner: "Target-cache collector",
+    reason:
+      "Real Git clones, source holders and filesystem metadata exercise checkout custody through the bootstrap collector.",
   },
   {
     kind: "exact",
@@ -208,6 +240,21 @@ const EMBEDDED_PYTHON_ALLOWLIST = [
     category: "subprocess-fixture",
     owner: "Target-cache collector",
     reason: "Runs the Linux process-table census regression in the repository shell gate.",
+  },
+  {
+    path: "Makefile",
+    pattern: r"^\s*python3\s+\./scripts/tests/prune_stale_targets_clone_owner_test\.py(?:\s|$)",
+    category: "subprocess-fixture",
+    owner: "Target-cache collector",
+    reason: "Runs the real clone and filesystem custody controls in the repository shell gate.",
+  },
+  {
+    path: "scripts/prune_stale_targets.sh",
+    pattern: r#"^\s*python3\s+-\s+"\$@"\s+<<'PY'"#,
+    category: "foreign-runtime-bootstrap",
+    owner: "Target-cache collector",
+    reason:
+      "Registers atomic owner records and reads bounded regular-file metadata before Harn exists; the collector cannot depend on the cache it prunes.",
   },
   {
     path: "scripts/prune_stale_targets.sh",

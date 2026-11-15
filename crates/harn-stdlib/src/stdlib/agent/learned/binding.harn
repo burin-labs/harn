@@ -1,0 +1,36 @@
+import {
+  LearnedBindingRequest,
+  LearnedCapability,
+  LearnedRequest,
+} from "std/agent/learned/contracts"
+import { EvaluationPolicy, boolean } from "std/predicate"
+
+/**
+ * Describe the semantic check shared by dispatch, fixtures, and evaluation.
+ * @effects: [fs.read]
+ * @errors: ["prompt unavailable"]
+ */
+pub fn learned_binding_request(
+  fs: HarnessFs,
+  request: LearnedRequest,
+  capability: LearnedCapability,
+  arguments: dict<string, unknown>,
+  policy: EvaluationPolicy,
+) -> LearnedBindingRequest {
+  return {
+    site_id: "stdlib.learned_binding.v1",
+    state: {
+      request: request.request,
+      capability_id: capability.id,
+      capability_meaning: capability.meaning,
+      input_schema_json: json_stringify(capability.tool.inputSchema),
+      arguments_json: json_stringify(arguments),
+    },
+    questions: {
+      faithful: boolean(
+        fs.render_prompt("std/agent/learned/prompts/check_binding.harn.prompt", {}),
+      ),
+    },
+    policy: policy,
+  }
+}

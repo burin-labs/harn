@@ -16,7 +16,9 @@ mod native_binding;
 mod prepared;
 mod schema;
 
+pub(crate) use prepared::compile_runtime_schema;
 pub(crate) use schema::try_transform_schema_nodes as transform_codegen_schema;
+pub(crate) use schema::try_visit_schema_nodes_with_context as visit_schema_with_context;
 use schema::{
     decode_json_pointer_segment, encode_json_pointer_segment, try_transform_schema_nodes,
     try_visit_schema_nodes,
@@ -234,12 +236,23 @@ pub struct ToolExecution {
     pub task_support: ToolTaskSupport,
 }
 
+/// Whether a classification was declared or projected from legacy annotations.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolPolicySource {
+    #[default]
+    Declared,
+    LegacyAnnotations,
+}
+
 /// Harn-owned execution classification, separate from advisory MCP hints.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
 pub struct ToolPolicy {
     pub kind: ToolKind,
     pub side_effect_level: SideEffectLevel,
+    #[serde(default)]
+    pub source: ToolPolicySource,
 }
 
 /// Reusable named JSON Schemas carried by a catalog.
@@ -546,7 +559,9 @@ impl ToolCatalog {
         result: JsonValue,
     ) -> Result<Option<JsonValue>, ToolCatalogProjectionError> {
         let Some(output_schema) = entry.output_schema.as_ref() else {
-            return Ok(None);
+            // MCP permits structured objects without an advertised schema.
+            // Keep producer receipts intact even for dynamically authored tools.
+            return Ok(result.is_object().then_some(result));
         };
         let schema = standalone_schema(
             output_schema,
@@ -890,13 +905,18 @@ fn tool_catalog_entry_to_mcp_with_components(
     if let Some(output_schema) = entry.output_schema.as_ref() {
         tool["outputSchema"] = mcp_output_schema(&public_mcp_schema(output_schema, components)?);
     }
+    let mut contract = serde_json::Map::new();
     if let Some(error_schema) = entry.error_schema.as_ref() {
-        let error_schema = public_mcp_schema(error_schema, components)?;
-        tool.as_object_mut()
-            .expect("MCP tool projection is an object")
-            .entry("_meta")
-            .or_insert_with(|| json!({}))[HARN_MCP_TOOL_CONTRACT_META_KEY] =
-            json!({"errorSchema": error_schema});
+        contract.insert(
+            "errorSchema".into(),
+            public_mcp_schema(error_schema, components)?,
+        );
+    }
+    if let Some(policy) = entry.policy.as_ref() {
+        contract.insert("policy".into(), json!(policy));
+    }
+    if !contract.is_empty() {
+        tool["_meta"] = json!({HARN_MCP_TOOL_CONTRACT_META_KEY: contract});
     }
     if let Some(annotations) = entry.annotations.as_ref() {
         let mut annotations = annotations.clone();
@@ -1258,6 +1278,7 @@ pub(crate) fn append_tool_catalog_typescript(output: &mut String, config: &Confi
     declaration!(ToolPresentationAnnotations);
     declaration!(ToolIcon);
     declaration!(ToolExecution);
+    declaration!(ToolPolicySource);
     declaration!(ToolPolicy);
     declaration!(ToolCatalogComponents);
     declaration!(ToolCatalogEntry);

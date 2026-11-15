@@ -196,3 +196,93 @@ fn a_granted_value_is_filtered_when_the_current_session_has_no_store() {
     assert!(!out.contains(VALUE), "a granted value was printed: {out}");
     assert!(out.contains("[redacted]"), "nothing was filtered: {out}");
 }
+
+/// Output drained in chunks is redacted before anyone reads it. Wherever a
+/// read splits a filtered value, no emitted chunk carries any part of it, and
+/// the joined output equals redacting the whole stream at once. A tail that
+/// cannot begin a filtered value is never held, so paused output is current.
+#[test]
+fn a_streamed_value_is_redacted_wherever_a_read_splits_it() {
+    let store = super::Store::default();
+    for value in ["stream-secret-value", "stream-secret-longer-value"] {
+        assert!(store.lock().add_filter(value));
+    }
+    let filter = super::OutputFilter(store.clone());
+    let text = b"a stream-secret-value b stream-secret-longer-value stream-sec\nready\n";
+    let whole = store.lock().redact_bytes(text);
+    for first in 0..=text.len() {
+        for second in first..=text.len() {
+            let mut stream = filter.stream();
+            let chunks = [
+                stream.push(&text[..first]),
+                stream.push(&text[first..second]),
+                stream.push(&text[second..]),
+            ];
+            for chunk in &chunks {
+                assert!(
+                    !chunk.windows(6).any(|window| window == b"secret"),
+                    "split at {first}/{second} emitted {:?}",
+                    String::from_utf8_lossy(chunk)
+                );
+            }
+            let mut joined = chunks.concat();
+            joined.extend(stream.finish());
+            // A read that ends on a value's first byte releases that byte,
+            // and the rest of the value still redacts.
+            let joined = String::from_utf8(joined)
+                .unwrap()
+                .replace("s[redacted]", "[redacted]");
+            assert_eq!(
+                joined.as_bytes(),
+                whole.as_slice(),
+                "split at {first}/{second}"
+            );
+        }
+    }
+    let mut stream = filter.stream();
+    assert_eq!(stream.push(b"ready\n"), b"ready\n");
+    assert_eq!(stream.push(b"token=stream-sec"), b"token=");
+    assert_eq!(stream.finish(), b"stream-sec");
+}
+
+/// A prompt ending in a filtered value's first byte is not held, so an output
+/// wait sees it while its program waits for input. If the value then
+/// completes, everything after that byte is still redacted.
+#[test]
+fn a_one_byte_tail_is_released_and_the_value_it_begins_still_redacts() {
+    let store = super::Store::default();
+    assert!(store.lock().add_filter("stream-secret-value"));
+    let filter = super::OutputFilter(store);
+    let mut stream = filter.stream();
+    assert_eq!(stream.push(b"continue? s"), b"continue? s");
+    assert_eq!(stream.push(b"tream-secret-value!"), b"[redacted]!");
+    assert_eq!(stream.finish(), b"");
+
+    let mut stream = filter.stream();
+    assert_eq!(stream.push(b"x s"), b"x s");
+    assert_eq!(stream.push(b"t"), b"");
+    assert_eq!(stream.push(b"op"), b"top");
+    assert_eq!(stream.finish(), b"");
+}
+
+/// Two overlapping filtered values that share their first byte: whichever one
+/// completes after that byte is released, the rest of it still redacts, and
+/// the longer match wins as it does for the whole stream.
+#[test]
+fn a_released_byte_starting_two_overlapping_values_still_redacts_either() {
+    let store = super::Store::default();
+    for value in ["stream-secret-value", "stream-secret-longer-value"] {
+        assert!(store.lock().add_filter(value));
+    }
+    let filter = super::OutputFilter(store);
+    for (rest, expected) in [
+        (&b"tream-secret-value."[..], &b"[redacted]."[..]),
+        (b"tream-secret-longer-value.", b"[redacted]."),
+    ] {
+        let mut stream = filter.stream();
+        assert_eq!(stream.push(b"a s"), b"a s");
+        let mut shown = stream.push(rest);
+        shown.extend(stream.finish());
+        assert_eq!(shown, expected, "{}", String::from_utf8_lossy(rest));
+    }
+}

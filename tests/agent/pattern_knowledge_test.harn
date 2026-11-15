@@ -443,7 +443,14 @@ pipeline test_pattern_learning_import_keeps_a_redacted_command_ledger(harness: H
       const calls = transcript.entries.filter({ entry -> entry.kind == "tool_call" }).to_list()
       assert_eq(
         transcript.entries[0],
-        {kind: "message", role: "user", text: "Fix the parser and make the tests pass."},
+        {
+          kind: "message",
+          role: "user",
+          text: "Fix the parser and make the tests pass.",
+          entry_index: 0,
+          content_chars: 39,
+          content_truncated: false,
+        },
       )
       assert_eq(len(calls), 2)
       assert(

@@ -97,6 +97,15 @@ fallback refuse the grant unless the policy already permits general networking.
 Other backends refuse it. The socket must
 exist and have an absolute path; an unset `SSH_AUTH_SOCK` is a CLI error.
 
+Native embedders can call
+`harn_vm::process_sandbox::ssh_agent_grant_available(&policy)` before starting a
+session with a proposed `ssh_agent_socket`. It returns `Result<(), VmError>`
+using the same validator and `ToolRejected` reason as process validation, so a
+host can decline the grant and explain why without copying platform checks.
+The check does not connect to the agent or change the policy. An absent grant
+succeeds; success checks only the proposed grant, not the rest of the session's
+policy. A later spawn still validates the grant against the current host state.
+
 When a confined child fails, the refusal record names the boundary that
 refused it: `mechanism` is one of `egress`, `local_socket`, `home_read`,
 `write`, or `unknown`, and `reason` spells out what was and was not granted.
@@ -577,8 +586,15 @@ pointing at their narrowly scoped toolchain/config preset roots so installed
 toolchains and private-registry configuration remain usable. `PNPM_HOME`
 contains installed pnpm versions, so moving it would make an offline
 `pnpm run` try to download the project's already-installed pinned version.
-Preserving it grants no additional filesystem or network access. On macOS, a
-loopback grant also appends `-Djava.net.preferIPv6Addresses=true` to
+Preserving it grants no additional filesystem or network access.
+
+Corepack's `COREPACK_HOME` likewise retains the installed package-manager root
+before Harn relocates `XDG_CACHE_HOME`. An explicit value wins; otherwise Harn
+uses the launcher's original XDG cache directory, `LOCALAPPDATA`, or Corepack's
+platform default under the home directory. Existing filesystem rules still
+apply, and this does not permit downloading an absent package manager.
+
+On macOS, a loopback grant also appends `-Djava.net.preferIPv6Addresses=true` to
 `JAVA_TOOL_OPTIONS`: a dual-stack JVM binds `127.0.0.1` as the IPv4-mapped
 IPv6 address `::ffff:127.0.0.1`, which the seatbelt's loopback filter does not
 recognise, so Gradle and other JVM tools would otherwise fail their loopback

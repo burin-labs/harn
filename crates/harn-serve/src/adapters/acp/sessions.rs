@@ -501,6 +501,7 @@ impl ConcurrentSessionControls {
 pub(super) struct ToolCallCancelRequest {
     pub(super) session_id: String,
     pub(super) call_id: String,
+    pub(super) handle_id: Option<String>,
     pub(super) reason: String,
     pub(super) inject_reminder: bool,
 }
@@ -545,9 +546,21 @@ impl ToolCallCancelRequest {
             .or_else(|| params.get("inject_reminder"))
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(true);
+        let handle_id = match params.get("handleId").or_else(|| params.get("handle_id")) {
+            None | Some(serde_json::Value::Null) => None,
+            Some(serde_json::Value::String(value)) if !value.trim().is_empty() => {
+                Some(value.clone())
+            }
+            _ => {
+                return Err(
+                    "session/cancel_tool_call handleId must be a nonempty string".to_string(),
+                )
+            }
+        };
         Ok(Self {
             session_id,
             call_id,
+            handle_id,
             reason,
             inject_reminder,
         })
@@ -557,6 +570,23 @@ impl ToolCallCancelRequest {
         self,
         registry: &harn_vm::tool_call_cancellations::CancellationRegistry,
     ) -> ToolCallCancelResult {
+        if let Some(handle_id) = self.handle_id {
+            #[cfg(feature = "hostlib")]
+            let status = harn_hostlib::tools::long_running::cancel_session_handle(
+                &self.session_id,
+                &handle_id,
+            );
+            #[cfg(not(feature = "hostlib"))]
+            let status = {
+                let _ = handle_id;
+                harn_vm::tool_call_cancellations::CancelStatus::NotFound
+            };
+            return ToolCallCancelResult {
+                status: status.as_str(),
+                call_id: self.call_id,
+                tool: None,
+            };
+        }
         let outcome = registry.cancel(
             &self.session_id,
             &self.call_id,

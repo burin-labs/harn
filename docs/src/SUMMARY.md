@@ -4,6 +4,8 @@
 
 # Concepts
 
+- [Why qualify learned workflows?](./learned-workflows.md)
+
 - [Start here](./concepts/index.md)
 - [Mental model](./concepts/mental-model.md)
 - [Glossary](./concepts/glossary.md)
@@ -164,6 +166,7 @@
 - [External actions](./stdlib/external-action.md)
 - [Execution decisions](./stdlib/execution.md)
 - [Semantic dispatch](./stdlib/decision.md)
+- [Learned workflows](./stdlib/learned-workflows.md)
 - [Command sequence plans](./stdlib/command-sequence-plan.md)
 - [Shell exit evidence](./stdlib/shell-exit-evidence.md)
 - [Daemon stdlib](./stdlib/daemon.md)
@@ -415,6 +418,7 @@
 - [Post-merge CI tier](./dev/post-merge-tier.md)
 - [Green branch](./dev/green-branch.md)
 - [Agent shell guard](./dev/agent-shell-guard.md)
+- [Build target ownership](./dev/build-target-ownership.md)
 - [Deterministic test patterns](./dev/testing.md)
 - [Check documentation examples](./dev/check-docs-snippets.md)
 - [Windows test coverage](./dev/windows-test-coverage.md)

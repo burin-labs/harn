@@ -877,6 +877,15 @@ pub(super) async fn host_agent_session_finalize(
         result["adaptive_budget"] = budget;
     }
     let physical_usage = super::physical_usage_ledger(&session);
+    if session.provider_call_count > 0 {
+        let observed = vm_to_json(&super::usage_accounting::observed_totals(&session, true));
+        if let serde_json::Value::Object(fields) = observed {
+            result
+                .as_object_mut()
+                .expect("agent result is a record")
+                .extend(fields);
+        }
+    }
     result["physical_usage"] = crate::llm::vm_value_to_json(&super::physical_usage_to_vm_value(
         &physical_usage,
         session.provider_call_count,

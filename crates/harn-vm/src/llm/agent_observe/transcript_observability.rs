@@ -83,7 +83,12 @@ fn try_append_llm_transcript_entry_to_dir(entry: &serde_json::Value, dir: Option
 /// `tool_calls` arrays are not promoted to avoid duplicate
 /// `tool_call` events for the same `call_id`.
 pub(super) fn forward_transcript_run_events(entry: &serde_json::Value) {
-    if !crate::run_events::sink_active() {
+    use crate::run_events::{enabled, RunEventKind};
+
+    let transcript_enabled = enabled(RunEventKind::Transcript);
+    let tool_call_enabled = enabled(RunEventKind::ToolCall);
+    let tool_result_enabled = enabled(RunEventKind::ToolResult);
+    if !(transcript_enabled || tool_call_enabled || tool_result_enabled) {
         return;
     }
     let kind = entry
@@ -91,12 +96,7 @@ pub(super) fn forward_transcript_run_events(entry: &serde_json::Value) {
         .and_then(|value| value.as_str())
         .unwrap_or("transcript_event")
         .to_string();
-    let agent_id = entry
-        .get("agent_id")
-        .and_then(|value| value.as_str())
-        .map(str::to_string);
-
-    if kind == "interpreted_response" {
+    if tool_call_enabled && kind == "interpreted_response" {
         if let Some(calls) = entry.get("tool_calls").and_then(|value| value.as_array()) {
             for call in calls {
                 let name = call
@@ -125,7 +125,7 @@ pub(super) fn forward_transcript_run_events(entry: &serde_json::Value) {
         }
     }
 
-    if kind == "tool_result" {
+    if tool_result_enabled && kind == "tool_result" {
         let call_id = entry
             .get("call_id")
             .or_else(|| entry.get("id"))
@@ -148,11 +148,17 @@ pub(super) fn forward_transcript_run_events(entry: &serde_json::Value) {
         });
     }
 
-    crate::run_events::emit(crate::run_events::RunEvent::Transcript {
-        agent_id,
-        kind,
-        payload: entry.clone(),
-    });
+    if transcript_enabled {
+        let agent_id = entry
+            .get("agent_id")
+            .and_then(|value| value.as_str())
+            .map(str::to_string);
+        crate::run_events::emit(crate::run_events::RunEvent::Transcript {
+            agent_id,
+            kind,
+            payload: entry.clone(),
+        });
+    }
 }
 
 pub(super) fn append_llm_transcript_event_log(entry: &serde_json::Value) -> bool {

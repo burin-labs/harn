@@ -25,6 +25,7 @@ impl PreparedWireType {
     pub fn graph(&self) -> &PreparedWireGraph {
         &self.graph
     }
+    /// Hydration shape. Runtime catalogs retain their original validation schema.
     pub fn json_schema(&self) -> serde_json::Value {
         self.graph
             .json_schema(&self.root)

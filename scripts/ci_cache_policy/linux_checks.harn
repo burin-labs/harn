@@ -10,8 +10,11 @@ const CACHE_REFRESH_WORKFLOW = "rust-cache-refresh.yml"
 /** The ref GitHub keeps cache entries for. */
 const PERSISTENT_BRANCH = "main"
 
-fn strings_of(values: any) -> list<string> {
-  return (values ?? []).map({ value -> return trim(to_string(value)) }).to_list()
+fn strings_of(values: string | list<string> | nil) -> list<string> {
+  if type_of(values) == "string" {
+    return [values.trim()]
+  }
+  return (values ?? []).map({ value -> return value.trim() }).to_list()
 }
 
 /**
@@ -201,7 +204,7 @@ fn producer_step_budget_errors(
     const step = step_named(job, name)
     if step == nil {
       errors = errors + ["ci.yml:${job_name} must keep the budgeted step '${name}'"]
-    } else if trim(to_string(step["timeout-minutes"] ?? "")) != to_string(expected) {
+    } else if trim(to_string(step_timeout(step) ?? "")) != to_string(expected) {
       errors = errors
         + [
           "ci.yml:${job_name} step '${name}' must carry its own ${expected} budget so the cache save reserve stays reserved",
@@ -267,7 +270,7 @@ fn hosted_compile_lane_errors(
     return ["ci.yml:${job_name} must define the hosted Linux compile lane"]
   }
   let errors: list<string> = []
-  if trim(job["runs-on"] ?? "") != HOSTED_LINUX_RUNNER {
+  if trim(to_string(job_runner(job) ?? "")) != HOSTED_LINUX_RUNNER {
     errors = errors + ["ci.yml:${job_name} must run on ${HOSTED_LINUX_RUNNER}"]
   }
   if trim(job?.env?.[RUNNER_TIER_ENV] ?? "") != HOSTED_RUNNER_TIER {
@@ -317,7 +320,7 @@ fn rust_lint_lane_errors(workflow: CiWorkflow?) -> list<string> {
     return ["ci.yml:${job_name} must define the strict Clippy lane"]
   }
   let errors: list<string> = []
-  if trim(job["runs-on"] ?? "") != HOSTED_LINUX_RUNNER {
+  if trim(to_string(job_runner(job) ?? "")) != HOSTED_LINUX_RUNNER {
     errors = errors + ["ci.yml:${job_name} must run on GitHub-hosted ${HOSTED_LINUX_RUNNER}"]
   }
   if trim(to_string(job?.env?.[RUNNER_TIER_ENV] ?? "")) != HOSTED_RUNNER_TIER {
@@ -330,7 +333,7 @@ fn rust_lint_lane_errors(workflow: CiWorkflow?) -> list<string> {
     errors = errors + ["ci.yml:${job_name} must not restore a build cache Clippy cannot reuse"]
   }
   const kinds = matrix_include_rows(job).map({ entry -> trim(entry?.kind ?? "") }).to_list()
-  if kinds != RUST_LINT_LEGS || job?.strategy?.["fail-fast"] != false {
+  if kinds != RUST_LINT_LEGS || strategy_fail_fast(job) != false {
     errors = errors
       + [
         "ci.yml:${job_name} must run exactly one fail-slow matrix leg per lint leg: ${join(RUST_LINT_LEGS, ", ")}",
@@ -356,7 +359,7 @@ fn persistent_compile_lane_errors(
     errors = errors
       + ["ci.yml:${job_name} must depend only on the Rust change decision"]
   }
-  if trim(job["runs-on"] ?? "") != producer_runner_expression() {
+  if trim(to_string(job_runner(job) ?? "")) != producer_runner_expression() {
     errors = errors
       + ["ci.yml:${job_name} must use standard hosted ${PRODUCER_HOSTED_LINUX_RUNNER}"]
   }
@@ -367,7 +370,7 @@ fn persistent_compile_lane_errors(
   if trim(to_string(job?.env?.SCCACHE_CACHE_SIZE ?? "")) != "15G" {
     errors = errors + ["ci.yml:${job_name} must bound persistent sccache at 15G"]
   }
-  if trim(to_string(job["timeout-minutes"] ?? ""))
+  if trim(to_string(job_timeout(job) ?? ""))
     != timeout_expression(budgets) {
     errors = errors
       + [
@@ -440,7 +443,7 @@ fn hosted_refresh_lane_errors(workflow: CiWorkflow?) -> list<string> {
     ]
   }
   let errors: list<string> = []
-  if trim(job["runs-on"] ?? "") != HOSTED_LINUX_RUNNER {
+  if trim(to_string(job_runner(job) ?? "")) != HOSTED_LINUX_RUNNER {
     errors = errors
       + ["${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must run on ${HOSTED_LINUX_RUNNER}"]
   }
@@ -472,7 +475,7 @@ pub fn rust_cache_refresh_concurrency_errors(workflow: CiWorkflow?) -> list<stri
         "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must serialize main cache mutations separately from read-only branch qualification",
       ]
   }
-  if lowercase(trim(to_string(workflow?.concurrency?.["cancel-in-progress"] ?? true))) != "false" {
+  if lowercase(trim(to_string(concurrency_cancel(workflow?.concurrency) ?? true))) != "false" {
     errors = errors
       + [
         "${CACHE_REFRESH_WORKFLOW}:rust-cache-refresh must finish the active cache save before the newest pending one",
@@ -484,7 +487,7 @@ pub fn rust_cache_refresh_concurrency_errors(workflow: CiWorkflow?) -> list<stri
       errors = errors
         + ["Cache refresh must not interleave producer jobs through a job concurrency group"]
     }
-    if job != nil && job?.strategy?.["max-parallel"] != 1 {
+    if job != nil && strategy_max_parallel(job) != 1 {
       errors = errors + ["Cache refresh must serialize each producer matrix"]
     }
   }
@@ -543,7 +546,7 @@ pub fn cache_refresh_trigger_errors(workflow: CiWorkflow?) -> list<string> {
   guard workflow != nil else {
     return ["${CACHE_REFRESH_WORKFLOW} must exist as the cache refresh owner"]
   }
-  const triggers = workflow["on"] ?? {}
+  const triggers = workflow_events(workflow)
   let errors: list<string> = []
   const push_branches = strings_of(triggers?.push?.branches)
   if !push_branches.contains(PERSISTENT_BRANCH) {
@@ -554,7 +557,7 @@ pub fn cache_refresh_trigger_errors(workflow: CiWorkflow?) -> list<string> {
   }
   let crons: list<string> = []
   for row in triggers?.schedule ?? [] {
-    crons = crons + [trim(to_string(row?.cron ?? ""))]
+    crons = crons + [trim(to_string(row.cron ?? ""))]
   }
   if len(crons.filter({ cron -> cron != "" }).to_list()) == 0 {
     errors = errors
@@ -605,7 +608,7 @@ pub fn rust_cache_refresh_prerequisite_errors(workflow: CiWorkflow?) -> list<str
     }
   }
   const caches = matching_steps(cli, RUST_CACHE_ACTION)
-  if len(caches) != 1 || caches[0]?.["continue-on-error"] == true {
+  if len(caches) != 1 || step_continue_on_error(caches[0]) == true {
     errors = errors
       + ["Cache refresh cannot treat a failed qualification lifecycle as a successful prerequisite"]
   }
@@ -707,7 +710,7 @@ fn archived_workspace_test_consumer_errors(
     return []
   }
   let errors: list<string> = []
-  if trim(consumer["runs-on"] ?? "") != HOSTED_LINUX_RUNNER {
+  if trim(to_string(job_runner(consumer) ?? "")) != HOSTED_LINUX_RUNNER {
     errors = errors
       + ["ci.yml:${job_name} must run on ${HOSTED_LINUX_RUNNER}"]
   }
@@ -718,7 +721,7 @@ fn archived_workspace_test_consumer_errors(
   if trim(consumer?.env?.RUSTFLAGS ?? "") != trim(producer?.env?.RUSTFLAGS ?? "") {
     errors = errors + ["ci.yml:${job_name} must match rust-check-inputs RUSTFLAGS"]
   }
-  if trim(to_string(consumer["timeout-minutes"] ?? "")) != EXECUTION_ONLY_TIMEOUT_MINUTES {
+  if trim(to_string(job_timeout(consumer) ?? "")) != EXECUTION_ONLY_TIMEOUT_MINUTES {
     errors = errors
       + [
         "ci.yml:${job_name} must keep the execution-only ${EXECUTION_ONLY_TIMEOUT_MINUTES}-minute timeout",
@@ -809,8 +812,8 @@ fn security_ready_barrier_errors(workflow: CiWorkflow?) -> list<string> {
   // The waiter reads the producer's state, so a queued or running producer is
   // pending rather than spending the wait. Gating the barrier on producer
   // completion as well only delays the sandbox proof behind the test phase.
-  if trim(ready_job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER
-    || trim(to_string(ready_job?.["timeout-minutes"] ?? ""))
+  if trim(to_string(job_runner(ready_job) ?? "")) != HOSTED_LINUX_RUNNER
+    || trim(to_string(job_timeout(ready_job) ?? ""))
       != ARTIFACT_READY_TIMEOUT_MINUTES
     || ready_step?.env?.HARN_EXT_ARTIFACT_WAIT_MAX_ATTEMPTS != nil
     || ready_needs != ["changes"]
@@ -842,7 +845,7 @@ fn harn_audit_overlap_errors(workflow: CiWorkflow?) -> list<string> {
   if (audit?.needs ?? []) != ["changes", CLI_PRODUCER_JOB]
     || trim(audit?.if ?? "") != LIVE_CLI_CONSUMER_IF
     || step_index_by_name(steps, "Wait for shared Harn binary") >= 0
-    || trim(to_string(audit?.["timeout-minutes"] ?? ""))
+    || trim(to_string(job_timeout(audit) ?? ""))
       != HARN_AUDIT_TIMEOUT_MINUTES
     || download_index < 0
     || verify_index < 0
@@ -983,9 +986,9 @@ fn walltime_report_errors(workflow: CiWorkflow?) -> list<string> {
   const status_command = trim(status_step?.run ?? "")
   if trim(report_step?.run ?? "")
     != "./scripts/ci/write_ci_walltime_report.sh \"$RUNNER_TEMP/ci-walltime-report.json\""
-    || report_step?.["continue-on-error"]
+    || step_continue_on_error(report_step)
       != nil
-    || upload_report_step?.["continue-on-error"]
+    || step_continue_on_error(upload_report_step)
       != nil
     || trim(upload_report_step?.with?.["if-no-files-found"] ?? "")
       != "error"
@@ -1036,8 +1039,8 @@ fn parallel_rust_proof_errors(workflow: CiWorkflow?) -> list<string> {
     || trim(test_step?.env?.HARN_LLM_CALLS_DISABLED ?? "") != "1"
     || trim(test_step?.env?.HARN_EXT_TEST_PARTITION ?? "") != "$" + "{{ matrix.partition }}"
     || trim(test_step?.if ?? "") != ""
-    || test_step?.["continue-on-error"] != nil
-    || partitions?.["continue-on-error"] != nil
+    || step_continue_on_error(test_step) != nil
+    || job_continue_on_error(partitions) != nil
     || trim(test_step?.run ?? "")
       != "scripts/ci/run_rust_test_lane.sh bash scripts/ci/run_workspace_tests.sh \"$HARN_EXT_TEST_PARTITION\"" {
     errors = errors
@@ -1046,7 +1049,7 @@ fn parallel_rust_proof_errors(workflow: CiWorkflow?) -> list<string> {
   const security_job = workflow?.jobs?.["rust-security"]
   const security_step = step_by_name(security_job?.steps ?? [], "Run Linux sandbox tests")
   const security_command = trim(security_step?.run ?? "")
-  if trim(security_job?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER
+  if trim(to_string(job_runner(security_job) ?? "")) != HOSTED_LINUX_RUNNER
     || trim(security_step?.id ?? "")
       != "release-audit-rust-security"
     || !contains(security_command, "--archive-file")
@@ -1082,8 +1085,8 @@ fn rust_test_aggregate_errors(workflow: CiWorkflow?) -> list<string> {
     || strings_of(aggregate?.needs).sorted()
       != ["changes", "rust-check-inputs", "rust-test", "rust-test-partitions"]
     || trim(aggregate?.if ?? "") != "always()"
-    || aggregate?.["continue-on-error"] != nil
-    || aggregate_step?.["continue-on-error"] != nil
+    || job_continue_on_error(aggregate) != nil
+    || step_continue_on_error(aggregate_step) != nil
     || trim(aggregate_step?.if ?? "") != ""
     || trim(aggregate_step?.run ?? "") != "bash scripts/ci/verify_rust_test_results.sh"
     || aggregate_step?.env != required_env {
@@ -1194,13 +1197,13 @@ fn early_source_policy_errors(workflow: CiWorkflow?) -> list<string> {
   }
   const mirror_command = "make check-aws-config-vendor test-aws-config-vendor"
   const mirror_steps = (shell_job?.steps ?? []).filter(
-    fn(step: dict) -> bool { return step?.run == mirror_command },
+    fn(step: CiStep) -> bool { return step.run == mirror_command },
   )
     .to_list()
   if len(mirror_steps) != 1
     || mirror_steps[0]?.if != nil
-    || (mirror_steps[0]?.["continue-on-error"] ?? false) != false
-    || (shell_job["continue-on-error"] ?? false) != false {
+    || (step_continue_on_error(mirror_steps[0]) ?? false) != false
+    || (job_continue_on_error(shell_job) ?? false) != false {
     errors = errors
       + ["ci.yml:shell-gates must run and enforce the recorded AWS SDK mirror before merge"]
   }

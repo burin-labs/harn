@@ -509,10 +509,8 @@ impl ObservedAttemptToken {
     /// indistinguishable from an unmeasured attempt
     /// (burin-labs/harn#8529).
     pub(super) fn record_provider_dispatch(&self) {
-        self.dispatches.record();
-        if let Some(session_id) = self.session_id.as_deref() {
-            super::agent_session_host::record_provider_dispatch(session_id);
-        }
+        self.dispatches
+            .record_for_session(self.session_id.as_deref());
         self.inference_speed.start();
     }
 

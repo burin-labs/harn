@@ -1,0 +1,59 @@
+import { connector_http_json, connector_http_request } from "std/connectors/shared"
+
+fn main(harness: Harness) {
+  const url = "https://example.test/binary-error"
+  for body in ["{\"code\":\"denied\"}", "δ".repeat(1030)] {
+    harness.testing.http_mock_clear()
+    harness.testing.http_mock("GET", url, {status: 400, body: body})
+    const response = connector_http_request(
+      harness.clock,
+      harness.net,
+      "GET",
+      url,
+      {response_type: "bytes"},
+    )
+    const expected = len(body) > 1024 ? "${substring(body, 0, 1024)}…[truncated 6 chars]" : body
+    assert_eq(response.ok, false)
+    assert_eq(response.error.category, "provider_error")
+    assert_eq(response.body, expected)
+    assert_eq(response.error.body, expected)
+    assert_eq(response.body_bytes, bytes_from_string(body))
+    const redacted = connector_http_request(
+      harness.clock,
+      harness.net,
+      "GET",
+      url,
+      {response_type: "bytes", redact_error_body: true},
+    )
+    assert_eq(redacted.body, nil)
+    assert_eq(redacted.error.body, nil)
+    assert_eq(redacted.body_bytes, nil)
+    assert_eq(len(harness.testing.http_mock_calls()), 2)
+  }
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock("GET", url, {status: 200, body: "not-json"})
+  const invalid = connector_http_json(
+    harness.clock,
+    harness.net,
+    "GET",
+    url,
+    {response_type: "bytes"},
+  )
+  assert_eq(invalid.ok, false)
+  assert_eq(invalid.error.category, "invalid_json")
+  assert_eq(invalid.body, "not-json")
+  assert_eq(invalid.error.body, "not-json")
+  assert_eq(bytes_to_string(invalid.body_bytes ?? bytes_from_string("")), "not-json")
+  const success = connector_http_request(
+    harness.clock,
+    harness.net,
+    "GET",
+    url,
+    {response_type: "bytes"},
+  )
+  assert_eq(success.ok, true)
+  assert_eq(success.body, "")
+  assert_eq(bytes_to_string(success.body_bytes ?? bytes_from_string("")), "not-json")
+  assert_eq(len(harness.testing.http_mock_calls()), 2)
+  harness.stdio.println("connector byte errors preserve safe text and original bytes")
+}

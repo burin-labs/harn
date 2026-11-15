@@ -1,0 +1,1605 @@
+{
+  "contract": "harn.learned_dispatch_corpus.v4",
+  "development": [
+    {
+      "id": "development-positive-00",
+      "resource": "widgets",
+      "fields": {
+        "label": "string",
+        "quantity": "integer",
+        "active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard widgets resource with label (string), quantity (integer), active (boolean). Add the resource module, dispatch tests and API documentation using this application's existing App conventions."
+    },
+    {
+      "id": "development-positive-01",
+      "resource": "reading_groups",
+      "fields": {
+        "display_name": "string",
+        "member_count": "integer",
+        "is_open": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add a repository-standard in-memory reading_groups resource: is_open (boolean), member_count (integer), display_name (string). Generate its auto-mounted module, request tests, and API documentation. Preserve the host and dependencies."
+    },
+    {
+      "id": "development-positive-02",
+      "resource": "sensors",
+      "fields": {
+        "location": "string",
+        "revision": "integer",
+        "enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold sensors, including its module, tests and documentation. Its fields are location (string), revision (integer), enabled (boolean). Use the existing standard POST/GET App pattern with strict payload validation and per-App storage."
+    },
+    {
+      "id": "development-positive-03",
+      "resource": "stock_items",
+      "fields": {
+        "description": "string",
+        "remaining": "integer",
+        "available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need a standard stock_items resource for this App: available (boolean), remaining (integer), description (string). Create app/resources/stock_items.py, tests/test_stock_items.py and docs/stock_items.md, following the current in-memory resource contract."
+    },
+    {
+      "id": "development-positive-04",
+      "resource": "projects",
+      "fields": {
+        "title": "string",
+        "priority": "integer",
+        "archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard projects resource with title (string), priority (integer), archived (boolean). Add the resource module, dispatch tests and API documentation using this application's existing App conventions."
+    },
+    {
+      "id": "development-positive-05",
+      "resource": "tickets",
+      "fields": {
+        "summary": "string",
+        "severity": "integer",
+        "resolved": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add a repository-standard in-memory tickets resource: resolved (boolean), severity (integer), summary (string). Generate its auto-mounted module, request tests, and API documentation. Preserve the host and dependencies."
+    },
+    {
+      "id": "development-positive-06",
+      "resource": "notebooks",
+      "fields": {
+        "owner": "string",
+        "page_count": "integer",
+        "shared": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold notebooks, including its module, tests and documentation. Its fields are owner (string), page_count (integer), shared (boolean). Use the existing standard POST/GET App pattern with strict payload validation and per-App storage."
+    },
+    {
+      "id": "development-positive-07",
+      "resource": "locations",
+      "fields": {
+        "address": "string",
+        "capacity": "integer",
+        "accessible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need a standard locations resource for this App: accessible (boolean), capacity (integer), address (string). Create app/resources/locations.py, tests/test_locations.py and docs/locations.md, following the current in-memory resource contract."
+    },
+    {
+      "id": "development-negative-00",
+      "expected": "",
+      "request": "Explain how I could create a standard widgets resource with label string, quantity integer, and active boolean. Do not edit files."
+    },
+    {
+      "id": "development-negative-01",
+      "expected": "",
+      "request": "Create a widgets resource with label string, quantity integer, active boolean, and SQLite persistence."
+    },
+    {
+      "id": "development-negative-02",
+      "expected": "",
+      "request": "Create both widgets and labels resources, each with name string, count integer and enabled boolean."
+    },
+    {
+      "id": "development-negative-03",
+      "expected": "",
+      "request": "Modify the existing books resource to add an enabled boolean field."
+    },
+    {
+      "id": "development-negative-04",
+      "expected": "",
+      "request": "Create a widgets resource with label string, quantity integer and active boolean, and remove /health."
+    },
+    {
+      "id": "development-negative-05",
+      "expected": "",
+      "request": "Create a widgets resource with label string, description string and active boolean."
+    },
+    {
+      "id": "development-negative-06",
+      "expected": "",
+      "request": "Create a measurements resource with label string, value float and active boolean."
+    },
+    {
+      "id": "development-negative-07",
+      "expected": "",
+      "request": "Create a widgets resource with label string, quantity integer and active boolean, protected by authentication."
+    }
+  ],
+  "qualification": [
+    {
+      "id": "qualification-v4-000",
+      "resource": "release_members",
+      "fields": {
+        "record_display_label": "string",
+        "record_capacity": "integer",
+        "record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard release_members resource with record_display_label (string), record_capacity (integer), and record_is_enabled (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v4-001",
+      "resource": "release_workers",
+      "fields": {
+        "record_reference_code": "string",
+        "record_sequence_number": "integer",
+        "record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named release_workers. Fields: record_is_visible boolean, record_reference_code string, record_sequence_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v4-002",
+      "resource": "release_rooms",
+      "fields": {
+        "record_short_title": "string",
+        "record_revision_number": "integer",
+        "record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold release_rooms: record_revision_number is an integer, record_is_ready is a boolean, and record_short_title is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v4-003",
+      "resource": "release_prompts",
+      "fields": {
+        "record_description_text": "string",
+        "record_priority_level": "integer",
+        "record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/release_prompts.py, tests/test_prompts.py, and docs/release_prompts.md for a new standard release_prompts resource. Its exact fields are record_description_text: string, record_priority_level: integer, record_is_archived: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v4-004",
+      "resource": "release_periods",
+      "fields": {
+        "record_owner_name": "string",
+        "record_total_count": "integer",
+        "record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add release_periods with the string field record_owner_name, integer field record_total_count, and boolean field record_is_public. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v4-005",
+      "resource": "release_platforms",
+      "fields": {
+        "record_category_name": "string",
+        "record_sort_rank": "integer",
+        "record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new release_platforms resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly record_is_available (boolean), record_sort_rank (integer), and record_category_name (string), with strict types."
+    },
+    {
+      "id": "qualification-v4-006",
+      "resource": "release_browsers",
+      "fields": {
+        "record_external_key": "string",
+        "record_retry_limit": "integer",
+        "record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard release_browsers resource with record_external_key (string), record_retry_limit (integer), and record_is_active (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v4-007",
+      "resource": "release_requests",
+      "fields": {
+        "record_summary_text": "string",
+        "record_version_number": "integer",
+        "record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named release_requests. Fields: record_is_complete boolean, record_summary_text string, record_version_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v4-008",
+      "resource": "release_desks",
+      "fields": {
+        "record_display_label": "string",
+        "record_capacity": "integer",
+        "record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold release_desks: record_capacity is an integer, record_is_enabled is a boolean, and record_display_label is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v4-009",
+      "resource": "release_cycles",
+      "fields": {
+        "record_reference_code": "string",
+        "record_sequence_number": "integer",
+        "record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/release_cycles.py, tests/test_cycles.py, and docs/release_cycles.md for a new standard release_cycles resource. Its exact fields are record_reference_code: string, record_sequence_number: integer, record_is_visible: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v4-010",
+      "resource": "release_contracts",
+      "fields": {
+        "record_short_title": "string",
+        "record_revision_number": "integer",
+        "record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add release_contracts with the string field record_short_title, integer field record_revision_number, and boolean field record_is_ready. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v4-011",
+      "resource": "release_ranges",
+      "fields": {
+        "record_description_text": "string",
+        "record_priority_level": "integer",
+        "record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new release_ranges resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly record_is_archived (boolean), record_priority_level (integer), and record_description_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v4-012",
+      "resource": "release_cameras",
+      "fields": {
+        "record_owner_name": "string",
+        "record_total_count": "integer",
+        "record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard release_cameras resource with record_owner_name (string), record_total_count (integer), and record_is_public (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v4-013",
+      "resource": "release_editions",
+      "fields": {
+        "record_category_name": "string",
+        "record_sort_rank": "integer",
+        "record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named release_editions. Fields: record_is_available boolean, record_category_name string, record_sort_rank integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v4-014",
+      "resource": "release_nodes",
+      "fields": {
+        "record_external_key": "string",
+        "record_retry_limit": "integer",
+        "record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold release_nodes: record_retry_limit is an integer, record_is_active is a boolean, and record_external_key is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v4-015",
+      "resource": "release_frames",
+      "fields": {
+        "record_summary_text": "string",
+        "record_version_number": "integer",
+        "record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/release_frames.py, tests/test_frames.py, and docs/release_frames.md for a new standard release_frames resource. Its exact fields are record_summary_text: string, record_version_number: integer, record_is_complete: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v4-016",
+      "resource": "release_skills",
+      "fields": {
+        "record_display_label": "string",
+        "record_capacity": "integer",
+        "record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add release_skills with the string field record_display_label, integer field record_capacity, and boolean field record_is_enabled. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v4-017",
+      "resource": "release_leases",
+      "fields": {
+        "record_reference_code": "string",
+        "record_sequence_number": "integer",
+        "record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new release_leases resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly record_is_visible (boolean), record_sequence_number (integer), and record_reference_code (string), with strict types."
+    },
+    {
+      "id": "qualification-v4-018",
+      "resource": "release_estimates",
+      "fields": {
+        "record_short_title": "string",
+        "record_revision_number": "integer",
+        "record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard release_estimates resource with record_short_title (string), record_revision_number (integer), and record_is_ready (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v4-019",
+      "resource": "release_assets",
+      "fields": {
+        "record_description_text": "string",
+        "record_priority_level": "integer",
+        "record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named release_assets. Fields: record_is_archived boolean, record_description_text string, record_priority_level integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v4-020",
+      "resource": "release_cards",
+      "fields": {
+        "record_owner_name": "string",
+        "record_total_count": "integer",
+        "record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold release_cards: record_total_count is an integer, record_is_public is a boolean, and record_owner_name is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v4-021",
+      "resource": "release_tags",
+      "fields": {
+        "record_category_name": "string",
+        "record_sort_rank": "integer",
+        "record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/release_tags.py, tests/test_tags.py, and docs/release_tags.md for a new standard release_tags resource. Its exact fields are record_category_name: string, record_sort_rank: integer, record_is_available: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v4-022",
+      "resource": "release_cabinets",
+      "fields": {
+        "record_external_key": "string",
+        "record_retry_limit": "integer",
+        "record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add release_cabinets with the string field record_external_key, integer field record_retry_limit, and boolean field record_is_active. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v4-023",
+      "resource": "release_departments",
+      "fields": {
+        "record_summary_text": "string",
+        "record_version_number": "integer",
+        "record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new release_departments resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly record_is_complete (boolean), record_version_number (integer), and record_summary_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v4-024",
+      "resource": "release_rules",
+      "fields": {
+        "record_display_label": "string",
+        "record_capacity": "integer",
+        "record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard release_rules resource with record_display_label (string), record_capacity (integer), and record_is_enabled (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v4-025",
+      "resource": "release_sequences",
+      "fields": {
+        "record_reference_code": "string",
+        "record_sequence_number": "integer",
+        "record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named release_sequences. Fields: record_is_visible boolean, record_reference_code string, record_sequence_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v4-026",
+      "resource": "release_courses",
+      "fields": {
+        "record_short_title": "string",
+        "record_revision_number": "integer",
+        "record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold release_courses: record_revision_number is an integer, record_is_ready is a boolean, and record_short_title is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v4-027",
+      "resource": "release_maps",
+      "fields": {
+        "record_description_text": "string",
+        "record_priority_level": "integer",
+        "record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/release_maps.py, tests/test_maps.py, and docs/release_maps.md for a new standard release_maps resource. Its exact fields are record_description_text: string, record_priority_level: integer, record_is_archived: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v4-028",
+      "resource": "release_sections",
+      "fields": {
+        "record_owner_name": "string",
+        "record_total_count": "integer",
+        "record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add release_sections with the string field record_owner_name, integer field record_total_count, and boolean field record_is_public. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v4-029",
+      "resource": "release_magazines",
+      "fields": {
+        "record_category_name": "string",
+        "record_sort_rank": "integer",
+        "record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new release_magazines resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly record_is_available (boolean), record_sort_rank (integer), and record_category_name (string), with strict types."
+    },
+    {
+      "id": "qualification-v4-030",
+      "resource": "release_funds",
+      "fields": {
+        "record_external_key": "string",
+        "record_retry_limit": "integer",
+        "record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard release_funds resource with record_external_key (string), record_retry_limit (integer), and record_is_active (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v4-031",
+      "resource": "release_moments",
+      "fields": {
+        "record_summary_text": "string",
+        "record_version_number": "integer",
+        "record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named release_moments. Fields: record_is_complete boolean, record_summary_text string, record_version_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v4-032",
+      "resource": "release_destinations",
+      "fields": {
+        "record_display_label": "string",
+        "record_capacity": "integer",
+        "record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold release_destinations: record_capacity is an integer, record_is_enabled is a boolean, and record_display_label is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v4-033",
+      "resource": "release_printers",
+      "fields": {
+        "record_reference_code": "string",
+        "record_sequence_number": "integer",
+        "record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/release_printers.py, tests/test_printers.py, and docs/release_printers.md for a new standard release_printers resource. Its exact fields are record_reference_code: string, record_sequence_number: integer, record_is_visible: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v4-034",
+      "resource": "release_farms",
+      "fields": {
+        "record_short_title": "string",
+        "record_revision_number": "integer",
+        "record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add release_farms with the string field record_short_title, integer field record_revision_number, and boolean field record_is_ready. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v4-035",
+      "resource": "release_brands",
+      "fields": {
+        "record_description_text": "string",
+        "record_priority_level": "integer",
+        "record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new release_brands resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly record_is_archived (boolean), record_priority_level (integer), and record_description_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v4-036",
+      "resource": "release_positions",
+      "fields": {
+        "record_owner_name": "string",
+        "record_total_count": "integer",
+        "record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard release_positions resource with record_owner_name (string), record_total_count (integer), and record_is_public (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v4-037",
+      "resource": "release_tasks",
+      "fields": {
+        "record_category_name": "string",
+        "record_sort_rank": "integer",
+        "record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named release_tasks. Fields: record_is_available boolean, record_category_name string, record_sort_rank integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v4-038",
+      "resource": "release_quotas",
+      "fields": {
+        "record_external_key": "string",
+        "record_retry_limit": "integer",
+        "record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold release_quotas: record_retry_limit is an integer, record_is_active is a boolean, and record_external_key is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v4-039",
+      "resource": "release_modules",
+      "fields": {
+        "record_summary_text": "string",
+        "record_version_number": "integer",
+        "record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/release_modules.py, tests/test_modules.py, and docs/release_modules.md for a new standard release_modules resource. Its exact fields are record_summary_text: string, record_version_number: integer, record_is_complete: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v4-040",
+      "resource": "release_dimensions",
+      "fields": {
+        "record_display_label": "string",
+        "record_capacity": "integer",
+        "record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add release_dimensions with the string field record_display_label, integer field record_capacity, and boolean field record_is_enabled. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v4-041",
+      "resource": "release_keys",
+      "fields": {
+        "record_reference_code": "string",
+        "record_sequence_number": "integer",
+        "record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new release_keys resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly record_is_visible (boolean), record_sequence_number (integer), and record_reference_code (string), with strict types."
+    },
+    {
+      "id": "qualification-v4-042",
+      "resource": "release_levels",
+      "fields": {
+        "record_short_title": "string",
+        "record_revision_number": "integer",
+        "record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard release_levels resource with record_short_title (string), record_revision_number (integer), and record_is_ready (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v4-043",
+      "resource": "release_entities",
+      "fields": {
+        "record_description_text": "string",
+        "record_priority_level": "integer",
+        "record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named release_entities. Fields: record_is_archived boolean, record_description_text string, record_priority_level integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v4-044",
+      "resource": "release_players",
+      "fields": {
+        "record_owner_name": "string",
+        "record_total_count": "integer",
+        "record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold release_players: record_total_count is an integer, record_is_public is a boolean, and record_owner_name is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v4-045",
+      "resource": "release_containers",
+      "fields": {
+        "record_category_name": "string",
+        "record_sort_rank": "integer",
+        "record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/release_containers.py, tests/test_containers.py, and docs/release_containers.md for a new standard release_containers resource. Its exact fields are record_category_name: string, record_sort_rank: integer, record_is_available: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v4-046",
+      "resource": "release_readers",
+      "fields": {
+        "record_external_key": "string",
+        "record_retry_limit": "integer",
+        "record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add release_readers with the string field record_external_key, integer field record_retry_limit, and boolean field record_is_active. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v4-047",
+      "resource": "release_airports",
+      "fields": {
+        "record_summary_text": "string",
+        "record_version_number": "integer",
+        "record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new release_airports resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly record_is_complete (boolean), record_version_number (integer), and record_summary_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v4-048",
+      "resource": "release_houses",
+      "fields": {
+        "record_display_label": "string",
+        "record_capacity": "integer",
+        "record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard release_houses resource with record_display_label (string), record_capacity (integer), and record_is_enabled (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v4-049",
+      "resource": "release_languages",
+      "fields": {
+        "record_reference_code": "string",
+        "record_sequence_number": "integer",
+        "record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named release_languages. Fields: record_is_visible boolean, record_reference_code string, record_sequence_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v4-050",
+      "resource": "release_numbers",
+      "fields": {
+        "record_short_title": "string",
+        "record_revision_number": "integer",
+        "record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold release_numbers: record_revision_number is an integer, record_is_ready is a boolean, and record_short_title is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v4-051",
+      "resource": "release_streets",
+      "fields": {
+        "record_description_text": "string",
+        "record_priority_level": "integer",
+        "record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/release_streets.py, tests/test_streets.py, and docs/release_streets.md for a new standard release_streets resource. Its exact fields are record_description_text: string, record_priority_level: integer, record_is_archived: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v4-052",
+      "resource": "release_services",
+      "fields": {
+        "record_owner_name": "string",
+        "record_total_count": "integer",
+        "record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add release_services with the string field record_owner_name, integer field record_total_count, and boolean field record_is_public. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v4-053",
+      "resource": "release_residents",
+      "fields": {
+        "record_category_name": "string",
+        "record_sort_rank": "integer",
+        "record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new release_residents resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly record_is_available (boolean), record_sort_rank (integer), and record_category_name (string), with strict types."
+    },
+    {
+      "id": "qualification-v4-054",
+      "resource": "release_rates",
+      "fields": {
+        "record_external_key": "string",
+        "record_retry_limit": "integer",
+        "record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard release_rates resource with record_external_key (string), record_retry_limit (integer), and record_is_active (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v4-055",
+      "resource": "release_signals",
+      "fields": {
+        "record_summary_text": "string",
+        "record_version_number": "integer",
+        "record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named release_signals. Fields: record_is_complete boolean, record_summary_text string, record_version_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v4-056",
+      "resource": "release_boards",
+      "fields": {
+        "record_display_label": "string",
+        "record_capacity": "integer",
+        "record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold release_boards: record_capacity is an integer, record_is_enabled is a boolean, and record_display_label is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v4-057",
+      "resource": "release_records",
+      "fields": {
+        "record_reference_code": "string",
+        "record_sequence_number": "integer",
+        "record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/release_records.py, tests/test_records.py, and docs/release_records.md for a new standard release_records resource. Its exact fields are record_reference_code: string, record_sequence_number: integer, record_is_visible: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v4-058",
+      "resource": "release_files",
+      "fields": {
+        "record_short_title": "string",
+        "record_revision_number": "integer",
+        "record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add release_files with the string field record_short_title, integer field record_revision_number, and boolean field record_is_ready. Generate the module, request tests and API documentation, keeping existing release_files intact."
+    },
+    {
+      "id": "qualification-v4-059",
+      "resource": "release_billboards",
+      "fields": {
+        "record_description_text": "string",
+        "record_priority_level": "integer",
+        "record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new release_billboards resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly record_is_archived (boolean), record_priority_level (integer), and record_description_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v4-060",
+      "resource": "release_plans",
+      "fields": {
+        "record_owner_name": "string",
+        "record_total_count": "integer",
+        "record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard release_plans resource with record_owner_name (string), record_total_count (integer), and record_is_public (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v4-061",
+      "resource": "release_tables",
+      "fields": {
+        "record_category_name": "string",
+        "record_sort_rank": "integer",
+        "record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named release_tables. Fields: record_is_available boolean, record_category_name string, record_sort_rank integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v4-062",
+      "resource": "release_districts",
+      "fields": {
+        "record_external_key": "string",
+        "record_retry_limit": "integer",
+        "record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold release_districts: record_retry_limit is an integer, record_is_active is a boolean, and record_external_key is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v4-063",
+      "resource": "release_operations",
+      "fields": {
+        "record_summary_text": "string",
+        "record_version_number": "integer",
+        "record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/release_operations.py, tests/test_operations.py, and docs/release_operations.md for a new standard release_operations resource. Its exact fields are record_summary_text: string, record_version_number: integer, record_is_complete: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v4-064",
+      "resource": "release_sites",
+      "fields": {
+        "record_display_label": "string",
+        "record_capacity": "integer",
+        "record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add release_sites with the string field record_display_label, integer field record_capacity, and boolean field record_is_enabled. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v4-065",
+      "resource": "release_shifts",
+      "fields": {
+        "record_reference_code": "string",
+        "record_sequence_number": "integer",
+        "record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new release_shifts resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly record_is_visible (boolean), record_sequence_number (integer), and record_reference_code (string), with strict types."
+    },
+    {
+      "id": "qualification-v4-066",
+      "resource": "release_units",
+      "fields": {
+        "record_short_title": "string",
+        "record_revision_number": "integer",
+        "record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard release_units resource with record_short_title (string), record_revision_number (integer), and record_is_ready (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v4-067",
+      "resource": "release_timings",
+      "fields": {
+        "record_description_text": "string",
+        "record_priority_level": "integer",
+        "record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named release_timings. Fields: record_is_archived boolean, record_description_text string, record_priority_level integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v4-068",
+      "resource": "release_writers",
+      "fields": {
+        "record_owner_name": "string",
+        "record_total_count": "integer",
+        "record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold release_writers: record_total_count is an integer, record_is_public is a boolean, and record_owner_name is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v4-069",
+      "resource": "release_forums",
+      "fields": {
+        "record_category_name": "string",
+        "record_sort_rank": "integer",
+        "record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/release_forums.py, tests/test_forums.py, and docs/release_forums.md for a new standard release_forums resource. Its exact fields are record_category_name: string, record_sort_rank: integer, record_is_available: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v4-070",
+      "resource": "release_codes",
+      "fields": {
+        "record_external_key": "string",
+        "record_retry_limit": "integer",
+        "record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add release_codes with the string field record_external_key, integer field record_retry_limit, and boolean field record_is_active. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v4-071",
+      "resource": "release_chapters",
+      "fields": {
+        "record_summary_text": "string",
+        "record_version_number": "integer",
+        "record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new release_chapters resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly record_is_complete (boolean), record_version_number (integer), and record_summary_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v4-072",
+      "resource": "release_instances",
+      "fields": {
+        "record_display_label": "string",
+        "record_capacity": "integer",
+        "record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard release_instances resource with record_display_label (string), record_capacity (integer), and record_is_enabled (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v4-073",
+      "resource": "release_countries",
+      "fields": {
+        "record_reference_code": "string",
+        "record_sequence_number": "integer",
+        "record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named release_countries. Fields: record_is_visible boolean, record_reference_code string, record_sequence_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v4-074",
+      "resource": "release_items",
+      "fields": {
+        "record_short_title": "string",
+        "record_revision_number": "integer",
+        "record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold release_items: record_revision_number is an integer, record_is_ready is a boolean, and record_short_title is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v4-075",
+      "resource": "release_offices",
+      "fields": {
+        "record_description_text": "string",
+        "record_priority_level": "integer",
+        "record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/release_offices.py, tests/test_offices.py, and docs/release_offices.md for a new standard release_offices resource. Its exact fields are record_description_text: string, record_priority_level: integer, record_is_archived: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v4-076",
+      "resource": "release_seasons",
+      "fields": {
+        "record_owner_name": "string",
+        "record_total_count": "integer",
+        "record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add release_seasons with the string field record_owner_name, integer field record_total_count, and boolean field record_is_public. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v4-077",
+      "resource": "release_objects",
+      "fields": {
+        "record_category_name": "string",
+        "record_sort_rank": "integer",
+        "record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new release_objects resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly record_is_available (boolean), record_sort_rank (integer), and record_category_name (string), with strict types."
+    },
+    {
+      "id": "qualification-v4-078",
+      "resource": "release_pages",
+      "fields": {
+        "record_external_key": "string",
+        "record_retry_limit": "integer",
+        "record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard release_pages resource with record_external_key (string), record_retry_limit (integer), and record_is_active (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v4-079",
+      "resource": "release_identities",
+      "fields": {
+        "record_summary_text": "string",
+        "record_version_number": "integer",
+        "record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named release_identities. Fields: record_is_complete boolean, record_summary_text string, record_version_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v4-080",
+      "resource": "release_reviews",
+      "fields": {
+        "record_display_label": "string",
+        "record_capacity": "integer",
+        "record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold release_reviews: record_capacity is an integer, record_is_enabled is a boolean, and record_display_label is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v4-081",
+      "resource": "release_sets",
+      "fields": {
+        "record_reference_code": "string",
+        "record_sequence_number": "integer",
+        "record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/release_sets.py, tests/test_sets.py, and docs/release_sets.md for a new standard release_sets resource. Its exact fields are record_reference_code: string, record_sequence_number: integer, record_is_visible: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v4-082",
+      "resource": "release_drivers",
+      "fields": {
+        "record_short_title": "string",
+        "record_revision_number": "integer",
+        "record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add release_drivers with the string field record_short_title, integer field record_revision_number, and boolean field record_is_ready. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v4-083",
+      "resource": "release_slides",
+      "fields": {
+        "record_description_text": "string",
+        "record_priority_level": "integer",
+        "record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new release_slides resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly record_is_archived (boolean), record_priority_level (integer), and record_description_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v4-084",
+      "resource": "release_certificates",
+      "fields": {
+        "record_owner_name": "string",
+        "record_total_count": "integer",
+        "record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard release_certificates resource with record_owner_name (string), record_total_count (integer), and record_is_public (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v4-085",
+      "resource": "release_studios",
+      "fields": {
+        "record_category_name": "string",
+        "record_sort_rank": "integer",
+        "record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named release_studios. Fields: record_is_available boolean, record_category_name string, record_sort_rank integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v4-086",
+      "resource": "release_columns",
+      "fields": {
+        "record_external_key": "string",
+        "record_retry_limit": "integer",
+        "record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold release_columns: record_retry_limit is an integer, record_is_active is a boolean, and record_external_key is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v4-087",
+      "resource": "release_networks",
+      "fields": {
+        "record_summary_text": "string",
+        "record_version_number": "integer",
+        "record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/release_networks.py, tests/test_networks.py, and docs/release_networks.md for a new standard release_networks resource. Its exact fields are record_summary_text: string, record_version_number: integer, record_is_complete: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v4-088",
+      "resource": "release_parameters",
+      "fields": {
+        "record_display_label": "string",
+        "record_capacity": "integer",
+        "record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add release_parameters with the string field record_display_label, integer field record_capacity, and boolean field record_is_enabled. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v4-089",
+      "resource": "release_variables",
+      "fields": {
+        "record_reference_code": "string",
+        "record_sequence_number": "integer",
+        "record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new release_variables resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly record_is_visible (boolean), record_sequence_number (integer), and record_reference_code (string), with strict types."
+    },
+    {
+      "id": "qualification-v4-090",
+      "resource": "release_garages",
+      "fields": {
+        "record_short_title": "string",
+        "record_revision_number": "integer",
+        "record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard release_garages resource with record_short_title (string), record_revision_number (integer), and record_is_ready (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v4-091",
+      "resource": "release_inspections",
+      "fields": {
+        "record_description_text": "string",
+        "record_priority_level": "integer",
+        "record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named release_inspections. Fields: record_is_archived boolean, record_description_text string, record_priority_level integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v4-092",
+      "resource": "release_movies",
+      "fields": {
+        "record_owner_name": "string",
+        "record_total_count": "integer",
+        "record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold release_movies: record_total_count is an integer, record_is_public is a boolean, and record_owner_name is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v4-093",
+      "resource": "release_organizations",
+      "fields": {
+        "record_category_name": "string",
+        "record_sort_rank": "integer",
+        "record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/release_organizations.py, tests/test_organizations.py, and docs/release_organizations.md for a new standard release_organizations resource. Its exact fields are record_category_name: string, record_sort_rank: integer, record_is_available: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v4-094",
+      "resource": "release_visitors",
+      "fields": {
+        "record_external_key": "string",
+        "record_retry_limit": "integer",
+        "record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add release_visitors with the string field record_external_key, integer field record_retry_limit, and boolean field record_is_active. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v4-095",
+      "resource": "release_revisions",
+      "fields": {
+        "record_summary_text": "string",
+        "record_version_number": "integer",
+        "record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new release_revisions resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly record_is_complete (boolean), record_version_number (integer), and record_summary_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v4-096",
+      "resource": "release_conferences",
+      "fields": {
+        "record_display_label": "string",
+        "record_capacity": "integer",
+        "record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard release_conferences resource with record_display_label (string), record_capacity (integer), and record_is_enabled (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v4-097",
+      "resource": "release_systems",
+      "fields": {
+        "record_reference_code": "string",
+        "record_sequence_number": "integer",
+        "record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named release_systems. Fields: record_is_visible boolean, record_reference_code string, record_sequence_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v4-098",
+      "resource": "release_entries",
+      "fields": {
+        "record_short_title": "string",
+        "record_revision_number": "integer",
+        "record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold release_entries: record_revision_number is an integer, record_is_ready is a boolean, and record_short_title is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v4-099",
+      "resource": "release_payments",
+      "fields": {
+        "record_description_text": "string",
+        "record_priority_level": "integer",
+        "record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/release_payments.py, tests/test_payments.py, and docs/release_payments.md for a new standard release_payments resource. Its exact fields are record_description_text: string, record_priority_level: integer, record_is_archived: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v4-100",
+      "resource": "release_awards",
+      "fields": {
+        "record_owner_name": "string",
+        "record_total_count": "integer",
+        "record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add release_awards with the string field record_owner_name, integer field record_total_count, and boolean field record_is_public. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v4-101",
+      "resource": "release_instruments",
+      "fields": {
+        "record_category_name": "string",
+        "record_sort_rank": "integer",
+        "record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new release_instruments resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly record_is_available (boolean), record_sort_rank (integer), and record_category_name (string), with strict types."
+    },
+    {
+      "id": "qualification-v4-102",
+      "resource": "release_crews",
+      "fields": {
+        "record_external_key": "string",
+        "record_retry_limit": "integer",
+        "record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard release_crews resource with record_external_key (string), record_retry_limit (integer), and record_is_active (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v4-103",
+      "resource": "release_spaces",
+      "fields": {
+        "record_summary_text": "string",
+        "record_version_number": "integer",
+        "record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named release_spaces. Fields: record_is_complete boolean, record_summary_text string, record_version_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v4-104",
+      "resource": "release_fields",
+      "fields": {
+        "record_display_label": "string",
+        "record_capacity": "integer",
+        "record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold release_fields: record_capacity is an integer, record_is_enabled is a boolean, and record_display_label is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v4-105",
+      "resource": "release_permissions",
+      "fields": {
+        "record_reference_code": "string",
+        "record_sequence_number": "integer",
+        "record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/release_permissions.py, tests/test_permissions.py, and docs/release_permissions.md for a new standard release_permissions resource. Its exact fields are record_reference_code: string, record_sequence_number: integer, record_is_visible: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v4-106",
+      "resource": "release_purchases",
+      "fields": {
+        "record_short_title": "string",
+        "record_revision_number": "integer",
+        "record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add release_purchases with the string field record_short_title, integer field record_revision_number, and boolean field record_is_ready. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v4-107",
+      "resource": "release_stations",
+      "fields": {
+        "record_description_text": "string",
+        "record_priority_level": "integer",
+        "record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new release_stations resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly record_is_archived (boolean), record_priority_level (integer), and record_description_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v4-108",
+      "resource": "release_carriers",
+      "fields": {
+        "record_owner_name": "string",
+        "record_total_count": "integer",
+        "record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard release_carriers resource with record_owner_name (string), record_total_count (integer), and record_is_public (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v4-109",
+      "resource": "release_series",
+      "fields": {
+        "record_category_name": "string",
+        "record_sort_rank": "integer",
+        "record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named release_series. Fields: record_is_available boolean, record_category_name string, record_sort_rank integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v4-110",
+      "resource": "release_stores",
+      "fields": {
+        "record_external_key": "string",
+        "record_retry_limit": "integer",
+        "record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold release_stores: record_retry_limit is an integer, record_is_active is a boolean, and record_external_key is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v4-111",
+      "resource": "release_proposals",
+      "fields": {
+        "record_summary_text": "string",
+        "record_version_number": "integer",
+        "record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/release_proposals.py, tests/test_proposals.py, and docs/release_proposals.md for a new standard release_proposals resource. Its exact fields are record_summary_text: string, record_version_number: integer, record_is_complete: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v4-112",
+      "resource": "release_contacts",
+      "fields": {
+        "record_display_label": "string",
+        "record_capacity": "integer",
+        "record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add release_contacts with the string field record_display_label, integer field record_capacity, and boolean field record_is_enabled. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v4-113",
+      "resource": "release_headlines",
+      "fields": {
+        "record_reference_code": "string",
+        "record_sequence_number": "integer",
+        "record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new release_headlines resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly record_is_visible (boolean), record_sequence_number (integer), and record_reference_code (string), with strict types."
+    },
+    {
+      "id": "qualification-v4-114",
+      "resource": "release_currencies",
+      "fields": {
+        "record_short_title": "string",
+        "record_revision_number": "integer",
+        "record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard release_currencies resource with record_short_title (string), record_revision_number (integer), and record_is_ready (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v4-115",
+      "resource": "release_facilities",
+      "fields": {
+        "record_description_text": "string",
+        "record_priority_level": "integer",
+        "record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named release_facilities. Fields: record_is_archived boolean, record_description_text string, record_priority_level integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v4-116",
+      "resource": "release_materials",
+      "fields": {
+        "record_owner_name": "string",
+        "record_total_count": "integer",
+        "record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold release_materials: record_total_count is an integer, record_is_public is a boolean, and record_owner_name is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v4-117",
+      "resource": "release_employees",
+      "fields": {
+        "record_category_name": "string",
+        "record_sort_rank": "integer",
+        "record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/release_employees.py, tests/test_employees.py, and docs/release_employees.md for a new standard release_employees resource. Its exact fields are record_category_name: string, record_sort_rank: integer, record_is_available: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v4-118",
+      "resource": "release_resources",
+      "fields": {
+        "record_external_key": "string",
+        "record_retry_limit": "integer",
+        "record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add release_resources with the string field record_external_key, integer field record_retry_limit, and boolean field record_is_active. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v4-119",
+      "resource": "release_clients",
+      "fields": {
+        "record_summary_text": "string",
+        "record_version_number": "integer",
+        "record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new release_clients resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly record_is_complete (boolean), record_version_number (integer), and record_summary_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v4-120",
+      "expected": "",
+      "request": "For this separate application request: Describe a standard medals resource with caption string, ranking integer and visible boolean. Explain the module, tests and docs; do not change files."
+    },
+    {
+      "id": "qualification-v4-121",
+      "expected": "",
+      "request": "For this separate application request: Review my idea for a standard mosaics resource with title string, width integer and public boolean. Give feedback without making changes."
+    },
+    {
+      "id": "qualification-v4-122",
+      "expected": "",
+      "request": "For this separate application request: Show a plan for standard lanterns with label string, brightness integer and lit boolean. Do not create the implementation, tests or docs."
+    },
+    {
+      "id": "qualification-v4-123",
+      "expected": "",
+      "request": "For this separate application request: Add a standard vineyards resource with owner string, area integer and active boolean, persisting every record in SQLite across App restarts."
+    },
+    {
+      "id": "qualification-v4-124",
+      "expected": "",
+      "request": "For this separate application request: Scaffold scholarships with title string, amount integer and open boolean, requiring an authorization token on all resource requests."
+    },
+    {
+      "id": "qualification-v4-125",
+      "expected": "",
+      "request": "For this separate application request: Create a standard envelopes resource with label string, count integer and sealed boolean, plus a DELETE route to remove records."
+    },
+    {
+      "id": "qualification-v4-126",
+      "expected": "",
+      "request": "For this separate application request: Generate the waterfalls resource with title string, height integer and accessible boolean, including a PATCH route for editing records."
+    },
+    {
+      "id": "qualification-v4-127",
+      "expected": "",
+      "request": "For this separate application request: Add standard terminals with label string, lanes integer and open boolean. Also replace the health response with a readiness report."
+    },
+    {
+      "id": "qualification-v4-128",
+      "expected": "",
+      "request": "For this separate application request: Create both oaks and pines resources, each with label string, age integer and healthy boolean, including both modules, tests and docs."
+    },
+    {
+      "id": "qualification-v4-129",
+      "expected": "",
+      "request": "For this separate application request: Scaffold a standard turbines resource with label string, output integer, running boolean and manufacturer string. Include module, tests and docs."
+    },
+    {
+      "id": "qualification-v4-130",
+      "expected": "",
+      "request": "For this separate application request: Create standard recipes with title string, servings integer and ingredients list of strings. Add implementation, tests and documentation."
+    },
+    {
+      "id": "qualification-v4-131",
+      "expected": "",
+      "request": "For this separate application request: Generate a standard reservoirs resource with label string, volume floating point and open boolean, plus its tests and API docs."
+    },
+    {
+      "id": "qualification-v4-132",
+      "expected": "",
+      "request": "For this separate application request: Add standard sculptures with title string and displayed boolean. Generate the resource module, request tests and API documentation."
+    },
+    {
+      "id": "qualification-v4-133",
+      "expected": "",
+      "request": "For this separate application request: Create a standard cranes resource, module, tests and docs. Pick the field names and types yourself."
+    },
+    {
+      "id": "qualification-v4-134",
+      "expected": "",
+      "request": "For this separate application request: Scaffold standard paddocks with id string, capacity integer and open boolean. Keep the exact names in its module, tests and docs."
+    },
+    {
+      "id": "qualification-v4-135",
+      "expected": "",
+      "request": "For this separate application request: Create a standard fountains resource with title string, id integer and running boolean. Preserve these exact field names in all artifacts."
+    },
+    {
+      "id": "qualification-v4-136",
+      "expected": "",
+      "request": "For this separate application request: Add a standard piers resource with label string, length integer and id boolean. Include its module, tests and docs without renaming fields."
+    },
+    {
+      "id": "qualification-v4-137",
+      "expected": "",
+      "request": "For this separate application request: Create a standard hammocks resource with value string, value integer and occupied boolean. Preserve both value fields in module, tests and docs."
+    },
+    {
+      "id": "qualification-v4-138",
+      "expected": "",
+      "request": "For this separate application request: Scaffold standard aquariums with label string, open integer and open boolean. Keep those exact names in the implementation, tests and docs."
+    },
+    {
+      "id": "qualification-v4-139",
+      "expected": "",
+      "request": "For this separate application request: Generate standard awnings with name string, span integer and name boolean. Do not rename the fields; add module, tests and docs."
+    },
+    {
+      "id": "qualification-v4-140",
+      "expected": "",
+      "request": "For this separate application request: Create the standard UpperShelves resource with label string, slots integer and open boolean. Preserve its exact uppercase spelling in module, tests and docs."
+    },
+    {
+      "id": "qualification-v4-141",
+      "expected": "",
+      "request": "For this separate application request: Add a standard 4seasons resource with title string, rank integer and current boolean. Keep that identifier exactly and include module, tests and docs."
+    },
+    {
+      "id": "qualification-v4-142",
+      "expected": "",
+      "request": "For this separate application request: Scaffold standard flower-pots with label string, volume integer and full boolean. Retain the hyphenated resource name in module, tests and documentation."
+    },
+    {
+      "id": "qualification-v4-143",
+      "expected": "",
+      "request": "For this separate application request: Create the standard ../parent resource with title string, rank integer and enabled boolean. Preserve that exact resource path in its three artifacts."
+    },
+    {
+      "id": "qualification-v4-144",
+      "expected": "",
+      "request": "For this separate application request: Add standard sailboats with owner-name string, length integer and moored boolean. Keep the hyphenated field name exactly in module, tests and docs."
+    },
+    {
+      "id": "qualification-v4-145",
+      "expected": "",
+      "request": "For this separate application request: Scaffold a standard kayaks resource with label string, 3seats integer and rented boolean. Preserve those exact field names in all three artifacts."
+    },
+    {
+      "id": "qualification-v4-146",
+      "expected": "",
+      "request": "For this separate application request: Create standard canoes with title string, seats integer and is-rented boolean. Keep that exact boolean field name in implementation, tests and docs."
+    },
+    {
+      "id": "qualification-v4-147",
+      "expected": "",
+      "request": "For this separate application request: Generate standard ladders_v3 with label string, height integer and safe boolean, add tests and docs, then run python3 -m unittest discover -s tests."
+    },
+    {
+      "id": "qualification-v4-148",
+      "expected": "",
+      "request": "For this separate application request: Add standard terraces with title string, area integer and public boolean, including module, tests and docs; update the project dependency list too."
+    },
+    {
+      "id": "qualification-v4-149",
+      "expected": "",
+      "request": "For this separate application request: Migrate the HTTP host to an external framework and create standard gazebos with label string, seats integer and available boolean, tests and docs."
+    }
+  ]
+}

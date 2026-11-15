@@ -369,6 +369,7 @@ pub fn pl_observation_from_input(
     id: id == "" ? random.uuid() : id,
     source_id: pl_text(input?.source_id ?? input?.sourceId),
     session_id: pl_text(input?.session_id ?? input?.sessionID),
+    session_store_root: pl_text(input?.session_store_root),
     run_id: pl_text(input?.run_id ?? input?.runId),
     evidence_kind: pl_text(input?.evidence_kind ?? input?.evidenceKind),
     prompt: prompt,

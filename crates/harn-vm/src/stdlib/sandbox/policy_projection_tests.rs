@@ -17,6 +17,26 @@ fn writing_policy(workspace: &Path) -> CapabilityPolicy {
     }
 }
 
+#[cfg(target_os = "macos")]
+#[test]
+fn granted_clone_transfer_writes_share_the_backend_root_census() {
+    use crate::stdlib::sandbox::{normalize_for_policy, workspace_env};
+
+    let workspace = tempfile::tempdir().unwrap();
+    let private = tempfile::tempdir().unwrap();
+    let transfer = private.path().join("repository");
+    let expected = normalize_for_policy(&transfer);
+    let policy = writing_policy(workspace.path());
+    assert!(!process_sandbox_writable_roots(&policy).contains(&expected));
+    let launch = workspace_env::grant_spawn::OwnSpawnLaunch::begin_with_writes(
+        private.path(),
+        std::slice::from_ref(&transfer),
+    );
+    assert!(process_sandbox_writable_roots(&policy).contains(&expected));
+    drop(launch);
+    assert!(!process_sandbox_writable_roots(&policy).contains(&expected));
+}
+
 /// A write root that does not exist yet, under a link, resolves through the
 /// link: a reader comparing canonical paths would otherwise miss a file a
 /// child creates there later.

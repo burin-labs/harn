@@ -264,7 +264,7 @@ pub(super) fn host_agent_session_totals_builtin(
 ) -> Result<VmValue, VmError> {
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     let totals = with_session(&session_id, HOST_SESSION_TOTALS, |session| {
-        Ok(SessionUsageTotals::from(&*session))
+        Ok(super::usage_accounting::observed_totals(session, true))
     })?;
     // `tokens_used` is cumulative input+output. `input_tokens` / `output_tokens`
     // are the split components — surfaced so budget/detector logic that keys on
@@ -274,7 +274,7 @@ pub(super) fn host_agent_session_totals_builtin(
     // `physical_usage` is the run's complete provider ledger, including
     // preparation calls no accepted turn owns. Hosts read it for running
     // totals instead of summing turn events.
-    let VmValue::Dict(totals) = totals.to_vm(true) else {
+    let VmValue::Dict(totals) = totals else {
         unreachable!("session totals project to a dict");
     };
     let mut totals = (*totals).clone();

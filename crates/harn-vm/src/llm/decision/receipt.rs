@@ -235,6 +235,7 @@ impl EvaluationReceipt {
             "physical_attempts": self.physical_attempts, "accounting_status": self.accounting_status,
             "input_tokens": self.input_tokens, "output_tokens": self.output_tokens,
             "cost_usd": self.cost_usd, "budget_charge_usd": self.budget_charge_usd,
+            "admission_reason": self.admission_reason, "provider_reason": self.provider_reason,
             "native_transport": transport, "usage_certainty": usage_certainty,
         }))
     }

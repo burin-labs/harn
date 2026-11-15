@@ -6,6 +6,98 @@ type Request = {message: string}
 
 type Reply = {handler: string, message: string, receipt: string}
 
+pipeline test_empty_library_abstains_without_an_evaluator(harness: Harness) {
+  const app: DecisionRouter<Request, Reply> = router(
+    {
+      id: "test.empty.v1",
+      input: schema_contract(schema_of(Request), []),
+      instructions: "Route an order request.",
+      routes: [],
+      policy: policy(),
+    },
+  )
+  with_evaluation_fixtures(
+    harness,
+    [],
+    { ->
+      assert_eq(app.assess(harness.llm, {message: "Where is A42?"}).kind, "no_routes")
+      assert_eq(app.dispatch(harness, {message: "Where is A42?"}).kind, "no_routes")
+    },
+  )
+  assert_eq(harness.runtime.store_get("decision.test.calls"), nil)
+}
+
+pipeline test_fixture_cleanup_preserves_the_original_body_failure(harness: Harness) {
+  const app = make_router()
+  const failed = try {
+    with_evaluation_fixtures(
+      harness,
+      [fixture(app, {message: "Where is A42?"})],
+      { ->
+        throw "original body failure"
+      },
+    )
+  }
+  assert(is_err(failed))
+  assert(to_string(unwrap_err(failed)).contains("original body failure"))
+}
+
+pipeline test_single_route_asks_only_applicability(harness: Harness) {
+  const app: DecisionRouter<Request, Reply> = router(
+    {
+      id: "test.singleton.v1",
+      input: schema_contract(schema_of(Request), []),
+      instructions: "Route an order request.",
+      routes: [
+        {
+          name: "lookup",
+          meaning: "Read an order status without modifying it",
+          minimum_probability: 0.9,
+          handle: { harness: Harness, request: Request, evidence: DecisionEvidence ->
+            handled(harness.runtime, request, evidence, "lookup")
+          },
+        },
+      ],
+      policy: policy(),
+    },
+  )
+  assert_eq(keys(app.definition.questions), ["applicable"])
+  const requests = [{message: "Where is A42?"}, {message: "Write a poem"}]
+  const fixtures: list<EvaluationFixture> = requests.map(
+    { request: Request ->
+      {
+        site_id: "stdlib.decision.dispatch.v1",
+        state: state(app.definition, json_stringify(request)),
+        questions: app.definition.questions,
+        policy: app.definition.policy.evaluation,
+        answers: {
+          applicable: {
+            kind: "boolean",
+            verdict: request.message == "Where is A42?",
+            confidence: 1.0,
+            evidence: "declared applicability",
+          },
+        },
+      }
+    },
+  )
+    .to_list()
+  with_evaluation_fixtures(
+    harness,
+    fixtures,
+    { ->
+      const matched = app.dispatch(harness, requests[0])
+      assert_eq(matched.kind, "dispatched")
+      if matched.kind == "dispatched" {
+        assert_eq(matched.evidence.route, "lookup")
+        assert_eq(matched.evidence.route_confidence_kind, "not_required")
+      }
+      assert_eq(app.dispatch(harness, requests[1]).kind, "unmatched")
+    },
+  )
+  assert_eq(harness.runtime.store_get("decision.test.calls"), ["lookup"])
+}
+
 fn policy() -> DecisionPolicy {
   return {
     evaluation: {
@@ -278,7 +370,11 @@ pipeline test_definition_identity_tracks_meanings_and_selection_policy() {
   settings.minimum_margin = 0.8
   const changed = make_router(settings)
   assert_ne(first.definition.digest, changed.definition.digest)
-  assert_eq(first.definition.questions.route.criteria.lookup, first.definition.routes[0]?.meaning)
+  const route = first.definition.questions.route
+  if route == nil {
+    throw "a multi-capability decision must have a routing question"
+  }
+  assert_eq(route.criteria.lookup, first.definition.routes[0]?.meaning)
   const rejected = try {
     make_router(settings + {applicability_accept: 0.4})
   }

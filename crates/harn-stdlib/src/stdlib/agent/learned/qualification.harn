@@ -1,0 +1,200 @@
+import {
+  LearnedIdentity,
+  LearnedObservation,
+  LearnedQualification,
+  LearnedQualificationOptions,
+  LearnedTrial,
+} from "std/agent/learned/contracts"
+import { selective_risk_report } from "std/eval/selective_risk"
+
+/**
+ * Build a trial from an explicit runtime disposition and independent grading.
+ * Missing disposition is unmeasured, never an abstention. A committed call
+ * without execution evidence remains an accepted error in learned_qualify.
+ * @effects: []
+ * @errors: ["invalid learned observation"]
+ */
+pub fn learned_trial(observation: LearnedObservation) -> LearnedTrial {
+  const decision = observation.assessment
+  const disposition = observation.disposition
+  if disposition.kind == "abstained" {
+    require trim(disposition.reason) != "" && observation.execution.kind == "not_run",
+      "std/agent/learned: abstention requires an explicit reason and no execution"
+    return {
+      id: observation.id,
+      expected: observation.expected,
+      selected: "",
+      confidence: 0.0,
+      abstained: true,
+      execution: observation.execution,
+    }
+  }
+  guard decision.kind == "selected" else {
+    throw "std/agent/learned: commitment requires an assessment"
+  }
+  require decision.capability.id == disposition.capability_id
+    && decision.evidence.route == disposition.capability_id
+    && decision.evidence.receipt == disposition.decision_receipt,
+    "std/agent/learned: commitment differs from the assessed capability"
+  const binding = observation.binding
+  guard binding != nil && binding.kind == "answered" else {
+    throw "std/agent/learned: commitment requires a measured binding check"
+  }
+  const faithful = binding.value.faithful
+  require faithful.kind == "boolean" && faithful.verdict
+    && faithful.probability >= 0.0
+    && faithful.probability <= 1.0
+    && trim(disposition.binding_receipt) != ""
+    && binding.receipt != decision.evidence.receipt
+    && faithful.confidence_kind == decision.evidence.applicability_confidence_kind
+    && binding.receipt == disposition.binding_receipt,
+    "std/agent/learned: commitment differs from the accepted binding check"
+  return {
+    id: observation.id,
+    expected: observation.expected,
+    selected: disposition.capability_id,
+    confidence: min(
+      min(decision.evidence.applicability_probability, decision.evidence.route_probability),
+      faithful.probability,
+    ),
+    abstained: false,
+    execution: observation.execution,
+  }
+}
+
+/**
+ * Measure accepted execution errors, rather than selector agreement alone.
+ * A selected capability without a fresh execution receipt counts as an error.
+ * The caller owns isolated execution and independent labels; this report does
+ * not establish that its population resembles production traffic.
+ * @effects: []
+ * @errors: ["invalid learned trial"]
+ */
+pub fn learned_qualify(
+  identity: LearnedIdentity,
+  trials: list<LearnedTrial>,
+  options: LearnedQualificationOptions,
+) -> LearnedQualification {
+  let seen: list<string> = []
+  let receipts: list<string> = []
+  let rows = []
+  let executed = 0
+  let failed = 0
+  let negatives = 0
+  for trial in trials {
+    if trim(trial.id) == "" || seen.contains(trial.id) {
+      throw "std/agent/learned: trials require unique nonempty ids"
+    }
+    seen = seen + [trial.id]
+    if trial.expected == "" {
+      negatives += 1
+    }
+    let verified = false
+    if trial.execution.kind != "not_run" {
+      if trim(trial.execution.receipt) == "" || trim(trial.execution.workspace_digest) == "" {
+        throw "std/agent/learned: execution evidence requires receipt and workspace identity"
+      }
+      if receipts.contains(trial.execution.receipt) {
+        throw "std/agent/learned: an execution receipt cannot qualify multiple trials"
+      }
+      receipts = receipts + [trial.execution.receipt]
+      if trial.abstained {
+        throw "std/agent/learned: abstained trials must not execute"
+      }
+      executed += 1
+      verified = trial.execution.kind == "passed"
+    }
+    if !trial.abstained && (!verified || trial.selected != trial.expected) {
+      failed += 1
+    }
+    rows = rows
+      + [
+        {
+          question_id: identity.definition_digest,
+          backend: identity.evaluator_revision,
+          expected: "verified",
+          predicted:
+            verified && trial.selected == trial.expected && trial.selected != "" ? "verified" : "failed",
+          confidence: trial.confidence,
+          abstained: trial.abstained,
+        },
+      ]
+  }
+  return {
+    contract: "harn.learned_qualification.v1",
+    identity: identity,
+    trials_digest: sha256(json_stringify(trials)),
+    report: selective_risk_report(
+      rows,
+      options.risk + {model_revision: identity.evaluator_revision},
+    ),
+    executed: executed,
+    failed: failed,
+    negatives: negatives,
+  }
+}
+
+/**
+ * Refuse stale identities and insufficient evidence before any live inference.
+ * @effects: []
+ * @errors: []
+ */
+pub fn learned_qualification_issue(
+  identity: LearnedIdentity,
+  qualification: LearnedQualification?,
+) -> string {
+  if qualification == nil {
+    return "missing_qualification"
+  }
+  if json_stringify(qualification.identity) != json_stringify(identity) {
+    return "stale_qualification"
+  }
+  if qualification.executed <= 0 || qualification.negatives <= 0
+    || qualification.trials_digest == "" {
+    return "insufficient_execution_evidence"
+  }
+  const report = qualification.report
+  if report.kind != "report" || len(report.groups) != 1 {
+    return "risk_not_certified"
+  }
+  const group = report.groups[0]
+  if group == nil {
+    return "risk_not_certified"
+  }
+  if group.question_id != identity.definition_digest
+    || group.backend != identity.evaluator_revision
+    || report.model_revision != identity.evaluator_revision
+    || group.recommendation.kind != "threshold" {
+    return "risk_not_certified"
+  }
+  const accepted = group.recommendation
+  if accepted.accepted <= 0 || accepted.accepted > qualification.executed
+    || accepted.errors > qualification.failed
+    || accepted.error_upper_bound > report.target_error {
+    return "inconsistent_qualification"
+  }
+  return ""
+}
+
+/**
+ * Read the admitted confidence threshold through the qualification owner.
+ * @effects: []
+ * @errors: []
+ */
+pub fn learned_qualification_threshold(
+  identity: LearnedIdentity,
+  qualification: LearnedQualification?,
+) -> Result<float, string> {
+  const issue = learned_qualification_issue(identity, qualification)
+  if issue != "" {
+    return Err(issue)
+  }
+  guard qualification != nil && qualification.report.kind == "report" else {
+    throw "unreachable qualified report"
+  }
+  const group = qualification.report.groups[0]
+  guard group != nil && group.recommendation.kind == "threshold" else {
+    throw "unreachable qualified threshold"
+  }
+  return Ok(group.recommendation.threshold)
+}

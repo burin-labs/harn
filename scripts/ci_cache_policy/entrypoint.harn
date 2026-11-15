@@ -62,11 +62,13 @@ pub fn run_ci_cache_policy(harness: Harness) {
     RELEASE_RUNNER_POLICY_PATH,
     schema_of(CiReleaseRunnerPolicy),
   )
-  guard is_ok(release_runners_loaded) else {
-    harness.stdio.eprintln(json_stringify(unwrap_err(release_runners_loaded)))
-    harness.runtime.exit(1)
+  const release_runner_policy = match release_runners_loaded {
+    Ok(value) -> { value }
+    Err(error) -> {
+      harness.stdio.eprintln(json_stringify(error))
+      harness.runtime.exit(1)
+    }
   }
-  const release_runner_policy = unwrap(release_runners_loaded)
   guard (release_runner_policy?.targets ?? []) != [] else {
     harness.stdio.eprintln("release runner policy lists no targets: " + RELEASE_RUNNER_POLICY_PATH)
     harness.runtime.exit(1)

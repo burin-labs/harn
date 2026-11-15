@@ -1,0 +1,30 @@
+import { pattern_learning_accept } from "std/agent/pattern_knowledge"
+
+type ReviewInputs = {project_root: string, memory_root: string, output_dir: string}
+
+type ReviewBatch = {proposals: list<{id: string, kind: string}>}
+
+fn main(harness: Harness) {
+  const inputs_path = argv[0]
+  const batch_path = argv[1]
+  guard inputs_path != nil && batch_path != nil else {
+    throw "usage: review.harn INPUTS.json CURATION.json"
+  }
+  const inputs: ReviewInputs = schema_expect(
+    json_parse(harness.fs.read_text(inputs_path)),
+    schema_of(ReviewInputs),
+  )
+  const batch: ReviewBatch = schema_expect(
+    json_parse(harness.fs.read_text(batch_path)),
+    schema_of(ReviewBatch),
+  )
+  require len(batch.proposals) == 1, "review expects one inspected executable"
+  const proposal = batch.proposals[0]
+  guard proposal != nil && proposal.kind == "harn_tool" else {
+    throw "reviewed proposal is not an executable tool"
+  }
+  const accepted = pattern_learning_accept(harness, proposal.id, inputs)
+  require accepted.accepted && accepted.staged, "review did not stage the inspected executable"
+  harness.fs.write_text(path_join(inputs.output_dir, "acceptance.json"), json_stringify(accepted))
+  harness.stdio.println(json_stringify(pick(accepted, ["accepted", "staged", "candidate_dir"])))
+}

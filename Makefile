@@ -867,6 +867,7 @@ test-pr-gate-scripts:
 	bash ./scripts/tests/prune_stale_targets_lock_test.sh
 	python3 ./scripts/tests/prune_stale_targets_reader_test.py
 	python3 ./scripts/tests/prune_stale_targets_linux_census_test.py
+	python3 ./scripts/tests/prune_stale_targets_clone_owner_test.py
 	python3 ./scripts/tests/prune_stale_targets_incremental_test.py
 	./scripts/tests/prune_stale_targets_retention_test.sh
 	./scripts/tests/prune_stale_targets_host_policy_test.sh

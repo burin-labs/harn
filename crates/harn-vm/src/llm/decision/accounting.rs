@@ -34,6 +34,32 @@ pub(super) fn record_native(receipt: &mut EvaluationReceipt) {
     // This counts observed outer requests. Gateway-reported downstream attempts
     // remain separate native transport evidence, including an absent report.
     usage.provider_call_count = Some(i64::from(receipt.physical_attempts));
+    if let Some(session_id) = crate::llm::agent_runtime::current_agent_session_id() {
+        let call_id = receipt
+            .invocation_id
+            .as_deref()
+            .expect("live evaluation identity");
+        crate::llm::agent_session_host::record_provider_attempt_usage(
+            &session_id,
+            call_id,
+            &receipt.requested_provider,
+            &receipt.requested_model,
+            &usage,
+        );
+        crate::llm::agent_session_host::record_accounted_call_usage(
+            &session_id,
+            &usage,
+            &crate::llm::api::ProviderAttempts {
+                total: receipt.physical_attempts,
+                ..Default::default()
+            },
+            call_id,
+            &receipt.requested_provider,
+            &receipt.requested_model,
+            "decision",
+            None,
+        );
+    }
     trace_llm_call(LlmTraceEntry {
         model: receipt.requested_model.clone(),
         provider: receipt.requested_provider.clone(),

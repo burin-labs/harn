@@ -1,0 +1,908 @@
+import {
+  LearnedAgentSetup,
+  LearnedCapability,
+  LearnedDispatcher,
+  LearnedObservation,
+  LearnedQualification,
+  LearnedTrial,
+  learned_agent_options,
+  learned_agent_options_deferred,
+  learned_binding_request,
+  learned_capability_snapshot,
+  learned_dispatcher,
+  learned_qualification_issue,
+  learned_qualify,
+  learned_trial,
+} from "std/agent/learned"
+import { agent_loop } from "std/agent/loop"
+import { __iteration_info_payload } from "std/agent/loop_turn_options"
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+import {
+  agent_is_tool_result_message,
+  agent_session_commit_directives,
+  agent_session_inject_reminder,
+} from "std/agent/state"
+import { agent_tool_handler_result, agent_tool_postcondition } from "std/agent/tool_lifecycle"
+import { DecisionPolicy, state } from "std/decision"
+import { LlmCallerRequest } from "std/llm/caller"
+import { LlmCallOptions } from "std/llm/options"
+import {
+  EvaluationFixture,
+  llm_text,
+  with_evaluation_fixtures,
+  with_llm_script,
+  with_temp_dir,
+} from "std/testing"
+import { ToolRegistry, tool_registry_from } from "std/tools"
+
+const BOUND_WIDGETS = {kind: "bound", args: {name: "widgets"}, reason: ""}
+
+pipeline test_declared_read_only_policy_enforces_the_local_agent_handler(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root: string ->
+      for declared in [false, true] {
+        const path = path_join(root, "${declared}.txt")
+        const registry = tool_registry_from(
+          [
+            {
+              name: "write_probe",
+              description: "Exercise a handler's declared effect ceiling.",
+              inputSchema: {
+                type: "object",
+                properties: {path: {type: "string"}},
+                required: ["path"],
+                additionalProperties: false,
+              },
+              annotations: {kind: "read", side_effect_level: "read_only", readOnlyHint: true},
+              execution_policy: declared ? {kind: "read", side_effect_level: "read_only"} : nil,
+              handler: { input: dict ->
+                harness.fs.write_text(input.path, "handler reached")
+                return "handler reached"
+              },
+            },
+          ],
+        )
+        const catalog = tool_schema(registry)
+        const entry = catalog.tools[0]
+        if entry == nil {
+          throw "the registry must retain its declared handler"
+        }
+        assert_eq(entry.policy?.source, declared ? "declared" : "legacy_annotations")
+        const candidate = capability()
+        const preflight = entry + {inputSchema: candidate.tool.inputSchema}
+        const configured = try {
+          dispatcher(candidate + {preflight_tool: preflight})
+        }
+        const accepted = match configured {
+          Ok(_) -> { true }
+          Err(_) -> { false }
+        }
+        assert_eq(accepted, declared, "an advisory classification cannot qualify a preflight")
+        const result = agent_dispatch_tool_call(
+          harness.tools,
+          {name: "write_probe", arguments: {path: path}},
+          registry,
+        )
+        assert_eq(result.ok, !declared)
+        assert_eq(harness.fs.exists(path), !declared)
+        if declared {
+          assert_eq(result.error_category, "tool_rejected")
+          assert(json_stringify(result).contains("write_text"))
+        } else {
+          assert_eq(harness.fs.read_text(path), "handler reached")
+        }
+      }
+    },
+  )
+}
+
+pipeline test_iteration_telemetry_preserves_local_origin() {
+  const origin = {kind: "local", producer: "harn.learned_dispatch", receipt: "selected-call"}
+  const local = __iteration_info_payload(
+    {generation_origin: origin},
+    1,
+    "",
+    {run_usage: {provider_call_count: 2, known_cost_usd: 0.02}},
+  )
+  assert_eq(local.generation_origin, origin)
+  assert_eq(local.run_usage?.provider_call_count, 2)
+  assert_eq(local.provider, "")
+  const provider = __iteration_info_payload({provider: "mock", model: "mock"}, 0, "done")
+  assert_eq(provider.generation_origin, nil)
+}
+
+fn capability() -> LearnedCapability {
+  const catalog = tool_schema(
+    tool_registry_from(
+      [
+        {
+          name: "add_resource",
+          description: "Add a resource using the project's reviewed scaffold.",
+          inputSchema: {
+            type: "object",
+            properties: {name: {type: "string", pattern: "^[a-z]+$"}},
+            required: ["name"],
+            additionalProperties: false,
+          },
+          handler: { args: dict -> args },
+        },
+      ],
+    ),
+  )
+  for tool in catalog.tools {
+    return {
+      id: "add-resource",
+      meaning:
+        "Create one standard resource in the existing application; do not modify existing resources.",
+      tool: tool,
+      package_digest: "reviewed-package-v1",
+      project_digest: "project-contract-v1",
+      verification_digest: "resource-verifier-v1",
+      minimum_probability: 0.9,
+    }
+  }
+  throw "fixture tool is missing"
+}
+
+fn dispatcher(
+  candidate: LearnedCapability = capability(),
+  binding: LlmCallOptions = {provider: "mock", model: "mock", repair: {enabled: false}},
+) -> LearnedDispatcher {
+  const policy: DecisionPolicy = {
+    evaluation: {
+      backend: "native_decision",
+      provider: "openrouter",
+      model: "openrouter/typesafe/jev-1.14",
+      threshold: 0.0,
+    },
+    applicability_accept: 0.9,
+    applicability_reject: 0.1,
+    minimum_margin: 0.1,
+  }
+  return learned_dispatcher(
+    {
+      id: "resource-dispatch.v1",
+      instructions: "Select a capability only when it covers the entire requested change.",
+      capabilities: [candidate],
+      policy: policy,
+      evaluator_revision: "fixture-jev-v1",
+      binding: binding,
+      runtime_digest: "fixture-runtime-v1",
+      grader_digest: "fixture-grader-v1",
+      population: "fixture scaffold requests",
+    },
+  )
+}
+
+fn trials(executed: bool = true) -> list<LearnedTrial> {
+  let rows: list<LearnedTrial> = []
+  for i in range(40) {
+    rows = rows
+      + [
+        {
+          id: "positive-${i}",
+          expected: "add-resource",
+          selected: "add-resource",
+          confidence: 0.99,
+          abstained: false,
+          execution: executed ? {
+            kind: "passed",
+            receipt: "fixture-${i}",
+            workspace_digest: "workspace-${i}",
+          } : {kind: "not_run"},
+        },
+      ]
+  }
+  return rows
+    + [
+      {
+        id: "negative",
+        expected: "",
+        selected: "",
+        confidence: 0.0,
+        abstained: true,
+        execution: {kind: "not_run"},
+      },
+    ]
+}
+
+fn qualified(app: LearnedDispatcher, rows: list<LearnedTrial> = trials()) -> LearnedQualification {
+  return learned_qualify(
+    app.identity,
+    rows,
+    {risk: {thresholds: [0.99], target_error: 0.1, delta: 0.05}},
+  )
+}
+
+pipeline test_missing_empty_and_unexecuted_evidence_cannot_enable_inference(harness: Harness) {
+  const app = dispatcher()
+  const request = {request: "Add a standard resource called widgets"}
+  with_evaluation_fixtures(
+    harness,
+    [],
+    { ->
+      assert_eq(app.assess(harness.llm, request, nil).kind, "unqualified")
+      assert_eq(app.assess(harness.llm, request, qualified(app, [])).kind, "unqualified")
+      const unexecuted = qualified(app, trials(false))
+      assert_eq(unexecuted.failed, 40)
+      assert_eq(app.assess(harness.llm, request, unexecuted).kind, "unqualified")
+    },
+  )
+}
+
+pipeline test_reused_execution_receipts_cannot_inflate_qualification() {
+  const app = dispatcher()
+  const reused = trials().map(
+    { trial: LearnedTrial ->
+      trial.execution.kind == "not_run" ? trial : trial
+        + {execution: trial.execution + {receipt: "one-historical-receipt"}}
+    },
+  )
+  const result = try {
+    qualified(app, reused)
+  }
+  assert(is_err(result))
+}
+
+pipeline test_source_identity_measures_content_and_refuses_missing_inputs(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root: string ->
+      const original = capability()
+      const declaration = pick(original, ["id", "meaning", "tool", "minimum_probability"])
+      const sources = {
+        package: {root: root, files: ["server.harn"]},
+        project: {root: root, files: ["project.json"]},
+        verification: {root: root, files: ["test.harn"]},
+      }
+      const missing = learned_capability_snapshot(harness.fs, declaration, sources)
+      assert_eq(missing.kind, "unavailable")
+      harness.fs.write_text(path_join(root, "server.harn"), "reviewed executable")
+      harness.fs.write_text(path_join(root, "project.json"), "project contract v1")
+      harness.fs.write_text(path_join(root, "test.harn"), "independent verifier")
+      const measured = learned_capability_snapshot(harness.fs, declaration, sources)
+      assert_eq(measured.kind, "measured")
+      if measured.kind == "measured" {
+        harness.fs.write_text(path_join(root, "project.json"), "project contract v2")
+        const changed = learned_capability_snapshot(harness.fs, declaration, sources)
+        assert_eq(changed.kind, "measured")
+        if changed.kind == "measured" {
+          assert(changed.capability.project_digest != measured.capability.project_digest)
+          assert_eq(changed.capability.package_digest, measured.capability.package_digest)
+        }
+      }
+      const empty = learned_capability_snapshot(
+        harness.fs,
+        declaration,
+        sources + {package: {root: root, files: []}},
+      )
+      assert_eq(empty.kind, "unavailable")
+    },
+  )
+}
+
+pipeline test_package_project_tool_and_verifier_changes_invalidate_qualification(harness: Harness) {
+  const app = dispatcher()
+  const proof = qualified(app)
+  assert_eq(learned_qualification_issue(app.identity, proof), "")
+  const original = capability()
+  assert_eq(
+    learned_qualification_issue(
+      dispatcher(original, {provider: "mock", model: "changed-binder"}).identity,
+      proof,
+    ),
+    "stale_qualification",
+  )
+  const changed = [
+    original + {package_digest: "package-v2"},
+    original + {project_digest: "project-v2"},
+    original + {verification_digest: "verifier-v2"},
+    original + {tool: original.tool + {inputSchema: {type: "object"}}},
+  ]
+  with_evaluation_fixtures(
+    harness,
+    [],
+    { ->
+      for candidate in changed {
+        const result = dispatcher(candidate).assess(harness.llm, {request: "Add widgets"}, proof)
+        assert_eq(result.kind, "unqualified")
+        if result.kind == "unqualified" {
+          assert_eq(result.reason, "stale_qualification")
+        }
+      }
+    },
+  )
+}
+
+pipeline test_live_selection_applies_the_qualified_threshold(harness: Harness) {
+  const app = dispatcher()
+  const proof = qualified(app)
+  const request = {request: "Add a standard resource called widgets"}
+  const fixture = {
+    site_id: "stdlib.decision.dispatch.v1",
+    state: state(app.definition, json_stringify(request)),
+    questions: app.definition.questions,
+    policy: app.definition.policy.evaluation,
+    answers: {applicable: {kind: "boolean", verdict: true, confidence: 0.95, evidence: "fixture"}},
+  }
+  with_evaluation_fixtures(
+    harness,
+    [fixture, fixture + {answers: {applicable: fixture.answers.applicable + {confidence: 1.0}}}],
+    { ->
+      const withheld = app.assess(harness.llm, request, proof)
+      assert_eq(withheld.kind, "unqualified")
+      if withheld.kind == "unqualified" {
+        assert_eq(withheld.reason, "below_qualified_threshold")
+      }
+      const selected = app.assess(harness.llm, request, proof)
+      assert_eq(selected.kind, "selected")
+      if selected.kind == "selected" {
+        assert_eq(selected.capability.tool.name, "add_resource")
+      }
+    },
+  )
+}
+
+fn resource_tools(fs: HarnessFs, root: string, verified: bool) -> ToolRegistry {
+  const input = capability().tool.inputSchema
+  guard type_of(input) == "dict" else {
+    throw "fixture tool requires an object schema"
+  }
+  return tool_registry_from(
+    [
+      {
+        name: "add_resource",
+        description: "Add a resource using the project's reviewed scaffold.",
+        inputSchema: input,
+        annotations: {kind: "edit", side_effect_level: "workspace_write"},
+        handler: { args: dict ->
+          const relative = "${args.name}.txt"
+          const path = path_join(root, relative)
+          assert(!fs.exists(path), "the recipe must not execute twice")
+          fs.write_text(path, "created ${args.name}")
+          assert_eq(fs.read_text(path), "created ${args.name}")
+          const facts = {mutation_status: "applied", changed_paths: [relative]}
+          return agent_tool_handler_result(
+            "Created and checked ${args.name}.",
+            verified ? facts + {verification: agent_tool_postcondition([relative])} : facts,
+          )
+        },
+      },
+    ],
+  )
+}
+
+fn selection_fixture(app: LearnedDispatcher, request: {request: string}) -> EvaluationFixture {
+  return {
+    site_id: "stdlib.decision.dispatch.v1",
+    state: state(app.definition, json_stringify(request)),
+    questions: app.definition.questions,
+    policy: app.definition.policy.evaluation,
+    answers: {applicable: {kind: "boolean", verdict: true, confidence: 1.0, evidence: "fixture"}},
+  }
+}
+
+fn binding_fixture(
+  fs: HarnessFs,
+  app: LearnedDispatcher,
+  request: {request: string},
+  verdict: bool = true,
+  confidence: float = 1.0,
+) -> EvaluationFixture {
+  return learned_binding_request(
+    fs,
+    request,
+    capability(),
+    BOUND_WIDGETS.args,
+    app.definition.policy.evaluation,
+  )
+    + {
+      answers: {
+        faithful: {kind: "boolean", verdict: verdict, confidence: confidence, evidence: "fixture"},
+      },
+    }
+}
+
+fn preflight_case(
+  harness: Harness,
+  verdict: dict,
+  succeeds: bool,
+  attempts_write: bool = false,
+  binding: {
+    verdict: bool,
+    confidence: float,
+    preflight: bool,
+  } = {verdict: true, confidence: 1.0, preflight: true},
+) {
+  with_temp_dir(
+    harness.fs,
+    { root: string ->
+      let preflight_calls = 0
+      const registry = tool_define(
+        resource_tools(harness.fs, root, true),
+        "check_resource",
+        "Check resource inputs without writes.",
+        {
+          inputSchema: capability().tool.inputSchema,
+          annotations: {kind: "read", readOnlyHint: true, side_effect_level: "read_only"},
+          execution_policy: {kind: "read", side_effect_level: "read_only"},
+          handler: { args: dict ->
+            preflight_calls += 1
+            assert_eq(args.name, "widgets")
+            if attempts_write {
+              harness.fs.write_text(path_join(root, "preflight-write.txt"), "forbidden")
+            }
+            return agent_tool_handler_result("Checked resource inputs.", verdict)
+          },
+        },
+      )
+      let candidate = capability()
+      for tool in tool_schema(registry).tools {
+        if tool.name == "check_resource" {
+          candidate = candidate + {preflight_tool: tool}
+        }
+      }
+      assert(candidate.preflight_tool != nil, "the preflight tool must be reached")
+      const app = dispatcher(candidate)
+      const request = {request: "Add a standard resource called widgets"}
+      let primary_calls = 0
+      const middleware = learned_agent_options(
+        harness,
+        {
+          request: request,
+          dispatcher: app,
+          qualification: qualified(app),
+          refresh_identity: { -> app.identity },
+          caller: { _call: LlmCallerRequest ->
+            primary_calls += 1
+            {ok: true, value: {text: "ordinary fallback"}}
+          },
+        },
+      )
+      with_evaluation_fixtures(
+        harness,
+        [
+          selection_fixture(app, request),
+          binding_fixture(harness.fs, app, request, binding.verdict, binding.confidence),
+        ],
+        { ->
+          with_llm_script(
+            harness.llm,
+            [llm_text(json_stringify(BOUND_WIDGETS))],
+            { ->
+              const result = agent_loop(
+                harness,
+                request.request,
+                nil,
+                {
+                  provider: "mock",
+                  model: "mock",
+                  tools: registry,
+                  tool_format: "native",
+                  max_iterations: 4,
+                  initial_user_content: [{type: "text", text: request.request}],
+                }
+                  + middleware,
+              )
+              assert_eq(harness.fs.exists(path_join(root, "widgets.txt")), succeeds)
+              assert(!harness.fs.exists(path_join(root, "preflight-write.txt")))
+              assert_eq(primary_calls, succeeds ? 0 : 1)
+              assert_eq(preflight_calls, binding.preflight ? 1 : 0)
+              if !attempts_write {
+                assert_eq(
+                  result.visible_text,
+                  succeeds ? "Created and checked widgets." : "ordinary fallback",
+                )
+              }
+            },
+          )
+        },
+      )
+    },
+  )
+}
+
+pipeline test_preflight_requires_explicit_read_only_readiness(harness: Harness) {
+  preflight_case(harness, {kind: "ready"}, true)
+  preflight_case(harness, {kind: "declined", reason: "unsupported_fields"}, false)
+  preflight_case(harness, {}, false)
+  preflight_case(harness, {kind: "ready"}, false, true)
+}
+
+pipeline test_binding_judgment_refuses_before_preflight(harness: Harness) {
+  preflight_case(
+    harness,
+    {kind: "ready"},
+    false,
+    false,
+    {verdict: false, confidence: 1.0, preflight: false},
+  )
+  preflight_case(
+    harness,
+    {kind: "ready"},
+    false,
+    false,
+    {verdict: true, confidence: 0.89, preflight: false},
+  )
+  preflight_case(
+    harness,
+    {kind: "ready"},
+    false,
+    false,
+    {verdict: true, confidence: 0.95, preflight: false},
+  )
+}
+
+pipeline test_observations_distinguish_assessment_from_committed_execution(harness: Harness) {
+  const app = dispatcher()
+  const request = {request: "Add a standard resource called widgets"}
+  with_evaluation_fixtures(
+    harness,
+    [selection_fixture(app, request), binding_fixture(harness.fs, app, request)],
+    { ->
+      const assessment = app.probe(harness.llm, request)
+      guard assessment.kind == "selected" else {
+        throw "fixture assessment must select"
+      }
+      const query = learned_binding_request(
+        harness.fs,
+        request,
+        capability(),
+        BOUND_WIDGETS.args,
+        app.definition.policy.evaluation,
+      )
+      const binding = harness.llm.evaluate_request(
+        "stdlib.learned_binding.v1",
+        query.state,
+        query.questions,
+        query.policy,
+      )
+      const observation: LearnedObservation = {
+        id: "observed",
+        expected: "add-resource",
+        assessment: assessment,
+        binding: binding,
+        disposition: {kind: "abstained", reason: "preflight_declined"},
+        execution: {kind: "not_run"},
+      }
+      assert(learned_trial(observation).abstained)
+      const committed = learned_trial(
+        observation
+          + {
+            disposition: {
+              kind: "committed",
+              capability_id: "add-resource",
+              decision_receipt: assessment.evidence.receipt,
+              binding_receipt: binding.receipt,
+            },
+          },
+      )
+      assert(!committed.abstained)
+      const reused = try {
+        learned_trial(
+          observation
+            + {
+              binding: binding + {receipt: assessment.evidence.receipt},
+              disposition: {
+                kind: "committed",
+                capability_id: "add-resource",
+                decision_receipt: assessment.evidence.receipt,
+                binding_receipt: assessment.evidence.receipt,
+              },
+            },
+        )
+      }
+      match reused {
+        Ok(_value) -> {
+          throw "applicability cannot substitute for a binding judgment"
+        }
+        Err(_error) -> { assert(true) }
+      }
+      assert_eq(
+        learned_qualify(
+          app.identity,
+          [committed],
+          {risk: {thresholds: [0.99], target_error: 0.1, delta: 0.05}},
+        ).failed,
+        1,
+      )
+      const missing = schema_parse(
+        pick(observation, ["id", "expected", "assessment", "execution"]),
+        schema_of(LearnedObservation),
+      )
+      match missing {
+        Ok(_value) -> {
+          throw "missing disposition cannot become abstention"
+        }
+        Err(_error) -> { assert(true) }
+      }
+    },
+  )
+}
+
+pipeline test_qualified_call_uses_the_normal_tool_path_and_fresh_postconditions(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root: string ->
+      const app = dispatcher()
+      const request = {request: "Add a standard resource called widgets"}
+      let primary_calls = 0
+      let resolutions = 0
+      let committed_directives = 0
+      const setup: LearnedAgentSetup = {
+        request: request,
+        dispatcher: app,
+        qualification: qualified(app),
+        refresh_identity: { -> app.identity },
+        caller: { _call ->
+          primary_calls += 1
+          return {ok: true, value: {text: "ordinary fallback"}}
+        },
+      }
+      const middleware = learned_agent_options_deferred(
+        harness,
+        {
+          llm_caller: setup.caller,
+          tool_caller: { call: dict, next: fn(dict) -> dict -> next(call) },
+        },
+        { registry: ToolRegistry ->
+          resolutions += 1
+          assert_eq(
+            tool_schema(registry).tools.map({ tool -> tool.name }).to_list(),
+            ["add_resource"],
+          )
+          return {kind: "ready", setup: setup}
+        },
+      )
+      with_evaluation_fixtures(
+        harness,
+        [selection_fixture(app, request), binding_fixture(harness.fs, app, request)],
+        { ->
+          with_llm_script(
+            harness.llm,
+            [llm_text(json_stringify(BOUND_WIDGETS))],
+            { ->
+              const result = agent_loop(
+                harness,
+                request.request,
+                nil,
+                {
+                  provider: "mock",
+                  model: "mock",
+                  tools: resource_tools(harness.fs, root, true),
+                  tool_format: "native",
+                  max_iterations: 3,
+                  initial_user_content: [{type: "text", text: request.request}],
+                }
+                  + middleware
+                  + {
+                    llm_caller: { call: LlmCallerRequest ->
+                      if committed_directives == 0 {
+                        const session_id = call.turn?.session_id ?? ""
+                        agent_session_inject_reminder(
+                          harness.agent,
+                          session_id,
+                          {
+                            body: "Use the current workspace.",
+                            role_hint: "user_block",
+                            ttl_turns: 1,
+                          },
+                        )
+                        committed_directives = agent_session_commit_directives(
+                          harness.agent,
+                          session_id,
+                        )
+                      }
+                      return middleware.llm_caller(call)
+                    },
+                  },
+              )
+              assert_eq(result.visible_text, "Created and checked widgets.")
+              assert_eq(primary_calls, 0)
+              assert_eq(resolutions, 1)
+              assert(committed_directives > 0, "the real directive commit path must fire")
+              assert_eq(harness.fs.read_text(path_join(root, "widgets.txt")), "created widgets")
+              assert_eq(
+                len(harness.llm.mock_calls()),
+                1,
+                "only the argument binder called a provider",
+              )
+              assert_eq(
+                result.unpriced_calls,
+                0,
+                "local planning must not invent unpriced provider calls",
+              )
+              assert_eq(result.provider_call_count, 1)
+              assert_eq(
+                result.tokens_used,
+                result.physical_usage.input_tokens + result.physical_usage.output_tokens,
+              )
+            },
+          )
+        },
+      )
+    },
+  )
+}
+
+pipeline test_failed_verification_recovers_with_the_actual_mutation_history(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root: string ->
+      const app = dispatcher()
+      const request = {request: "Add a standard resource called widgets"}
+      let primary_calls = 0
+      const middleware = learned_agent_options(
+        harness,
+        {
+          request: request,
+          dispatcher: app,
+          qualification: qualified(app),
+          refresh_identity: { -> app.identity },
+          caller: { call ->
+            primary_calls += 1
+            assert_eq(harness.fs.read_text(path_join(root, "widgets.txt")), "created widgets")
+            assert(
+              len((call.opts?.messages ?? []).filter(agent_is_tool_result_message).to_list()) > 0,
+            )
+            return {ok: true, value: {text: "recovered from the actual tool result"}}
+          },
+        },
+      )
+      with_evaluation_fixtures(
+        harness,
+        [selection_fixture(app, request), binding_fixture(harness.fs, app, request)],
+        { ->
+          with_llm_script(
+            harness.llm,
+            [llm_text(json_stringify(BOUND_WIDGETS))],
+            { ->
+              const result = agent_loop(
+                harness,
+                request.request,
+                nil,
+                {
+                  provider: "mock",
+                  model: "mock",
+                  tools: resource_tools(harness.fs, root, false),
+                  tool_format: "native",
+                  max_iterations: 3,
+                }
+                  + middleware,
+              )
+              assert_eq(result.visible_text, "recovered from the actual tool result")
+              assert_eq(primary_calls, 1)
+            },
+          )
+        },
+      )
+    },
+  )
+}
+
+pipeline test_continuing_conversation_falls_back_without_decision_or_mutation(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root: string ->
+      const app = dispatcher()
+      const request = {request: "Add a standard resource called widgets"}
+      let primary_calls = 0
+      const middleware = learned_agent_options(
+        harness,
+        {
+          request: request,
+          dispatcher: app,
+          qualification: qualified(app),
+          refresh_identity: { -> app.identity },
+          caller: { _call ->
+            primary_calls += 1
+            return {ok: true, value: {text: "handled the continuing conversation"}}
+          },
+        },
+      )
+      with_evaluation_fixtures(
+        harness,
+        [],
+        { ->
+          const result = agent_loop(
+            harness,
+            request.request,
+            nil,
+            {
+              provider: "mock",
+              model: "mock",
+              tools: resource_tools(harness.fs, root, true),
+              tool_format: "native",
+              history: [
+                {role: "user", content: "Only explain changes in this conversation."},
+                {role: "assistant", content: "I will explain them."},
+              ],
+              max_iterations: 1,
+            }
+              + middleware,
+          )
+          assert_eq(result.visible_text, "handled the continuing conversation")
+        },
+      )
+      assert_eq(primary_calls, 1)
+      assert(!harness.fs.exists(path_join(root, "widgets.txt")))
+    },
+  )
+}
+
+pipeline test_changed_identity_and_policy_denial_prevent_the_selected_mutation(harness: Harness) {
+  for boundary in ["identity", "unavailable", "policy"] {
+    with_temp_dir(
+      harness.fs,
+      { root: string ->
+        const app = dispatcher()
+        const request = {request: "Add a standard resource called widgets"}
+        let identity_reads = 0
+        let primary_calls = 0
+        const middleware = learned_agent_options(
+          harness,
+          {
+            request: request,
+            dispatcher: app,
+            qualification: qualified(app),
+            refresh_identity: { ->
+              identity_reads += 1
+              if boundary == "unavailable" && identity_reads > 1 {
+                throw "reviewed source became unavailable"
+              }
+              return boundary == "identity" && identity_reads > 1 ? app.identity
+                + {capabilities_digest: "changed-after-selection"} : app.identity
+            },
+            caller: { call ->
+              primary_calls += 1
+              assert(!harness.fs.exists(path_join(root, "widgets.txt")))
+              assert(
+                len((call.opts?.messages ?? []).filter(agent_is_tool_result_message).to_list()) > 0,
+              )
+              return {ok: true, value: {text: "recovered from refused execution"}}
+            },
+          },
+        )
+        with_evaluation_fixtures(
+          harness,
+          [selection_fixture(app, request), binding_fixture(harness.fs, app, request)],
+          { ->
+            with_llm_script(
+              harness.llm,
+              [llm_text(json_stringify(BOUND_WIDGETS))],
+              { ->
+                const result = agent_loop(
+                  harness,
+                  request.request,
+                  nil,
+                  {
+                    provider: "mock",
+                    model: "mock",
+                    tool_format: "native",
+                    max_iterations: 3,
+                    tools: resource_tools(harness.fs, root, true),
+                    tool_precheck: { _call ->
+                      return boundary == "policy" ? {
+                        deny: true,
+                        model_cue: "workspace write denied by policy",
+                      } : nil
+                    },
+                  }
+                    + middleware,
+                )
+                assert_eq(result.final_status, "completion_unverified")
+                assert_eq(result.publication_admitted, false)
+                assert_eq(result.tools.rejected, ["add_resource"])
+                assert_eq(result.trace.tool_executions, 0)
+                assert_eq(primary_calls, 1)
+                assert_eq(len(harness.llm.mock_calls()), 1, "binding ran before refusal")
+              },
+            )
+          },
+        )
+        assert(!harness.fs.exists(path_join(root, "widgets.txt")))
+      },
+    )
+  }
+}

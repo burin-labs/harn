@@ -456,17 +456,24 @@ fn compile_validator(
     schema: &JsonValue,
     registry: &jsonschema::Registry,
 ) -> Result<Validator, PreparedToolCatalogError> {
+    compile_runtime_schema(schema, registry, RUNTIME_SCHEMA_ROOT_URI).map_err(|error| {
+        PreparedToolCatalogError::new(format!(
+            "tool {tool:?} {} schema could not be compiled: {error}",
+            phase.label()
+        ))
+    })
+}
+
+pub(crate) fn compile_runtime_schema(
+    schema: &JsonValue,
+    registry: &jsonschema::Registry,
+    base_uri: &str,
+) -> Result<Validator, jsonschema::ValidationError<'static>> {
     jsonschema::options()
         .with_draft(jsonschema::Draft::Draft202012)
         .with_registry(registry)
-        .with_base_uri(RUNTIME_SCHEMA_ROOT_URI)
+        .with_base_uri(base_uri)
         .build(schema)
-        .map_err(|error| {
-            PreparedToolCatalogError::new(format!(
-                "tool {tool:?} {} schema could not be compiled: {error}",
-                phase.label()
-            ))
-        })
 }
 
 #[derive(Clone, Debug)]

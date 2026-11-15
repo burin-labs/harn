@@ -11,6 +11,19 @@ pub(crate) async fn scope_read_only_invocation<T>(
     session_id: &str,
     future: impl std::future::Future<Output = Result<T, VmError>>,
 ) -> Result<T, VmError> {
+    crate::tool_registry::preparation_scope::preparation(scope_read_only_effects(async move {
+        // Private adapter reads retain the handler's authority inside the
+        // mandatory gate, which trusted bridge calls cannot bypass.
+        let _trusted_bridge_guard = super::allow_trusted_bridge_calls();
+        crate::orchestration::scope_agent_session(session_id.to_string(), future).await
+    }))
+    .await
+}
+
+/// Enforce read-only effects even for trusted handlers and child interpreters.
+pub(crate) async fn scope_read_only_effects<T>(
+    future: impl std::future::Future<Output = Result<T, VmError>>,
+) -> Result<T, VmError> {
     let overlay = CapabilityPolicy {
         side_effect_level: Some("read_only".into()),
         ..CapabilityPolicy::neutral()
@@ -22,17 +35,9 @@ pub(crate) async fn scope_read_only_invocation<T>(
             message,
             category: crate::value::ErrorCategory::ToolRejected,
         })?;
-    crate::tool_registry::preparation_scope::preparation(async move {
-        // Private adapter reads are not effects of the model's tool. Keep the
-        // same authority as its handler, but always install the mandatory
-        // preparation gate before this exemption can observe a capability.
-        let _trusted_bridge_guard = super::allow_trusted_bridge_calls();
-        crate::orchestration::scope_agent_session(
-            session_id.to_string(),
-            crate::orchestration::scope_execution_policy(ceiling, future),
-        )
-        .await
-    })
+    crate::tool_registry::preparation_scope::read_only(
+        crate::orchestration::scope_execution_policy(ceiling, future),
+    )
     .await
 }
 

@@ -80,7 +80,7 @@
 # including spaces, and protects that name in both managed cache families.
 # Env:
 #   HARN_TARGET_GC_ROOTS        space-separated repo search roots
-#                               (default: "$HOME/projects $HOME/.codex/worktrees /private/tmp")
+#                               (default: projects, remote-builds and .codex/worktrees under HOME, /private/tmp)
 #   HARN_TARGET_GC_FIND_DEPTH   max depth for nested worktree discovery (default 3)
 #   HARN_TARGET_GC_MIN_AGE_SECS minimum idle age before any automatic removal,
 #                               including size enforcement (default 10800)
@@ -118,6 +118,112 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/file_time.sh
 source "$SCRIPT_DIR/lib/file_time.sh"
+
+# The target records its checkout so maintenance does not depend on where a
+# standalone clone was placed. Registration and reads use the same record format.
+target_checkout() {
+  python3 - "$@" <<'PY'
+import datetime
+import json
+import os
+from pathlib import Path
+import stat
+import subprocess
+import sys
+import tempfile
+
+mode, raw = sys.argv[1:3]
+path = Path(raw).resolve()
+
+
+def read_regular(path):
+    if path.is_symlink():
+        raise ValueError("ownership metadata is a symlink")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    descriptor = os.open(path, flags)
+    with os.fdopen(descriptor, encoding="utf-8") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise ValueError("ownership metadata is not a regular file")
+        value = handle.read(65537)
+    if len(value) > 65536:
+        raise ValueError("ownership metadata exceeds its size limit")
+    return value
+
+
+try:
+    if mode == "lock":
+        result = subprocess.run(["git", "-C", str(path), "rev-parse", "--absolute-git-dir"],
+                                check=True, capture_output=True, text=True)
+        lock = Path(result.stdout.strip()) / "locked"
+        try:
+            reason = read_regular(lock)
+        except FileNotFoundError:
+            sys.exit(3)
+        if reason.startswith("burin-claim "):
+            claim = json.loads(reason.removeprefix("burin-claim "))
+            if (not isinstance(claim, dict) or type(claim.get("v")) is not int
+                    or claim["v"] != 1 or not isinstance(claim.get("owner"), str)
+                    or not claim["owner"] or not isinstance(claim.get("expires"), str)):
+                raise ValueError("invalid checkout claim")
+            expires = datetime.datetime.fromisoformat(claim["expires"].replace("Z", "+00:00"))
+            if expires.tzinfo is None:
+                raise ValueError("checkout claim has no timezone")
+            if expires <= datetime.datetime.now(datetime.timezone.utc):
+                sys.exit(3)
+        print("checkout-lock")
+        sys.exit(0)
+    record = path / ".harn-target-owner.json"
+    if mode == "register":
+        checkout = Path(sys.argv[3]).resolve(strict=True)
+        if path.parent.name not in {"harn-target", "release-gate-target"} or not path.is_dir():
+            raise ValueError("target is outside a managed cache root")
+        result = subprocess.run(["git", "-C", str(checkout), "rev-parse", "--show-toplevel"],
+                                check=True, capture_output=True, text=True)
+        if Path(result.stdout.strip()).resolve() != checkout:
+            raise ValueError("checkout is not a Git root")
+        if any(c in str(checkout) for c in "\r\n\t"):
+            raise ValueError("checkout path contains unsupported control characters")
+        value = {"schema": "harn.target-owner/v1", "checkout": str(checkout)}
+        descriptor, temporary = tempfile.mkstemp(prefix=".harn-target-owner-", dir=path)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                json.dump(value, handle)
+                handle.write("\n")
+            os.replace(temporary, record)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+        sys.exit(0)
+    try:
+        value = json.loads(read_regular(record))
+    except FileNotFoundError:
+        sys.exit(3)
+    if not isinstance(value, dict):
+        raise ValueError("invalid target owner record")
+    checkout = value.get("checkout")
+    if value.get("schema") != "harn.target-owner/v1" or not isinstance(checkout, str):
+        raise ValueError("invalid target owner record")
+    if not Path(checkout).is_absolute() or any(c in checkout for c in "\r\n\t"):
+        raise ValueError("invalid checkout path")
+    try:
+        source_stat = Path(checkout).stat()
+    except FileNotFoundError:
+        sys.exit(4)
+    if not stat.S_ISDIR(source_stat.st_mode):
+        sys.exit(4)
+    print(checkout)
+except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError) as error:
+    detail = f": {error}" if mode == "register" and isinstance(error, ValueError) else ""
+    print("harn-target GC: checkout ownership is unmeasured" + detail, file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
+if [[ "${1:-}" == --record-owner ]]; then
+  [[ "$#" -eq 3 ]] || { echo '--record-owner needs TARGET CHECKOUT' >&2; exit 2; }
+  target_checkout register "$2" "$3"
+  exit
+fi
 
 # When was this target tree last built in?
 #
@@ -170,6 +276,8 @@ Usage: scripts/prune_stale_targets.sh [options]
   --prune-incremental-entry NAME
                        Remove only idle Cargo incremental state in this entry.
   --protect-entry NAME Keep this exact basename ahead of every removal rule.
+  --record-owner TARGET CHECKOUT
+                       Record a managed target's checkout without running GC.
   --help               Show this help without scanning or changing caches.
 
 Repeat --remove-entry and --protect-entry to name several entries. Names cannot
@@ -486,6 +594,7 @@ fi
 
 default_roots() {
   printf '%s\n' "$HOME/projects"
+  printf '%s\n' "$HOME/remote-builds"
   printf '%s\n' "$HOME/.codex/worktrees"
   printf '%s\n' "/private/tmp"
 }
@@ -629,7 +738,7 @@ fi
 #   process reading the entry outside Cargo is the accepted blind spot for a
 #   rebuildable cache.
 linux_entry_handle_pids() {
-  local dir="$1" physical="$2" lock lock_status locks
+  local dir="$1" physical="$2" mode="${3:-target}" lock lock_status locks
   python3 - "$proc_root" "$dir" "$physical" <<'PY' || return 1
 import os
 import stat
@@ -735,6 +844,7 @@ for name in os.listdir(proc):
 for holder in holders:
     print(holder)
 PY
+  [ "$mode" = target ] || return 0
   # flock exits 1 only when another holder has the lock; any other failure
   # leaves the lock unmeasured, as does a lock search that cannot read the tree.
   locks="$(find "$physical" -maxdepth 3 -name .cargo-lock -type f 2>/dev/null)" || return 1
@@ -751,8 +861,8 @@ PY
 }
 
 # Pids that own a cache entry, one per line.
-entry_live_pids() {
-  local dir="$1" pid line snapshot lsof_out handle_pids physical handle_verdict
+path_live_pids() {
+  local dir="$1" mode="${2:-target}" pid line snapshot lsof_out handle_pids physical handle_verdict
   physical="$(cd "$dir" && pwd -P)" || return 1
   # A reader can hold any artifact without naming the path in its arguments or
   # holding Cargo's lock. A failed or empty census cannot establish idleness.
@@ -764,7 +874,7 @@ entry_live_pids() {
       *) return 1 ;;
     esac
   elif [ "$(uname -s)" = Linux ]; then
-    linux_entry_handle_pids "$dir" "$physical" || return 1
+    linux_entry_handle_pids "$dir" "$physical" "$mode" || return 1
   else
     lsof_out="$(lsof -n -Fpfn 2>&1)" || return 1
     [ -n "$lsof_out" ] || return 1
@@ -824,6 +934,7 @@ entry_live_pids() {
 # worktree's .cargo/config.toml; fall back to the derived <parent>-<leaf> name.
 keep_file="$(mktemp)"
 release_keep_file="$(mktemp)"
+checkout_file="$(mktemp)"
 # Warm entries a live worktree still points at, one `<mtime> <path>` line per
 # root, so the retention cap below can rank them by recency.
 warm_file="$(mktemp)"
@@ -844,7 +955,7 @@ pressure_protected() {
 }
 # Print the summary from the EXIT trap so no stray failure can ever make the
 # GC die silently again.
-trap 'rm -f "$keep_file" "$release_keep_file" "$warm_file" "$evictable_file"; print_summary; release_run_lock' EXIT
+trap 'rm -f "$keep_file" "$release_keep_file" "$checkout_file" "$warm_file" "$evictable_file"; print_summary; release_run_lock' EXIT
 
 live_worktrees() {
   discover_repo_roots | while read -r repo; do
@@ -887,16 +998,47 @@ live_worktrees | while read -r wt; do
   if [ -f "$cfg" ]; then
     td=$(grep -E '^[[:space:]]*target-dir[[:space:]]*=' "$cfg" 2>/dev/null \
          | head -1 | sed -E 's/^[^"]*"//; s/".*$//' || true)
-    if [ -n "$td" ]; then basename "$td"; fi
+    if [ -n "$td" ]; then printf 'harn-target\t%s\t%s\n' "$(basename "$td")" "$wt"; fi
   fi
   # derived-name fallback (matches dev_setup.sh::derive_target_dir)
-  printf '%s-%s\n' "$(basename "$(dirname "$wt")")" "$(basename "$wt")"
-done | sort -u > "$keep_file" || true
+  printf 'harn-target\t%s-%s\t%s\n' "$(basename "$(dirname "$wt")")" "$(basename "$wt")" "$wt"
+done | sort -u > "$checkout_file" || true
+cut -f2 "$checkout_file" | sort -u > "$keep_file"
+
+entry_live_pids() {
+  local dir="$1" name family owner status recorded sources source_name pids
+  pids="$(path_live_pids "$dir")" || return 1
+  if [ -n "$pids" ]; then
+    printf '%s\n' "$pids"
+    return 0
+  fi
+  name="$(basename "$dir")"
+  family="$(basename "$(dirname "$dir")")"
+  status=0
+  recorded="$(target_checkout read "$dir")" || status=$?
+  case "$status" in
+    0) sources="$recorded" ;;
+    3) sources="$(awk -F '\t' -v name="$name" -v family="$family" '$1 == family && $2 == name {print $3}' "$checkout_file")" ;;
+    4) sources="" ;;
+    *) return 1 ;;
+  esac
+  while IFS= read -r owner; do
+    [ -n "$owner" ] && [ -d "$owner" ] || continue
+    status=0
+    source_name="$(target_checkout lock "$owner")" || status=$?
+    case "$status" in
+      0) printf '%s\n' "$source_name" ;;
+      3) ;;
+      *) return 1 ;;
+    esac
+    path_live_pids "$owner" checkout || return 1
+  done <<< "$(printf '%s\n' "$sources" | sort -u)"
+}
 
 prune_root() {
   local target_root="$1"
   local keep="$2"
-  local d name m pids
+  local d name m pids owner_status
   # Removal is destructive, so the root is re-validated here rather than only
   # where it was discovered. Both managed families are named exactly.
   case "$(basename "$target_root")" in
@@ -936,7 +1078,10 @@ prune_root() {
       kept=$((kept + 1)); kept_paths+=("$d"); continue
     fi
 
-    if grep -qxF "$name" "$keep"; then
+    owner_status=0
+    target_checkout read "$d" >/dev/null || owner_status=$?
+    if [ "$owner_status" -eq 0 ] \
+      || { [ "$owner_status" -eq 3 ] && grep -qxF "$name" "$keep"; }; then
       # A live worktree points at this tree, so it is warm rather than an
       # orphan. It is not decided here: the retention cap below ranks every
       # warm entry in this root against the others.
@@ -1333,7 +1478,9 @@ fi
 live_worktrees | while read -r wt; do
   [ -n "$wt" ] || continue
   # Mirrors release_gate.sh::release_gate_target_name.
-  printf '%s\n' "$(printf '%s' "$(basename "$wt")" | tr -c 'A-Za-z0-9._-' '-')"
+  name="$(printf '%s' "$(basename "$wt")" | tr -c 'A-Za-z0-9._-' '-')"
+  printf 'release-gate-target\t%s\t%s\n' "$name" "$wt" >> "$checkout_file"
+  printf '%s\n' "$name"
 done | sort -u > "$release_keep_file" || true
 
 if [ "${#release_target_roots[@]}" -gt 0 ]; then

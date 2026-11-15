@@ -28,7 +28,7 @@ pub type DecisionDefinition = {
   digest: string,
   input_schema_digest: string,
   routes: list<DecisionRouteDefinition>,
-  questions: {applicable: BooleanQuestion, route: ChoiceQuestion},
+  questions: {applicable: BooleanQuestion, route?: ChoiceQuestion},
   policy: DecisionPolicy,
 }
 
@@ -47,13 +47,14 @@ pub type DecisionEvidence = {
   applicability_confidence_kind: ConfidenceKind,
   route: string,
   route_probability: float,
-  route_confidence_kind: ConfidenceKind,
+  route_confidence_kind: ConfidenceKind | "not_required",
   margin: float,
 }
 
 pub type DecisionUncertainReason = "applicability" | "route_probability" | "route_margin"
 
-pub type DecisionNonMatch = {kind: "invalid_input", error: SchemaContractFailure} \
+pub type DecisionNonMatch = {kind: "no_routes"} \
+  | {kind: "invalid_input", error: SchemaContractFailure} \
   | {kind: "evaluation_failed", evaluation: EvaluationOutcome} \
   | {kind: "unmatched", evidence: DecisionEvidence} \
   | {kind: "uncertain", reason: DecisionUncertainReason, evidence: DecisionEvidence}

@@ -953,6 +953,9 @@ pub struct AcpSessionCancelToolCallParams {
     pub session_id: String,
     #[serde(rename = "toolCallId")]
     pub tool_call_id: String,
+    /// A command returned by the tool call that continues running afterward.
+    #[serde(rename = "handleId", default, skip_serializing_if = "Option::is_none")]
+    pub handle_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(
@@ -968,6 +971,7 @@ impl AcpSessionCancelToolCallParams {
         Self {
             session_id: session_id.into(),
             tool_call_id: tool_call_id.into(),
+            handle_id: None,
             reason: None,
             inject_reminder: None,
         }

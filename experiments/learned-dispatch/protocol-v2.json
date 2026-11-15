@@ -1,0 +1,38 @@
+{
+  "contract": "harn.learned_dispatch_study.v2",
+  "predecessor": "results-v1.json",
+  "purpose": "Qualify the combined assessment, argument binding, enforced read-only preflight, and committed mutation path after the failed assessment-based study. Preserve the predecessor's rows and verdict.",
+  "population": "The same small Python HTTP application and standard single-resource scaffolding contract as v1. Exactly one new lowercase resource identifier and three distinct non-reserved field identifiers with string, integer, and boolean types. No test-command execution, extra operations, persistence, authorization, or existing-resource edits.",
+  "candidate": {
+    "change": "Extract the reviewed executable's existing input and project checks into one preparation function shared by a read-only preflight tool and the mutating tool. Recheck preparation before writing. Enforce the declared read-only policy at the canonical native and served MCP handler boundary.",
+    "selector": "Keep the v1 revision-2 instructions, evaluator, binder options, and 0.8 confidence threshold. Do not tune prompts or thresholds against this study.",
+    "provenance": "A reviewed engineering repair of the original model-authored candidate. Do not present the repaired source as a new autonomous curator output."
+  },
+  "development": {
+    "corpus": "corpus.json development split",
+    "repetitions": 1,
+    "allowed_changes": "Repair deterministic execution, contract, collection, or grading bugs. Any material candidate change after the held-out freeze requires a separately versioned study and fresh cases."
+  },
+  "qualification": {
+    "corpus": "corpus-v2.json qualification split",
+    "positive_cases": 60,
+    "negative_cases": 30,
+    "repetitions": 1,
+    "thresholds": [0.8],
+    "target_error": 0.1,
+    "delta": 0.05,
+    "freeze": "Freeze executables, external pipeline, candidate, schemas, configuration, project, grader, collector, launcher, protocol, and all cases before any qualification inference. Record content hashes. Preserve every attempted run and collection failure.",
+    "acceptance": "Only an explicit runtime committed disposition counts as acceptance. It must match the assessed capability and decision receipt. Explicit abstained dispositions with a reason and no mutator commitment count as fallbacks. Missing, duplicate, or contradictory dispositions are unmeasured collection failures and prevent certification.",
+    "errors": "Every committed incompatible request, missing execution result, denied or failed mutator, failed postcondition, or independent behavior-grade failure counts as an accepted error. Never credit ordinary fallback work as learned execution.",
+    "owner": "Construct each trial with std/agent/learned.learned_trial from typed observations; certify with the existing learned_qualify owner. Do not implement risk or acceptance policy in the collector.",
+    "report": "Report raw assessment selection and incompatibility counts, binding/preflight fallback reasons, commitment coverage, committed execution failures, settled provider cost, end-to-end latency, and the owner's risk verdict. Certification is conditional on commitment, not a claim that the selector is perfect."
+  },
+  "execution": {
+    "max_concurrent": 4,
+    "max_provider_spend_usd_session": 4.0,
+    "workspace": "One fresh isolated application copy per trial. Source workspace remains unchanged.",
+    "grader": "Reuse the calibrated v1 grader on the application's actual dispatch path for supported committed outputs. Wrongly committed negatives are errors regardless of their output. Preserve the application's originals and require exactly the intended source additions.",
+    "controls": ["read-only handler attempts a write and is refused", "ordinary write handler succeeds through the same boundary", "MCP policy survives catalog projection", "missing and failed qualification cause no decision inference", "approval stop and steer retire parked calls", "changed execution identity after approval refuses execution", "ordinary qualified execution records the admitted qualification digest"]
+  },
+  "interpretation": "A bounded synthetic prototype study. The prespecified corpus is not a random sample of deployment traffic; repeated templates and related cases limit independence. No production accuracy, general reliability, or automatic self-improvement claim. A failure remains a failure."
+}

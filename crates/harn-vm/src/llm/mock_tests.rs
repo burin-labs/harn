@@ -37,6 +37,53 @@ fn text_mock(text: &str) -> LlmMock {
 }
 
 #[test]
+fn mock_errors_retain_zero_and_simulated_billing_without_pricing_live_errors() {
+    use crate::llm::usage::{LlmUsage, ProviderUsageReceipt};
+    use crate::value::ErrorCategory;
+    for provider_envelope in [false, true] {
+        for simulated_cost in [None, Some(0.25)] {
+            let mut fixture = text_mock("");
+            fixture.simulated_cost_usd = simulated_cost;
+            fixture.input_tokens = Some(7);
+            fixture.output_tokens = Some(3);
+            let error = MockError {
+                category: ErrorCategory::RateLimit,
+                message: "429 transient".to_string(),
+                status: provider_envelope.then_some(429),
+                kind: None,
+                reason: None,
+                retry_after_ms: Some(2500),
+            };
+            let actual = mock_error_to_vm_error(&error, &fixture);
+            let VmError::Thrown(VmValue::Dict(fields)) = &actual else {
+                panic!("mock error must retain its typed envelope");
+            };
+            assert_eq!(
+                fields.get("retry_after_ms").and_then(VmValue::as_int),
+                Some(2500)
+            );
+            assert_eq!(
+                crate::value::error_to_category(&actual),
+                ErrorCategory::RateLimit
+            );
+            let receipt = ProviderUsageReceipt::from_error(&actual)
+                .expect("the consumed mock owns its billing receipt");
+            let usage = LlmUsage::from_provider_receipt("mock", "fixture-model", &receipt);
+            assert_eq!(usage.cost_usd, Some(simulated_cost.unwrap_or(0.0)));
+            assert_eq!(usage.input_tokens, 7);
+            assert_eq!(usage.output_tokens, 3);
+            assert_eq!(usage.unpriced_calls, 0);
+            assert_eq!(usage.usage_unknown_calls, 0);
+        }
+    }
+    let unmeasured = VmError::CategorizedError {
+        message: "429 transient".to_string(),
+        category: ErrorCategory::RateLimit,
+    };
+    assert!(ProviderUsageReceipt::from_error(&unmeasured).is_none());
+}
+
+#[test]
 fn build_mock_result_surfaces_fixture_tool_calls() {
     // The CLI-mock fixture shape a downstream native-tool test uses.
     let mock = crate::llm::jsonl::parse_llm_mock_value(&serde_json::json!({

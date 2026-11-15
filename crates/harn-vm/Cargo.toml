@@ -229,6 +229,9 @@ wait-timeout = "0.2"
 arcstr = { version = "1", features = ["serde", "std"] }
 similar = "3"
 
+[target.'cfg(not(target_vendor = "apple"))'.dependencies]
+buildid = "=1.1.0"
+
 [target.'cfg(windows)'.dependencies]
 windows-native-keyring-store = { version = "1.1", optional = true }
 windows-sys = { version = "0.61.2", features = [

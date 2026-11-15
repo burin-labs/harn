@@ -9,12 +9,22 @@ import {
 pub import {
   CiAction,
   CiJob,
+  CiMatrixRow,
   CiReleaseRunnerPolicy,
   CiStep,
   CiWorkflow,
   ci_text,
+  concurrency_cancel,
+  job_continue_on_error,
   job_needs,
+  job_runner,
+  job_timeout,
   matrix_include_rows,
+  step_continue_on_error,
+  step_timeout,
+  strategy_fail_fast,
+  strategy_max_parallel,
+  trigger_ignored_paths,
   workflow_events,
   workflow_inputs,
 } from "./workflow_model.harn"
@@ -746,12 +756,13 @@ pub fn supported_release_path_pattern(pattern: string) -> bool {
 }
 
 /** Parse the one path policy consumed by the release workflow. */
-pub fn release_warm_cache_path_policy_parse(value: any) -> ReleaseWarmCachePathPolicy? {
+pub fn release_warm_cache_path_policy_parse(value: unknown) -> ReleaseWarmCachePathPolicy? {
   const report = schema_validator(release_warm_cache_path_policy_schema()).report(value)
   if !report.ok {
     return nil
   }
-  const paths = report.value.release_build_inputs.map({ path -> trim(path) }).to_list()
+  const decoded = schema_expect(report.value, schema_of(ReleaseWarmCachePathPolicy))
+  const paths = decoded.release_build_inputs.map({ path -> trim(path) }).to_list()
   if len(paths) == 0
     || len(paths) != len(paths.unique())
     || paths.any({ path -> path.starts_with("/") || path.contains("..") || path.ends_with("/") })
@@ -906,7 +917,7 @@ pub fn release_warm_cache_concurrency_errors(workflow: CiWorkflow?) -> list<stri
     errors = errors
       + ["${RELEASE_BINARY_WORKFLOW} must give branch pushes run-qualified workflow lanes"]
   }
-  if trim(workflow?.concurrency?.["cancel-in-progress"] ?? "")
+  if trim(concurrency_cancel(workflow?.concurrency) ?? "")
     != RELEASE_WORKFLOW_CANCEL_POLICY {
     errors = errors
       + ["${RELEASE_BINARY_WORKFLOW} must reserve workflow cancellation for manual warms"]
@@ -928,7 +939,7 @@ pub fn release_warm_cache_concurrency_errors(workflow: CiWorkflow?) -> list<stri
         "${RELEASE_BINARY_WORKFLOW}:build must share one warm lane per target and qualify every other run",
       ]
   }
-  if trim(build_concurrency?.["cancel-in-progress"] ?? "") != RELEASE_BUILD_CANCEL_POLICY {
+  if trim(concurrency_cancel(build_concurrency) ?? "") != RELEASE_BUILD_CANCEL_POLICY {
     errors = errors
       + [
         "${RELEASE_BINARY_WORKFLOW}:build must let only real main-branch warms supersede a target warm",
@@ -946,7 +957,7 @@ pub fn release_aot_runner_errors(workflow: CiWorkflow?) -> list<string> {
         "${RELEASE_BINARY_WORKFLOW}:setup must project the policy-selected CLI AOT standard runner",
       ]
   }
-  const runner = trim(workflow?.jobs?.prepare_cli_aot?.["runs-on"] ?? "")
+  const runner = trim(to_string(job_runner(workflow?.jobs?.prepare_cli_aot) ?? ""))
   if runner != "$" + "{{ ${RELEASE_AOT_STANDARD_OUTPUT} }}" {
     errors = errors
       + [
@@ -966,61 +977,17 @@ pub fn release_warm_cache_prune_errors(workflow: CiWorkflow?) -> list<string> {
   return []
 }
 
-pub fn policy_from_validated(value: dict) -> CiCachePolicy {
-  const warm = value.windows_workspace_warm
-  const macos_warm = value.macos_workspace_warm
-  return {
-    schema_version: 7,
-    rust_cache_action: "./.github/actions/rust-cache",
-    node_cache_action: "./.github/actions/node-cache",
-    persistent_ref: "refs/heads/main",
-    storage_limit_bytes: value.storage_limit_bytes,
-    remote_sccache: false,
-    nextest_version: value.nextest_version,
-    windows_workspace_warm: {
-      artifact_name: warm.artifact_name,
-      manifest_schema: warm.manifest_schema,
-      workflow: warm.workflow,
-      job: warm.job,
-      retention_days: warm.retention_days,
-      max_bytes: warm.max_bytes,
-      build_headroom_bytes: warm.build_headroom_bytes,
-      dev_drive_size_default: warm.dev_drive_size_default,
-      dev_drive_size_full_workspace: warm.dev_drive_size_full_workspace,
-    },
-    macos_workspace_warm: {
-      artifact_name: macos_warm.artifact_name,
-      manifest_schema: macos_warm.manifest_schema,
-      workflow: macos_warm.workflow,
-      job: macos_warm.job,
-      retention_days: macos_warm.retention_days,
-      max_bytes: macos_warm.max_bytes,
-      build_headroom_bytes: macos_warm.build_headroom_bytes,
-    },
-    writers: value.writers.map(
-      { writer ->
-        return {workflow: writer.workflow, job: writer.job, shared_key: writer.shared_key}
-      },
-    )
-      .to_list(),
-    harn_check_cache_writers: value.harn_check_cache_writers.map(
-      { writer -> return {workflow: writer.workflow, job: writer.job, family: writer.family} },
-    )
-      .to_list(),
-  }
-}
-
 pub fn writer_key(workflow: string, job: string, shared_key: string) -> string {
   return workflow + ":" + job + ":" + shared_key
 }
 
 /** Validate the closed cache-policy document at its owning boundary. */
-pub fn ci_cache_policy_parse(value: any) -> CiCachePolicy? {
+pub fn ci_cache_policy_parse(value: unknown) -> CiCachePolicy? {
   const report = schema_validator(policy_schema()).report(value)
   if !report.ok {
     return nil
   }
-  const policy = policy_from_validated(report.value)
+  const policy = schema_expect(report.value, schema_of(CiCachePolicy))
   const writer_keys = policy.writers.map(
     { writer -> writer_key(writer.workflow, writer.job, writer.shared_key) },
   )
@@ -1158,7 +1125,7 @@ fn workspace_cache_generation_errors(action: CiAction?, steps: list<CiStep>) -> 
       errors = errors
         + ["${ACTION_PATH} broad fallback must restore by prefix without becoming a writer"]
     }
-    if !(broad_restore[0]?.["continue-on-error"] ?? false) {
+    if !(step_continue_on_error(broad_restore[0]) ?? false) {
       errors = errors + ["${ACTION_PATH} broad fallback must keep cache-service failures non-fatal"]
     }
     const restore_paths = trim(broad_restore[0]?.with?.path ?? "")
@@ -1286,7 +1253,7 @@ pub fn cache_action_errors(policy: CiCachePolicy, action: CiAction?) -> list<str
     errors = errors
       + ["${ACTION_PATH} must hard-gate saves on explicit authorization and refs/heads/main"]
   }
-  if !(step?.["continue-on-error"] ?? false) {
+  if !(step_continue_on_error(step) ?? false) {
     errors = errors + ["${ACTION_PATH} must keep cache-service failures non-fatal"]
   }
   const prune_input = action?.inputs?.[CACHE_PRUNE_INPUT]
@@ -1308,7 +1275,7 @@ pub fn cache_action_errors(policy: CiCachePolicy, action: CiAction?) -> list<str
           "${ACTION_PATH} release-generation pruning must require explicit main-branch save authorization",
         ]
     }
-    if pruners[0]?.["continue-on-error"] ?? false {
+    if step_continue_on_error(pruners[0]) ?? false {
       errors = errors
         + ["${ACTION_PATH} release-generation pruning must fail before the cache writer runs"]
     }
@@ -1356,8 +1323,8 @@ pub fn node_cache_action_errors(action: CiAction?) -> list<string> {
   if !contains(save_if, "github.ref == 'refs/heads/main'") {
     errors = errors + ["${NODE_ACTION_PATH} must hard-gate npm cache saves on refs/heads/main"]
   }
-  if !(restores[0]?.["continue-on-error"] ?? false)
-    || !(caches[0]?.["continue-on-error"] ?? false) {
+  if !(step_continue_on_error(restores[0]) ?? false)
+    || !(step_continue_on_error(caches[0]) ?? false) {
     errors = errors + ["${NODE_ACTION_PATH} must keep cache-service failures non-fatal"]
   }
   return errors
@@ -1403,8 +1370,8 @@ pub fn setup_harn_cache_action_errors(action: CiAction?) -> list<string> {
         "${SETUP_HARN_ACTION_PATH} restore-only consumers and default-branch writer must share one versioned path and key",
       ]
   }
-  if !(restores[0]?.["continue-on-error"] ?? false)
-    || !(caches[0]?.["continue-on-error"] ?? false) {
+  if !(step_continue_on_error(restores[0]) ?? false)
+    || !(step_continue_on_error(caches[0]) ?? false) {
     errors = errors
       + ["${SETUP_HARN_ACTION_PATH} must keep cache-service failures non-fatal"]
   }
@@ -1454,7 +1421,7 @@ pub fn cache_budget_reporter_errors(workflows: dict<string, CiWorkflow>) -> list
       ]
   }
   const tolerant_reporters = reporters.filter(
-    { step -> (step["continue-on-error"] ?? false) != false },
+    { step -> (step_continue_on_error(step) ?? false) != false },
   )
     .to_list()
   if len(tolerant_reporters) > 0 {
@@ -1571,7 +1538,7 @@ pub fn cli_cold_start_budget_errors(workflows: dict<string, CiWorkflow>) -> list
     errors = errors
       + ["${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} must skip release manual refs"]
   }
-  if job["timeout-minutes"] != CLI_COLD_START_JOB_TIMEOUT_MINUTES {
+  if job_timeout(job) != CLI_COLD_START_JOB_TIMEOUT_MINUTES {
     errors = errors
       + [
         "${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} must cap total runtime at ${CLI_COLD_START_JOB_TIMEOUT_MINUTES} minutes",
@@ -1583,7 +1550,7 @@ pub fn cli_cold_start_budget_errors(workflows: dict<string, CiWorkflow>) -> list
       + [
         "${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} must build the release harn binary explicitly",
       ]
-  } else if build_step["timeout-minutes"] != CLI_COLD_START_BUILD_TIMEOUT_MINUTES {
+  } else if step_timeout(build_step) != CLI_COLD_START_BUILD_TIMEOUT_MINUTES {
     errors = errors
       + [
         "${CLI_COLD_START_WORKFLOW}:${CLI_COLD_START_JOB} release build step must cap runtime at ${CLI_COLD_START_BUILD_TIMEOUT_MINUTES} minutes",
@@ -1609,7 +1576,7 @@ fn rust_cache_environment(
   workflow: CiWorkflow?,
   job: CiJob?,
   step: CiStep?,
-  matrix: dict = {},
+  matrix: CiMatrixRow = {},
 ) -> dict<string, string> {
   const declared = {...workflow?.env ?? {}, ...job?.env ?? {}, ...step?.env ?? {}}
   let environment: dict<string, string> = {}
@@ -1942,7 +1909,7 @@ fn per_commit_concurrency_errors(
         "${name} concurrency.group must give each main push its own key while preserving the other event keys",
       ]
   }
-  if trim(workflow?.concurrency?.["cancel-in-progress"] ?? "") != cancel {
+  if trim(concurrency_cancel(workflow?.concurrency) ?? "") != cancel {
     errors = errors
       + [
         "${name} must cancel superseded pull-request runs only; nothing may supersede a main push, so every head sha keeps an executed result",
@@ -2052,7 +2019,7 @@ fn runner_selector_labels(workflow: CiWorkflow?, job: CiJob?, selector: unknown)
 
 /** Every Linux runner label a job can resolve to from its `runs-on`. */
 fn job_runner_labels(workflow: CiWorkflow?, job: CiJob?) -> list<string> {
-  return runner_selector_labels(workflow, job, job?.["runs-on"])
+  return runner_selector_labels(workflow, job, job_runner(job))
 }
 
 /** `workflow_call` inputs that select a runner anywhere in the reusable workflow. */
@@ -2060,7 +2027,7 @@ fn workflow_call_runner_inputs(workflow: CiWorkflow?) -> list<string> {
   let names: list<string> = []
   for name in workflow_inputs(workflow, "workflow_call").keys() {
     for job in (workflow?.jobs ?? {}).values() {
-      if runner_selector_expressions(workflow, job, job?.["runs-on"]).any(
+      if runner_selector_expressions(workflow, job, job_runner(job)).any(
         { text -> contains(text, "inputs.${name}") },
       ) {
         names = names + [name]
@@ -2302,11 +2269,11 @@ pub fn minimal_pr_capacity_errors(ci: CiWorkflow?, publish: CiWorkflow?) -> list
   // The Clippy and Harn proof lanes used to switch to Blacksmith Linux, which
   // cannot confine a Harn child; they run on the shared hosted runner.
   for name in [SECURITY_READY_JOB, "rust-checks", "harn-audit"] {
-    if trim(jobs[name]?.["runs-on"] ?? "") != HOSTED_LINUX_RUNNER {
+    if trim(to_string(job_runner(jobs[name]) ?? "")) != HOSTED_LINUX_RUNNER {
       errors = errors + ["ci.yml:${name} must use GitHub-hosted ${HOSTED_LINUX_RUNNER}"]
     }
   }
-  if trim(jobs["rust-check-inputs"]?.["runs-on"] ?? "")
+  if trim(to_string(job_runner(jobs["rust-check-inputs"]) ?? ""))
     != producer_runner_expression() {
     errors = errors
       + ["ci.yml:rust-check-inputs must use standard hosted ${PRODUCER_HOSTED_LINUX_RUNNER}"]
@@ -2410,7 +2377,7 @@ pub fn minimal_pr_capacity_errors(ci: CiWorkflow?, publish: CiWorkflow?) -> list
 
 /** Keep namespace proof on an isolated runner with its own scoped grant. */
 pub fn e2e_hosted_runner_errors(e2e: CiWorkflow?) -> list<string> {
-  if e2e?.jobs?.e2e?.["runs-on"] != E2E_HOSTED_RUNNER {
+  if job_runner(e2e?.jobs?.e2e) != E2E_HOSTED_RUNNER {
     return ["e2e.yml:e2e must run on ${E2E_HOSTED_RUNNER} for namespace confinement"]
   }
   return []
@@ -2546,7 +2513,7 @@ fn consumer_dispatch_custody_errors(
 ) -> list<string> {
   let errors: list<string> = []
   if workflow?.concurrency?.group != CONSUMER_CANARY_GROUP
-    || workflow?.concurrency?.["cancel-in-progress"] != CONSUMER_CANARY_CANCEL {
+    || concurrency_cancel(workflow?.concurrency) != CONSUMER_CANARY_CANCEL {
     errors = errors + ["only an unpinned scheduled canary may supersede its prior observer"]
   }
   if !custody_before_dispatch || job?.permissions?.actions != "read"

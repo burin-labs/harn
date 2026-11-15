@@ -405,6 +405,10 @@ struct WaiterContext {
     progress_max_inline_bytes: usize,
     snapshot_binding: Option<harn_vm::value::DictMap>,
     output_feed: Arc<OutputFeed>,
+    private_filter: harn_vm::session_inputs::OutputFilter,
+    /// The command grant's private directory, kept until the waiter has
+    /// reaped the child and returns.
+    granted: Option<harn_vm::stdlib::process::GrantedSpawn>,
 }
 
 struct ProgressThreadContext {
@@ -479,9 +483,20 @@ pub(crate) fn spawn_long_running_with_options(
     let effective_cwd = proc::resolve_effective_cwd(builtin, cwd.as_deref())?;
     let sandbox_reporting = harn_vm::process_sandbox::ProcessSandboxReportingContext::current();
     let sandbox_report = sandbox_reporting.report();
+    // Registered before the grant resolves, so the granted value is filtered
+    // from this command's output.
+    let private_filter = harn_vm::session_inputs::OutputFilter::capture_for_spawn();
+    let granted = proc::command_grant(
+        builtin,
+        &program,
+        &args,
+        &effective_cwd,
+        &env,
+        options.env_mode,
+    )?;
     let mut env = env;
     proc::apply_toolchain_path(Some(&effective_cwd), &mut env, options.env_mode);
-    let spec = SpawnSpec {
+    let mut spec = SpawnSpec {
         builtin,
         program: program.clone(),
         args: args.clone(),
@@ -494,9 +509,14 @@ pub(crate) fn spawn_long_running_with_options(
         owner_death: OwnerDeathPolicy::KillContainment,
         output_capture: process_handle::OutputCapture::Pipe,
     };
+    if let Some(granted) = &granted {
+        proc::apply_command_grant(granted, &mut spec);
+    }
+    let launching = granted.as_ref().map(|granted| granted.launching());
     let handle = process_handle::spawn_process(spec).map_err(|error| {
         proc::process_error_to_hostlib(builtin, requested_cwd.as_deref(), &effective_cwd, error)
     })?;
+    drop(launching);
 
     let pid = handle.pid().unwrap_or(0);
     let process_group_id = handle.process_group_id();
@@ -565,6 +585,8 @@ pub(crate) fn spawn_long_running_with_options(
         progress_max_inline_bytes: options.progress_max_inline_bytes,
         snapshot_binding: options.snapshot_binding.clone(),
         output_feed,
+        private_filter,
+        granted,
     };
     let waiter_thread_name = waiter_context.handle_id.clone();
     let capture = options.capture;
@@ -620,7 +642,11 @@ pub(crate) fn spawn_long_running_with_options(
 }
 
 /// Background thread that waits for a child process and fires feedback.
-fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture: CaptureConfig) {
+fn waiter_thread(
+    mut context: WaiterContext,
+    cancel_state: Arc<CancelState>,
+    capture: CaptureConfig,
+) {
     let waiter_start = std::time::Instant::now();
 
     // Take the handle out of the store. If the entry is already gone (i.e.
@@ -652,6 +678,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     let stdout_thread = handle.take_stdout().map(|out| {
         spawn_output_drain(
             out,
+            context.private_filter.stream(),
             context.output_feed.clone(),
             planned.stdout_path.clone(),
             combined_file.clone(),
@@ -661,6 +688,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     let stderr_thread = handle.take_stderr().map(|err| {
         spawn_output_drain(
             err,
+            context.private_filter.stream(),
             context.output_feed.clone(),
             planned.stderr_path.clone(),
             combined_file.clone(),
@@ -740,11 +768,20 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         // No observed exit is neither a successful run nor proof of a signal.
         None => (-1, None),
     };
+    let process_succeeded = !cancelled && waited.is_ok() && exit_code == 0 && signal_name.is_none();
+    let grant_error = context
+        .granted
+        .take()
+        .and_then(|granted| granted.complete(process_succeeded).err());
+    if let Some(error) = &grant_error {
+        stderr
+            .extend_from_slice(format!("\nharn: command completion refused: {error}\n").as_bytes());
+    }
     let command_status = if timed_out {
         CommandStatus::TimedOut
     } else if cancelled {
         CommandStatus::Killed
-    } else if waited.is_err() {
+    } else if waited.is_err() || grant_error.is_some() {
         CommandStatus::Blocked
     } else {
         CommandStatus::Completed
@@ -826,7 +863,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         },
     );
     payload.insert("timed_out".into(), serde_json::Value::Bool(timed_out));
-    if !cancelled && waited.is_ok() {
+    if !cancelled && waited.is_ok() && grant_error.is_none() {
         if let Some(receipt) = handle.verifier_execution_receipt() {
             payload.insert(
                 "verifier_receipt".into(),
@@ -939,8 +976,12 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     }
 }
 
+/// Drain one output pipe. Bytes are redacted here, before the progress
+/// snapshots, the output waits and their matcher, the final result, and the
+/// artifact files the agent is pointed at can read them.
 fn spawn_output_drain(
     mut reader: Box<dyn Read + Send>,
+    mut redactor: harn_vm::session_inputs::StreamRedactor,
     output_feed: Arc<OutputFeed>,
     path: std::path::PathBuf,
     combined_file: Option<Arc<Mutex<std::fs::File>>>,
@@ -948,14 +989,7 @@ fn spawn_output_drain(
 ) -> std::thread::JoinHandle<()> {
     harn_parser::runtime_stack::spawn(move || {
         let mut file = std::fs::File::create(path).ok();
-        let mut buf = [0_u8; 8192];
-        loop {
-            let read = match reader.read(&mut buf) {
-                Ok(0) => break,
-                Ok(read) => read,
-                Err(_) => break,
-            };
-            let chunk = &buf[..read];
+        let mut deliver = |chunk: &[u8]| {
             if let Some(file) = file.as_mut() {
                 let _ = file.write_all(chunk);
             }
@@ -974,6 +1008,19 @@ fn spawn_output_drain(
                 state.last_output_at = Some(std::time::Instant::now());
             }
             output_feed.notify.notify_waiters();
+        };
+        let mut buf = [0_u8; 8192];
+        loop {
+            let read = match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(read) => read,
+                Err(_) => break,
+            };
+            deliver(&redactor.push(&buf[..read]));
+        }
+        let rest = redactor.finish();
+        if !rest.is_empty() {
+            deliver(&rest);
         }
     })
 }
@@ -1077,12 +1124,14 @@ fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHan
     })
 }
 
+#[derive(Default)]
 pub(crate) struct CancelOptions {
     pub(crate) timed_out: bool,
     pub(crate) wait_result: Option<Duration>,
 }
 
 pub(crate) struct CancelOutcome {
+    pub(crate) found: bool,
     pub(crate) cancelled: bool,
     pub(crate) result: Option<VmValue>,
 }
@@ -1091,14 +1140,21 @@ pub(crate) struct CancelOutcome {
 /// the waiter drain output/artifacts. Returns `true` if the handle was found
 /// and cancellation was newly requested.
 pub fn cancel_handle(handle_id: &str) -> bool {
-    cancel_handle_with_options(
-        handle_id,
-        CancelOptions {
-            timed_out: false,
-            wait_result: None,
-        },
-    )
-    .cancelled
+    cancel_handle_with_options(handle_id, CancelOptions::default()).cancelled
+}
+
+/// Request cancellation only when this session owns the running command.
+pub fn cancel_session_handle(
+    session_id: &str,
+    handle_id: &str,
+) -> harn_vm::tool_call_cancellations::CancelStatus {
+    use harn_vm::tool_call_cancellations::CancelStatus;
+    let outcome = cancel_handle_scoped(handle_id, CancelOptions::default(), Some(session_id));
+    match (outcome.found, outcome.cancelled) {
+        (false, _) => CancelStatus::NotFound,
+        (_, false) => CancelStatus::AlreadyCancelled,
+        (_, true) => CancelStatus::Cancelled,
+    }
 }
 
 pub(crate) fn snapshot_binding_for_handle(handle_id: &str) -> Option<harn_vm::value::DictMap> {
@@ -1130,16 +1186,37 @@ pub(crate) fn output_context_for_handle(handle_id: &str) -> Option<(Arc<OutputFe
 }
 
 pub(crate) fn cancel_handle_with_options(handle_id: &str, options: CancelOptions) -> CancelOutcome {
+    cancel_handle_scoped(handle_id, options, None)
+}
+
+fn cancel_handle_scoped(
+    handle_id: &str,
+    options: CancelOptions,
+    session_id: Option<&str>,
+) -> CancelOutcome {
     let (killer, cancel_state, result_rx) = {
         let mut store = HANDLE_STORE
             .lock()
             .expect("long-running handle store poisoned");
+        if session_id.is_some_and(|session| {
+            store
+                .entries
+                .get(handle_id)
+                .is_none_or(|entry| entry.session_id != session)
+        }) {
+            return CancelOutcome {
+                found: false,
+                cancelled: false,
+                result: None,
+            };
+        }
         let Some((killer, cancel_state)) = store
             .entries
             .get(handle_id)
             .map(|entry| (entry.killer.clone(), entry.cancel_state.clone()))
         else {
             return CancelOutcome {
+                found: false,
                 cancelled: false,
                 result: store.terminal_result(handle_id),
             };
@@ -1159,6 +1236,7 @@ pub(crate) fn cancel_handle_with_options(handle_id: &str, options: CancelOptions
     let cancellation = cancel_state.begin_cancellation(options.timed_out);
     let Some(mut cancellation) = cancellation else {
         return CancelOutcome {
+            found: true,
             cancelled: false,
             result: match (options.wait_result, result_rx) {
                 (Some(timeout), Some(rx)) => rx.recv_timeout(timeout).ok(),
@@ -1173,6 +1251,7 @@ pub(crate) fn cancel_handle_with_options(handle_id: &str, options: CancelOptions
         _ => None,
     };
     CancelOutcome {
+        found: true,
         cancelled: true,
         result,
     }

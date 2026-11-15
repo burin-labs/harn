@@ -1,0 +1,51 @@
+{
+  "contract": "harn.learned_dispatch_study.v4",
+  "predecessors": [
+    "results-v1.json",
+    "results-v2.json",
+    "results-v3.json"
+  ],
+  "development_evidence": "binding-screen-results.json",
+  "purpose": "Qualify explicit enforced preflight declarations after separating legacy annotation provenance from declared execution policy. Preserve the earlier failed studies and artifact-scoped v3 admission.",
+  "population": "The same small Python HTTP application and standard single-resource generator. One new lowercase resource identifier and three distinct non-reserved field identifiers with string, integer, and boolean roles. Excludes persistence, authorization, extra operations, existing-resource edits, and test-command execution.",
+  "candidate": {
+    "change": "Only the preflight declaration gains an explicit execution_policy. Catalog provenance distinguishes declared policies from legacy annotation classifications, including across MCP. Legacy classifications cannot qualify a preflight.",
+    "unchanged": "Revision-2 semantic binding question, evaluator and binder routes and effort, 0.9 threshold, deterministic generator output rules, preflight preparation logic, authored tests, and independent grader."
+  },
+  "development": {
+    "source": "Earlier observations and explicit correct/mismatched binding controls; never include them in the new qualification report.",
+    "execution_smoke": "Run the source-pinned native consumer before qualification. Prove both native judgments fired, the ordinary tool path reached preflight and mutation, and independent request checks passed. Prove an advisory legacy classification cannot qualify a preflight and an explicit read-only declaration blocks writes on ordinary local dispatch."
+  },
+  "qualification": {
+    "corpus": "corpus-v4.json",
+    "positive_cases": 120,
+    "negative_cases": 30,
+    "repetitions": 1,
+    "thresholds": [
+      0.9
+    ],
+    "target_error": 0.1,
+    "delta": 0.05,
+    "freeze": "Freeze executable hashes, pipeline files, candidate, project, configuration, grader, launcher, collector, protocol, and every case before the first qualification inference. Material algorithm, instruction, threshold, or grader changes require a new study and fresh cases. Include actual final CLI and native consumer artifact identities and all external pipeline files. No qualification calls precede that freeze.",
+    "acceptance": "Require one explicit committed or abstained runtime disposition. A commitment must link the assessed capability, original applicability receipt, and the separate answered binding judgment. Convert observations to trials through learned_trial. Missing or contradictory evidence blocks the report.",
+    "errors": "Every committed incompatible request, wrong bound value, wrong output, failed or missing execution, or failed independent grade is an accepted error. Preserve failures and never credit ordinary fallback work as learned execution.",
+    "owner": "Use learned_qualify and learned_qualification_issue. The runner transports evidence and reports its census; it does not implement risk policy.",
+    "report": "Report raw assessment selections, binding refusals, preflight refusals, commitment coverage, accepted errors, independent request checks, settled cost, latency, and ordinary fallback completion separately. An incomplete census cannot produce qualification."
+  },
+  "execution": {
+    "max_concurrent": 6,
+    "max_provider_spend_usd_session": 4.0,
+    "qualification_runner_budget_usd": 1.0,
+    "workspace": "Fresh isolated workspace and unique trial identifier for every observation.",
+    "recovery": "Wait for outstanding budget reservations to settle before refusing new work. Previously unstarted cases may resume with a recorded infrastructure-recovery receipt; never replace an observed result or omit a failing case.",
+    "controls": [
+      "native binding mismatch and uncertainty prevent preflight",
+      "binding applies the admitted threshold when it exceeds the base policy",
+      "an applicability receipt cannot substitute for a binding receipt",
+      "read-only native and MCP write attempts are refused with successful write controls",
+      "ordinary execution references its admitted qualification",
+      "approval, stop, steer, and post-approval contract changes keep their existing owner"
+    ]
+  },
+  "interpretation": "A bounded synthetic study with related templates, novel compatible resource/field identifiers and repeated incompatible task classes. Not an IID deployment sample or production reliability guarantee."
+}

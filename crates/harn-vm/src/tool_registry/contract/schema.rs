@@ -43,26 +43,39 @@ pub(super) fn try_visit_schema_nodes<E>(
     schema: &JsonValue,
     visitor: &mut impl FnMut(&serde_json::Map<String, JsonValue>) -> Result<(), E>,
 ) -> Result<(), E> {
+    try_visit_schema_nodes_with_context(schema, (), &mut |schema, ()| {
+        if let Some(object) = schema.as_object() {
+            visitor(object)?;
+        }
+        Ok(())
+    })
+}
+
+pub(crate) fn try_visit_schema_nodes_with_context<C: Clone, E>(
+    schema: &JsonValue,
+    context: C,
+    visitor: &mut impl FnMut(&JsonValue, C) -> Result<C, E>,
+) -> Result<(), E> {
+    let context = visitor(schema, context)?;
     let Some(object) = schema.as_object() else {
         return Ok(());
     };
-    visitor(object)?;
     for keyword in SINGLE_SUBSCHEMA_KEYWORDS {
         if let Some(child) = object.get(*keyword) {
-            try_visit_schema_nodes(child, visitor)?;
+            try_visit_schema_nodes_with_context(child, context.clone(), visitor)?;
         }
     }
     for keyword in ARRAY_SUBSCHEMA_KEYWORDS {
         if let Some(children) = object.get(*keyword).and_then(JsonValue::as_array) {
             for child in children {
-                try_visit_schema_nodes(child, visitor)?;
+                try_visit_schema_nodes_with_context(child, context.clone(), visitor)?;
             }
         }
     }
     for keyword in MAP_SUBSCHEMA_KEYWORDS {
         if let Some(children) = object.get(*keyword).and_then(JsonValue::as_object) {
             for child in children.values() {
-                try_visit_schema_nodes(child, visitor)?;
+                try_visit_schema_nodes_with_context(child, context.clone(), visitor)?;
             }
         }
     }

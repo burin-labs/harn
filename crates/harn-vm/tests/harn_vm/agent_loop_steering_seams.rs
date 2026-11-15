@@ -45,6 +45,9 @@ static SESSION_COUNTER: AtomicU64 = AtomicU64::new(0);
 #[path = "agent_loop_steering_stop.rs"]
 mod stop;
 
+#[path = "agent_loop_steering_completion.rs"]
+mod completion;
+
 /// Canonical session journals outlive a VM and may be shared by parallel test
 /// processes. Mint a process-local monotonic id for every pipeline invocation
 /// so repeated runs cannot rehydrate an earlier transcript without relying on

@@ -8,21 +8,38 @@ use serde_json::Value;
 use super::*;
 
 mod nominal;
+mod runtime;
 
-pub(crate) struct SchemaWireBuilder {
+#[cfg(test)]
+mod runtime_tests;
+
+pub(crate) use runtime::{wire_annotations, RuntimeJsonCodec};
+
+pub(crate) struct SchemaWireBuilder<'r> {
     types: BTreeMap<WireTypeId, Option<WireType>>,
     locations: BTreeMap<String, WireTypeId>,
     repeated: Vec<WireType>,
     object_refs: Vec<WireTypeId>,
+    runtime_registry: Option<jsonschema::Registry<'r>>,
+    runtime_json: BTreeMap<WireTypeId, RuntimeJsonCodec>,
 }
 
-impl SchemaWireBuilder {
+impl<'r> SchemaWireBuilder<'r> {
     pub(crate) fn new() -> Self {
         Self {
             types: BTreeMap::new(),
             locations: BTreeMap::new(),
             repeated: Vec::new(),
             object_refs: Vec::new(),
+            runtime_registry: None,
+            runtime_json: BTreeMap::new(),
+        }
+    }
+
+    pub(crate) fn runtime(registry: jsonschema::Registry<'r>) -> Self {
+        Self {
+            runtime_registry: Some(registry),
+            ..Self::new()
         }
     }
 
@@ -36,11 +53,15 @@ impl SchemaWireBuilder {
                 ));
             }
         }
-        let graph = PreparedWireGraph::prepare(
-            self.types
-                .into_values()
-                .map(|ty| ty.expect("successful lowering fills every reserved node")),
-        )?;
+        let types = self
+            .types
+            .into_values()
+            .map(|ty| ty.expect("successful lowering fills every reserved node"));
+        let graph = if self.runtime_registry.is_some() {
+            PreparedWireGraph::prepare_runtime(types, self.runtime_json)
+        } else {
+            PreparedWireGraph::prepare(types)
+        }?;
         for id in &self.object_refs {
             let ty = graph.unaliased(id)?;
             if !matches!(
@@ -49,6 +70,7 @@ impl SchemaWireBuilder {
                     | WireShape::Map { .. }
                     | WireShape::Enum { .. }
                     | WireShape::Bytes { .. }
+                    | WireShape::RuntimeJson
             ) {
                 return Err(super::graph::failure(ty, WireFailureCode::InvalidContract));
             }
@@ -57,6 +79,51 @@ impl SchemaWireBuilder {
     }
 
     pub(crate) fn lower(
+        &mut self,
+        schema: &Value,
+        resolver: Resolver<'_>,
+        location: &str,
+    ) -> Result<WireTypeId, WireFailure> {
+        match self.lower_closed(schema, resolver.clone(), location) {
+            Err(failure)
+                if self.runtime_registry.is_some()
+                    && failure.code == WireFailureCode::UnsupportedType
+                    && wire_annotations(schema, resolver.clone()).allows_opaque_json() =>
+            {
+                let id = failure
+                    .type_id
+                    .expect("schema failures carry their type ID");
+                let codec = RuntimeJsonCodec::compile(
+                    schema,
+                    self.runtime_registry
+                        .as_ref()
+                        .expect("runtime schema registry"),
+                    &resolver,
+                    location,
+                )
+                .map_err(|()| error(&id, location, WireFailureCode::InvalidContract))?;
+                self.runtime_json.insert(id.clone(), codec);
+                self.locations.insert(location.into(), id.clone());
+                self.types.insert(
+                    id.clone(),
+                    Some(WireType {
+                        id: id.clone(),
+                        name: None,
+                        source: failure.source,
+                        documentation: schema
+                            .get("description")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned),
+                        shape: WireShape::RuntimeJson,
+                    }),
+                );
+                Ok(id)
+            }
+            result => result,
+        }
+    }
+
+    fn lower_closed(
         &mut self,
         schema: &Value,
         resolver: Resolver<'_>,

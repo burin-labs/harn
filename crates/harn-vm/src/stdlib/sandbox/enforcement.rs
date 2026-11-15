@@ -18,6 +18,7 @@ use serde::Serialize;
 #[path = "ssh_agent.rs"]
 mod ssh_agent;
 pub(super) use ssh_agent::validate as validate_ssh_agent;
+pub use ssh_agent::validate as ssh_agent_grant_available;
 
 use crate::orchestration::{CapabilityPolicy, SandboxProfile};
 use crate::value::VmError;

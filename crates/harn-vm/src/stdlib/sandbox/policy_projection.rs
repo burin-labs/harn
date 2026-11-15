@@ -44,7 +44,8 @@ pub(crate) fn process_sandbox_policy_write_roots(policy: &CapabilityPolicy) -> V
 /// canonical: the workspace roots (with their git topology and runtime dir),
 /// the session temp dir, the policy's process write roots, the
 /// developer-toolchain caches, the Unix-socket roots and, on Linux, the host
-/// `/dev/shm` a direct Landlock launch falls back to granting.
+/// `/dev/shm` a direct Landlock launch falls back to granting. A granted Git
+/// clone's private transfer directory is included while its profile is built.
 ///
 /// Every root goes through [`super::normalize_for_policy`], the same
 /// normalization the backends render from: a root that does not exist yet
@@ -72,6 +73,8 @@ pub fn process_sandbox_writable_roots(policy: &CapabilityPolicy) -> Vec<PathBuf>
     ));
     #[cfg(target_os = "linux")]
     roots.extend(super::linux::shared_memory_fallback_root());
+    #[cfg(target_os = "macos")]
+    roots.extend(super::workspace_env::grant_spawn::own_spawn_write_roots());
     let mut roots: Vec<PathBuf> = roots
         .iter()
         .map(|root| super::normalize_for_policy(root))

@@ -1,5 +1,54 @@
 use crate::value::VmValue;
 
+/// Normalize a connected MCP descriptor into the agent dispatch catalog.
+pub(super) fn tag_mcp_tool(
+    mut tool: serde_json::Value,
+    server_name: &str,
+    eager_schemas: bool,
+) -> serde_json::Value {
+    if let Some(obj) = tool.as_object_mut() {
+        if let Some(mut metadata) = obj.get("_meta").cloned() {
+            if let Some(policy) = metadata
+                .get(crate::tool_registry::HARN_MCP_TOOL_CONTRACT_META_KEY)
+                .and_then(|contract| contract.get("policy"))
+                .and_then(|policy| {
+                    serde_json::from_value::<crate::tool_registry::ToolPolicy>(policy.clone()).ok()
+                })
+            {
+                obj.insert("execution_policy".into(), serde_json::json!(policy));
+            }
+            // Retain the original wire metadata, but do not re-author Harn's
+            // reserved adapter contract as application-owned catalog metadata.
+            if let Some(fields) = metadata.as_object_mut() {
+                fields.remove(crate::tool_registry::HARN_MCP_TOOL_CONTRACT_META_KEY);
+            }
+            obj.insert("meta".into(), metadata);
+        }
+        let original_name = obj
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string();
+        obj.insert(
+            "name".into(),
+            serde_json::json!(format!("{server_name}__{original_name}")),
+        );
+        for (key, value) in [
+            ("executor", "mcp_server"),
+            ("mcp_server", server_name),
+            ("_mcp_server", server_name),
+            ("_mcp_tool_name", original_name.as_str()),
+        ] {
+            obj.insert(key.into(), serde_json::json!(value));
+        }
+        // Keep a server's explicit disclosure setting; defer by default.
+        if !eager_schemas && !obj.contains_key("defer_loading") {
+            obj.insert("defer_loading".into(), serde_json::Value::Bool(true));
+        }
+    }
+    tool
+}
+
 pub(crate) fn entry_for<'a>(
     tools_val: Option<&'a VmValue>,
     tool_name: &str,
@@ -54,6 +103,46 @@ pub(super) fn descriptor_for(
 mod tests {
     use super::*;
     use crate::tool_annotations::ToolKind;
+
+    #[test]
+    fn mcp_execution_policy_round_trips_through_the_owned_contract() {
+        for policy in [
+            serde_json::json!({"kind": "read", "side_effect_level": "read_only", "source": "declared"}),
+            serde_json::json!({"kind": "read", "side_effect_level": "read_only", "source": "legacy_annotations"}),
+            serde_json::json!({"kind": "edit", "side_effect_level": "workspace_write", "source": "declared"}),
+        ] {
+            let mut catalog: crate::tool_registry::ToolCatalog =
+                serde_json::from_value(serde_json::json!({
+                    "schema_version": "harn-tools/2.0", "tools": [{
+                    "name": "check", "inputSchema": {"type": "object"}, "policy": policy,
+                    "governance": {"audiences": ["mcp"]},
+                    "cli": {"command": ["check"], "hidden": false}, "deferLoading": false
+                    }]
+                }))
+                .unwrap();
+            let entry = catalog.tools.remove(0);
+            let projected = crate::tool_registry::tool_catalog_entry_to_mcp(&entry);
+            let imported = tag_mcp_tool(projected, "server", false);
+            assert_eq!(imported["execution_policy"], policy);
+            assert_eq!(
+                imported["_meta"][crate::tool_registry::HARN_MCP_TOOL_CONTRACT_META_KEY]["policy"],
+                policy
+            );
+            assert_eq!(imported["name"], "server__check");
+            let registry = crate::json_to_vm_value(&serde_json::json!({"tools": [imported]}));
+            let normalized =
+                crate::tool_registry::tool_registry_catalog_for_tool(&registry, "server__check")
+                    .unwrap();
+            assert_eq!(normalized.tools[0].policy, entry.policy);
+            crate::tool_registry::PreparedToolCatalog::prepare(normalized).unwrap();
+        }
+        let advisory = tag_mcp_tool(
+            serde_json::json!({"name": "check", "annotations": {"readOnlyHint": true}}),
+            "server",
+            false,
+        );
+        assert!(advisory.get("execution_policy").is_none());
+    }
 
     #[test]
     fn descriptor_and_annotations_come_from_the_dispatch_catalog() {

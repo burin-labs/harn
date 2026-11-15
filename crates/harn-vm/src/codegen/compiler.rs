@@ -70,7 +70,7 @@ pub fn compile_catalog_with_sources(
     let mut lowered = Vec::new();
     let mut mcp_tools = Vec::new();
     for tool in selected {
-        let lower = |builder: &mut crate::wire::schema::SchemaWireBuilder, phase: &str| {
+        let lower = |builder: &mut crate::wire::schema::SchemaWireBuilder<'_>, phase: &str| {
             let uri = uri(&tool.name, phase);
             let resolver =
                 registry.resolver(jsonschema::uri::from_str(&uri).expect("encoded schema URI"));

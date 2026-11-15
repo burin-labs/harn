@@ -19,6 +19,104 @@ impl Drop for BackgroundSessionCleanup {
     }
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn tool_call_cancel_reaches_its_background_command_after_the_call_returns() {
+    let _guardian_args = harn_hostlib::process::owner_death::install_guardian_reexec_args([
+        "--exact",
+        "adapters::acp::tests::stop_controls::stop_controls_owner_death_guardian_fixture",
+        "--nocapture",
+    ]);
+    let _environment = harn_vm::stdlib::process::declare_session_environment_if_absent(
+        harn_vm::security::SessionEnvironment::inherited(),
+    );
+    let dir = tempfile::tempdir().expect("tempdir");
+    let fifo = dir.path().join("command-input");
+    assert!(std::process::Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .unwrap()
+        .success());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+    let mut sessions = Vec::new();
+    for id in [1, 2] {
+        server.handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0", "id": id, "method": "session/new",
+            "params": {"cwd": dir.path(), "environmentPolicy": {"kind": "isolated", "grants": []}},
+        })).await;
+        let created = recv_json(&mut rx).await;
+        sessions.push(created["result"]["sessionId"].as_str().unwrap().to_string());
+    }
+    let _cleanup = BackgroundSessionCleanup(sessions[0].clone());
+    let child = harn_hostlib::tools::long_running::spawn_long_running(
+        "run",
+        "cat".to_string(),
+        vec![fifo.to_string_lossy().into_owned()],
+        Some(dir.path().to_path_buf()),
+        BTreeMap::new(),
+        sessions[0].clone(),
+    )
+    .expect("spawn a FIFO-blocked command");
+    assert!(
+        is_running(child.pid),
+        "the actual background command was reached"
+    );
+    let reaped = harn_hostlib::tools::long_running::register_result_notifier(&child.handle_id)
+        .expect("live background command");
+    let host_bridge = attach_test_host_bridge(&mut server, &sessions[0]);
+    let registry = host_bridge.tool_call_cancellation_registry();
+    let (in_flight, registration) = registry.register(sessions[0].clone(), "active-call", "run");
+    for invalid in [serde_json::json!(""), serde_json::json!(7)] {
+        server.handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0", "id": 10, "method": "session/cancel_tool_call",
+            "params": {"sessionId": sessions[0], "toolCallId": "active-call", "handleId": invalid},
+        })).await;
+        let refused = recv_json(&mut rx).await;
+        assert_eq!(refused["error"]["code"], -32602, "{refused}");
+        assert!(
+            !in_flight.is_cancelled(),
+            "malformed command intent cannot fall through to tool-call cancellation"
+        );
+        assert!(is_running(child.pid));
+    }
+    drop(registration);
+    for (id, session, expected) in [
+        (3, &sessions[1], "not_found"),
+        (4, &sessions[0], "cancelled"),
+    ] {
+        server.handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0", "id": id, "method": "session/cancel_tool_call",
+            "params": {"sessionId": session, "toolCallId": "completed-run-call", "handleId": child.handle_id},
+        })).await;
+        let response = recv_json(&mut rx).await;
+        assert_eq!(response["result"]["status"], expected, "{response}");
+        assert_eq!(response["result"]["callId"], "completed-run-call");
+        if expected == "not_found" {
+            assert!(
+                is_running(child.pid),
+                "another session cannot cancel this command"
+            );
+        }
+    }
+    let terminal =
+        tokio::task::spawn_blocking(move || recv_within("cancelled command reaped", &reaped))
+            .await
+            .expect("waiter task");
+    assert_eq!(
+        terminal
+            .as_dict()
+            .unwrap()
+            .get("status")
+            .map(harn_vm::VmValue::display)
+            .as_deref(),
+        Some("killed")
+    );
+    assert!(
+        !is_running(child.pid),
+        "the acknowledged cancellation reaps the real child"
+    );
+}
+
 fn harn_string_literal(value: &str) -> String {
     format!("\"{}\"", harn_lexer::escape_string_literal(value))
 }

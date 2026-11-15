@@ -140,6 +140,44 @@ impl CommandStatus {
     }
 }
 
+/// The command-bound grant for one spawn of `program args`, or `None`.
+///
+/// Every hostlib spawn that inherits an environment asks here, foreground and
+/// long-running alike, so a grant reaches the program on whichever path runs
+/// it. A replaced environment is the caller's own and takes no grant. The
+/// result is held until the child is reaped and wrapped around the launch with
+/// [`harn_vm::stdlib::process::GrantedSpawn::launching`].
+pub(crate) fn command_grant(
+    builtin: &'static str,
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    overlay: &BTreeMap<String, String>,
+    env_mode: EnvMode,
+) -> Result<Option<harn_vm::stdlib::process::GrantedSpawn>, HostlibError> {
+    if env_mode == EnvMode::Replace {
+        return Ok(None);
+    }
+    harn_vm::stdlib::process::granted_spawn(program, args, cwd, overlay).map_err(|error| {
+        HostlibError::Backend {
+            builtin,
+            message: error.to_string(),
+        }
+    })
+}
+
+/// A granted spawn sets only what `granted_spawn` chose and removes every
+/// other inherited name, so no caller or ambient variable reaches it.
+pub(crate) fn apply_command_grant(
+    granted: &harn_vm::stdlib::process::GrantedSpawn,
+    spec: &mut SpawnSpec,
+) {
+    spec.program.clone_from(&granted.program);
+    spec.args = granted.args().to_vec();
+    spec.env = granted.env.iter().cloned().collect();
+    spec.env_remove.extend(granted.remove.iter().cloned());
+}
+
 /// Spawn the configured command, capture stdout + stderr in full, and
 /// enforce the timeout. Translates spawn / sandbox failures into
 /// `HostlibError::Backend` so the surrounding builtin gets a uniform
@@ -170,35 +208,27 @@ pub(crate) fn run_with_filter(
         CaptureTransport::Pipe => None,
         CaptureTransport::File => Some(FileCapture::new(req.builtin)?),
     };
-    // The one seam a command-bound grant on a program that runs others
-    // reaches: inheriting, piped, and redacted below. Held until the child is
-    // reaped, because it owns the spawn's private directory.
-    let granted = if req.env_mode == EnvMode::Replace || file_capture.is_some() {
+    // Held until the child is reaped, because it owns the spawn's private
+    // directory. A file capture is not redacted, so it takes no grant.
+    let granted = if file_capture.is_some() {
         None
     } else {
-        harn_vm::stdlib::process::granted_spawn(&req.program, &req.args, &effective_cwd, &req.env)
-            .map_err(|error| HostlibError::Backend {
-            builtin: req.builtin,
-            message: error.to_string(),
-        })?
+        command_grant(
+            req.builtin,
+            &req.program,
+            &req.args,
+            &effective_cwd,
+            &req.env,
+            req.env_mode,
+        )?
     };
-    // A granted spawn sets only what `granted_spawn` chose and removes every
-    // other inherited name, so no caller or ambient variable reaches it.
-    let mut env_remove = req.env_remove.clone();
-    if let Some(granted) = &granted {
-        env = granted.env.iter().cloned().collect();
-        env_remove.extend(granted.remove.iter().cloned());
-    }
-
-    let spec = SpawnSpec {
+    let mut spec = SpawnSpec {
         builtin: req.builtin,
-        program: granted
-            .as_ref()
-            .map_or_else(|| req.program.clone(), |granted| granted.program.clone()),
+        program: req.program.clone(),
         args: req.args.clone(),
         cwd: Some(effective_cwd.clone()),
         env,
-        env_remove,
+        env_remove: req.env_remove.clone(),
         env_mode: req.env_mode,
         use_stdin: req.stdin.is_some(),
         // Foreground children get their own process group too, so the
@@ -211,6 +241,9 @@ pub(crate) fn run_with_filter(
             .map(FileCapture::output_capture)
             .unwrap_or(OutputCapture::Pipe),
     };
+    if let Some(granted) = &granted {
+        apply_command_grant(granted, &mut spec);
+    }
     let call = crate::host_call::HostCallContext::current();
     let scope = call.process_scope();
     let launch_permit = match scope {
@@ -403,6 +436,14 @@ pub(crate) fn run_with_filter(
     let artifacts = persist_artifacts(&command_id, &stdout_bytes, &stderr_bytes, None)?;
     let inline = inline_output(&stdout_bytes, &stderr_bytes, req.capture);
 
+    if let Some(granted) = granted {
+        granted
+            .complete(command_status == CommandStatus::Completed && exit_code == 0)
+            .map_err(|error| HostlibError::Backend {
+                builtin: req.builtin,
+                message: error.to_string(),
+            })?;
+    }
     Ok(SpawnOutcome {
         verifier_receipt: (!timed_out && !drain_interrupted)
             .then(|| handle.verifier_execution_receipt())
