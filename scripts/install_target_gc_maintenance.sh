@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 # Install one daily host job for the current target-cache collector.
+#
+# HARN_TARGET_GC_SCHEDULE=none installs only the wrapper and removes any
+# schedule this installer published, for a host whose own maintenance job
+# already calls the wrapper. Two schedules would run the same sweep twice.
 set -euo pipefail
+
+schedule="${HARN_TARGET_GC_SCHEDULE:-daily}"
+case "$schedule" in
+  daily|none) ;;
+  *) echo "harn-target maintenance: HARN_TARGET_GC_SCHEDULE must be daily or none: $schedule" >&2; exit 2 ;;
+esac
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 installed="${HARN_TARGET_GC_INSTALL_DIR:-$HOME/.local/bin}/harn-target-gc-maintenance"
@@ -125,6 +135,32 @@ EOF
   fi
   echo "harn-target maintenance: installed daily LaunchAgent and current-policy wrapper"
 }
+
+remove_launchd() {
+  local label=com.harn.target-gc-maintenance
+  local domain="gui/$(id -u)"
+  local plist="$HOME/Library/LaunchAgents/$label.plist"
+  if launchctl print "$domain/$label" >/dev/null 2>&1 \
+    && ! launchctl bootout "$domain/$label"; then
+    echo "harn-target maintenance: LaunchAgent could not be unloaded" >&2
+    return 1
+  fi
+  rm -f -- "$plist"
+  if launchctl print "$domain/$label" >/dev/null 2>&1 || [ -e "$plist" ]; then
+    echo "harn-target maintenance: LaunchAgent remains after removal" >&2
+    return 1
+  fi
+}
+
+if [ "$schedule" = none ]; then
+  case "$(uname -s)" in
+    Darwin) remove_launchd || exit 1; remove_legacy_cron || exit 1 ;;
+    Linux) remove_legacy_cron || exit 1 ;;
+    *) echo "harn-target maintenance: unsupported scheduler platform" >&2; exit 1 ;;
+  esac
+  echo "harn-target maintenance: installed current-policy wrapper; no schedule (the host's maintenance calls it)"
+  exit 0
+fi
 
 case "$(uname -s)" in
   Darwin) install_launchd ;;
