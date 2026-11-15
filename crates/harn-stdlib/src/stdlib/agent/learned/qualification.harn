@@ -36,13 +36,26 @@ pub fn learned_trial(observation: LearnedObservation) -> LearnedTrial {
     && decision.evidence.route == disposition.capability_id
     && decision.evidence.receipt == disposition.decision_receipt,
     "std/agent/learned: commitment differs from the assessed capability"
+  const binding = observation.binding
+  guard binding != nil && binding.kind == "answered" else {
+    throw "std/agent/learned: commitment requires a measured binding check"
+  }
+  const faithful = binding.value.faithful
+  require faithful.kind == "boolean" && faithful.verdict
+    && faithful.probability >= 0.0
+    && faithful.probability <= 1.0
+    && trim(disposition.binding_receipt) != ""
+    && binding.receipt != decision.evidence.receipt
+    && faithful.confidence_kind == decision.evidence.applicability_confidence_kind
+    && binding.receipt == disposition.binding_receipt,
+    "std/agent/learned: commitment differs from the accepted binding check"
   return {
     id: observation.id,
     expected: observation.expected,
     selected: disposition.capability_id,
     confidence: min(
-      decision.evidence.applicability_probability,
-      decision.evidence.route_probability,
+      min(decision.evidence.applicability_probability, decision.evidence.route_probability),
+      faithful.probability,
     ),
     abstained: false,
     execution: observation.execution,
@@ -161,4 +174,27 @@ pub fn learned_qualification_issue(
     return "inconsistent_qualification"
   }
   return ""
+}
+
+/**
+ * Read the admitted confidence threshold through the qualification owner.
+ * @effects: []
+ * @errors: []
+ */
+pub fn learned_qualification_threshold(
+  identity: LearnedIdentity,
+  qualification: LearnedQualification?,
+) -> Result<float, string> {
+  const issue = learned_qualification_issue(identity, qualification)
+  if issue != "" {
+    return Err(issue)
+  }
+  guard qualification != nil && qualification.report.kind == "report" else {
+    throw "unreachable qualified report"
+  }
+  const group = qualification.report.groups[0]
+  guard group != nil && group.recommendation.kind == "threshold" else {
+    throw "unreachable qualified threshold"
+  }
+  return Ok(group.recommendation.threshold)
 }

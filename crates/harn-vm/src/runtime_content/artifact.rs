@@ -8,6 +8,9 @@ pub(super) fn linked_id() -> Option<String> {
 }
 
 #[cfg(target_vendor = "apple")]
+// Keep dyld's native header layouts with its libc lookup instead of defining
+// another Mach-O representation in the runtime.
+#[allow(deprecated)]
 pub(super) fn linked_id() -> Option<String> {
     let mut image = std::mem::MaybeUninit::<libc::Dl_info>::uninit();
     // SAFETY: dladdr initializes image on success. The address belongs to this

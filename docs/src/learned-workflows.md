@@ -2,7 +2,8 @@
 
 A learned workflow lets an agent reuse a reviewed executable for a familiar
 request. A decision model checks whether the request fits; a language model
-binds arguments to the tool's schema. Harn then runs the ordinary tool path.
+binds arguments to the tool's schema. A second decision checks those parameter
+values against the request before Harn runs preflight and the ordinary tool path.
 
 For example, a coding agent might learn how to add one resource to a particular
 application. Later requests can reuse that program instead of generating its
@@ -22,6 +23,12 @@ A study must declare its acceptance boundary before collecting evidence.
 Assessment accuracy, explicit fallback coverage, and committed execution risk
 answer different questions. A failed assessment-based study stays failed when
 a later study adds deterministic preflight checks.
+
+A valid schema and a successful tool receipt do not establish that the binder
+copied the intended name or assigned values to the intended roles. The binding
+check supplies a separate native judgment before commitment. Qualification
+still needs an independent grader of the requested result, because the judgment
+can also be wrong. Higher thresholds trade coverage for fewer accepted errors.
 
 [`learned_qualify`](stdlib/learned-workflows.md) uses the existing selective-risk
 report to choose among thresholds declared before measuring the corpus. Empty

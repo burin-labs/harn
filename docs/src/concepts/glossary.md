@@ -22,11 +22,14 @@ under qualification from fresh graded executions. Owned by
 
 **Learned assessment.** A model's advisory choice of a reviewed capability.
 
+**Learned binding check.** A separate native judgment of whether proposed
+parameter values preserve the request's names, values, and roles.
+
 **Learned preflight.** A read-only check of bound arguments and current project
 conditions through the capability's declared validation tool.
 
 **Learned commitment.** The recorded decision to invoke the capability's mutation
-tool after binding and any preflight pass. Every failed or unverified committed
+tool after binding, its semantic check, and any preflight pass. Every failed or unverified committed
 call counts as an execution error; earlier refusals are explicit abstentions.
 
 **Token reference.** One token ID paired with its exact tokenizer vocabulary.

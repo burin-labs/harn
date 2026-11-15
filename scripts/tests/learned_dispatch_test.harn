@@ -7,6 +7,7 @@ import {
   LearnedTrial,
   learned_agent_options,
   learned_agent_options_deferred,
+  learned_binding_request,
   learned_capability_snapshot,
   learned_dispatcher,
   learned_qualification_issue,
@@ -321,10 +322,42 @@ fn selection_fixture(app: LearnedDispatcher, request: {request: string}) -> Eval
   }
 }
 
-fn preflight_case(harness: Harness, verdict: dict, succeeds: bool, attempts_write: bool = false) {
+fn binding_fixture(
+  fs: HarnessFs,
+  app: LearnedDispatcher,
+  request: {request: string},
+  verdict: bool = true,
+  confidence: float = 1.0,
+) -> EvaluationFixture {
+  return learned_binding_request(
+    fs,
+    request,
+    capability(),
+    BOUND_WIDGETS.args,
+    app.definition.policy.evaluation,
+  )
+    + {
+      answers: {
+        faithful: {kind: "boolean", verdict: verdict, confidence: confidence, evidence: "fixture"},
+      },
+    }
+}
+
+fn preflight_case(
+  harness: Harness,
+  verdict: dict,
+  succeeds: bool,
+  attempts_write: bool = false,
+  binding: {
+    verdict: bool,
+    confidence: float,
+    preflight: bool,
+  } = {verdict: true, confidence: 1.0, preflight: true},
+) {
   with_temp_dir(
     harness.fs,
     { root: string ->
+      let preflight_calls = 0
       const registry = tool_define(
         resource_tools(harness.fs, root, true),
         "check_resource",
@@ -333,6 +366,7 @@ fn preflight_case(harness: Harness, verdict: dict, succeeds: bool, attempts_writ
           inputSchema: capability().tool.inputSchema,
           annotations: {kind: "read", readOnlyHint: true, side_effect_level: "read_only"},
           handler: { args: dict ->
+            preflight_calls += 1
             assert_eq(args.name, "widgets")
             if attempts_write {
               harness.fs.write_text(path_join(root, "preflight-write.txt"), "forbidden")
@@ -366,7 +400,10 @@ fn preflight_case(harness: Harness, verdict: dict, succeeds: bool, attempts_writ
       )
       with_evaluation_fixtures(
         harness,
-        [selection_fixture(app, request)],
+        [
+          selection_fixture(app, request),
+          binding_fixture(harness.fs, app, request, binding.verdict, binding.confidence),
+        ],
         { ->
           with_llm_script(
             harness.llm,
@@ -389,6 +426,7 @@ fn preflight_case(harness: Harness, verdict: dict, succeeds: bool, attempts_writ
               assert_eq(harness.fs.exists(path_join(root, "widgets.txt")), succeeds)
               assert(!harness.fs.exists(path_join(root, "preflight-write.txt")))
               assert_eq(primary_calls, succeeds ? 0 : 1)
+              assert_eq(preflight_calls, binding.preflight ? 1 : 0)
               if !attempts_write {
                 assert_eq(
                   result.visible_text,
@@ -410,21 +448,59 @@ pipeline test_preflight_requires_explicit_read_only_readiness(harness: Harness) 
   preflight_case(harness, {kind: "ready"}, false, true)
 }
 
+pipeline test_binding_judgment_refuses_before_preflight(harness: Harness) {
+  preflight_case(
+    harness,
+    {kind: "ready"},
+    false,
+    false,
+    {verdict: false, confidence: 1.0, preflight: false},
+  )
+  preflight_case(
+    harness,
+    {kind: "ready"},
+    false,
+    false,
+    {verdict: true, confidence: 0.89, preflight: false},
+  )
+  preflight_case(
+    harness,
+    {kind: "ready"},
+    false,
+    false,
+    {verdict: true, confidence: 0.95, preflight: false},
+  )
+}
+
 pipeline test_observations_distinguish_assessment_from_committed_execution(harness: Harness) {
   const app = dispatcher()
   const request = {request: "Add a standard resource called widgets"}
   with_evaluation_fixtures(
     harness,
-    [selection_fixture(app, request)],
+    [selection_fixture(app, request), binding_fixture(harness.fs, app, request)],
     { ->
       const assessment = app.probe(harness.llm, request)
       guard assessment.kind == "selected" else {
         throw "fixture assessment must select"
       }
+      const query = learned_binding_request(
+        harness.fs,
+        request,
+        capability(),
+        BOUND_WIDGETS.args,
+        app.definition.policy.evaluation,
+      )
+      const binding = harness.llm.evaluate_request(
+        "stdlib.learned_binding.v1",
+        query.state,
+        query.questions,
+        query.policy,
+      )
       const observation: LearnedObservation = {
         id: "observed",
         expected: "add-resource",
         assessment: assessment,
+        binding: binding,
         disposition: {kind: "abstained", reason: "preflight_declined"},
         execution: {kind: "not_run"},
       }
@@ -436,10 +512,31 @@ pipeline test_observations_distinguish_assessment_from_committed_execution(harne
               kind: "committed",
               capability_id: "add-resource",
               decision_receipt: assessment.evidence.receipt,
+              binding_receipt: binding.receipt,
             },
           },
       )
       assert(!committed.abstained)
+      const reused = try {
+        learned_trial(
+          observation
+            + {
+              binding: binding + {receipt: assessment.evidence.receipt},
+              disposition: {
+                kind: "committed",
+                capability_id: "add-resource",
+                decision_receipt: assessment.evidence.receipt,
+                binding_receipt: assessment.evidence.receipt,
+              },
+            },
+        )
+      }
+      match reused {
+        Ok(_value) -> {
+          throw "applicability cannot substitute for a binding judgment"
+        }
+        Err(_error) -> { assert(true) }
+      }
       assert_eq(
         learned_qualify(
           app.identity,
@@ -498,7 +595,7 @@ pipeline test_qualified_call_uses_the_normal_tool_path_and_fresh_postconditions(
       )
       with_evaluation_fixtures(
         harness,
-        [selection_fixture(app, request)],
+        [selection_fixture(app, request), binding_fixture(harness.fs, app, request)],
         { ->
           with_llm_script(
             harness.llm,
@@ -593,7 +690,7 @@ pipeline test_failed_verification_recovers_with_the_actual_mutation_history(harn
       )
       with_evaluation_fixtures(
         harness,
-        [selection_fixture(app, request)],
+        [selection_fixture(app, request), binding_fixture(harness.fs, app, request)],
         { ->
           with_llm_script(
             harness.llm,
@@ -707,7 +804,7 @@ pipeline test_changed_identity_and_policy_denial_prevent_the_selected_mutation(h
         )
         with_evaluation_fixtures(
           harness,
-          [selection_fixture(app, request)],
+          [selection_fixture(app, request), binding_fixture(harness.fs, app, request)],
           { ->
             with_llm_script(
               harness.llm,

@@ -9,7 +9,7 @@ use super::{
 };
 use crate::value::{VmError, VmValue};
 
-/// Run a handler under its declared execution policy. MCP presentation hints
+/// Enforce a handler's declared read-only ceiling. MCP presentation hints
 /// are advisory; only the normalized policy installs this mandatory ceiling.
 pub(crate) async fn scope_tool_handler<T>(
     entry: Option<&super::ToolCatalogEntry>,

@@ -1,3 +1,4 @@
+pub import { learned_binding_request } from "std/agent/learned/binding"
 pub import "std/agent/learned/contracts"
 pub import {
   LearnedAgentResolution,
@@ -12,6 +13,7 @@ pub import {
 } from "std/agent/learned/middleware"
 pub import {
   learned_qualification_issue,
+  learned_qualification_threshold,
   learned_qualify,
   learned_trial,
 } from "std/agent/learned/qualification"
@@ -106,12 +108,9 @@ pub fn learned_dispatcher(options: LearnedDispatcherOptions) -> LearnedDispatche
       if len(options.capabilities) == 0 {
         return {kind: "no_routes"}
       }
-      guard qualification != nil else {
-        return {kind: "unqualified", reason: "missing_qualification"}
-      }
-      const issue = learned_qualification_issue(identity, qualification)
-      if issue != "" {
-        return {kind: "unqualified", reason: issue}
+      const threshold = match learned_qualification_threshold(identity, qualification) {
+        Ok(value) -> { value }
+        Err(reason) -> { return {kind: "unqualified", reason: reason} }
       }
       const selected = probe(llm, request)
       if selected.kind != "selected" {
@@ -121,19 +120,7 @@ pub fn learned_dispatcher(options: LearnedDispatcherOptions) -> LearnedDispatche
         selected.evidence.applicability_probability,
         selected.evidence.route_probability,
       )
-      const report = qualification.report
-      guard report.kind == "report" else {
-        throw "unreachable qualification report"
-      }
-      const group = report.groups[0]
-      guard group != nil else {
-        throw "unreachable qualification group"
-      }
-      const recommendation = group.recommendation
-      guard recommendation.kind == "threshold" else {
-        throw "unreachable qualification threshold"
-      }
-      if confidence < recommendation.threshold {
+      if confidence < threshold {
         return {kind: "unqualified", reason: "below_qualified_threshold"}
       }
       return selected

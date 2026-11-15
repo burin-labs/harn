@@ -1,0 +1,40 @@
+{
+  "contract": "harn.learned_dispatch_study.v3",
+  "predecessors": ["results-v1.json", "results-v2.json"],
+  "development_evidence": "binding-screen-results.json",
+  "purpose": "Qualify semantic argument checking followed by enforced read-only preflight and committed execution, after the wrong-name failure in v2. Preserve both failed studies and every screening revision.",
+  "population": "The same small Python HTTP application and standard single-resource generator. One new lowercase resource identifier and three distinct non-reserved field identifiers with string, integer, and boolean roles. Excludes persistence, authorization, extra operations, existing-resource edits, and test-command execution.",
+  "candidate": {
+    "change": "After argument binding, ask the native decision model whether proposed parameter values preserve the requested names, values, and roles. Require the configured acceptance threshold before preflight. Store a separate binding judgment and receipt. Committed confidence is the minimum of applicability, route, and binding probabilities.",
+    "question": "Freeze revision 2 selected from three development question revisions and an expanded 120-call control screen. No further question tuning against this corpus.",
+    "policy": "Set applicability_accept to 0.9, shared by initial eligibility and binding checks. Keep the native evaluator route, applicability instructions, argument binder route and effort, executable, and independent grader. The new threshold is chosen on development evidence before fresh qualification.",
+    "executable": "The reviewed v2 preparation function, enforced read-only preflight, mutator, and authored tests remain the executable candidate. This study changes the shared dispatch algorithm, not the generator's output rules."
+  },
+  "development": {
+    "source": "Earlier observations and explicit correct/mismatched binding controls; never include them in the new qualification report.",
+    "execution_smoke": "Run the source-pinned native consumer before qualification. Prove both native judgments fired, the ordinary tool path reached preflight and mutation, and independent request checks passed."
+  },
+  "qualification": {
+    "corpus": "corpus-v3.json",
+    "positive_cases": 120,
+    "negative_cases": 30,
+    "repetitions": 1,
+    "thresholds": [0.9],
+    "target_error": 0.1,
+    "delta": 0.05,
+    "freeze": "Freeze executable hashes, pipeline files, candidate, project, configuration, grader, launcher, collector, protocol, and every case before the first qualification inference. Material algorithm, instruction, threshold, or grader changes require a new study and fresh cases.",
+    "acceptance": "Require one explicit committed or abstained runtime disposition. A commitment must link the assessed capability, original applicability receipt, and the separate answered binding judgment. Convert observations to trials through learned_trial. Missing or contradictory evidence blocks the report.",
+    "errors": "Every committed incompatible request, wrong bound value, wrong output, failed or missing execution, or failed independent grade is an accepted error. Preserve failures and never credit ordinary fallback work as learned execution.",
+    "owner": "Use learned_qualify and learned_qualification_issue. The runner transports evidence and reports its census; it does not implement risk policy.",
+    "report": "Report raw assessment selections, binding refusals, preflight refusals, commitment coverage, accepted errors, independent request checks, settled cost, latency, and ordinary fallback completion separately. An incomplete census cannot produce qualification."
+  },
+  "execution": {
+    "max_concurrent": 6,
+    "max_provider_spend_usd_session": 4.0,
+    "qualification_runner_budget_usd": 1.0,
+    "workspace": "Fresh isolated workspace and unique trial identifier for every observation.",
+    "recovery": "Wait for outstanding budget reservations to settle before refusing new work. Previously unstarted cases may resume with a recorded infrastructure-recovery receipt; never replace an observed result or omit a failing case.",
+    "controls": ["native binding mismatch and uncertainty prevent preflight", "binding applies the admitted threshold when it exceeds the base policy", "an applicability receipt cannot substitute for a binding receipt", "read-only native and MCP write attempts are refused with successful write controls", "ordinary execution references its admitted qualification", "approval, stop, steer, and post-approval contract changes keep their existing owner"]
+  },
+  "interpretation": "A bounded synthetic benchmark with related case templates, not an IID deployment sample or production reliability guarantee. Report the adaptive campaign and all earlier failures. A successful report describes only this prespecified study and its measured artifacts."
+}

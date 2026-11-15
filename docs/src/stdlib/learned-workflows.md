@@ -33,6 +33,17 @@ The mutating handler must recheck mutable preconditions before writing.
 The returned assessment is `selected`, `unqualified`, or a non-match from
 [`std/decision`](decision.md). An empty capability list requires no inference.
 
+After binding arguments, middleware asks the native evaluator whether the
+parameter values preserve the request's names, values, and roles. This check
+uses the dispatcher's evaluation policy. A mismatch, uncertainty, or evaluation
+failure causes fallback before preflight or mutation. Normal execution requires
+both the configured acceptance probability and the admitted qualification
+threshold.
+
+`learned_binding_request(fs, request, capability, arguments, policy)` returns
+the typed `LearnedBindingRequest` shared by dispatch, fixtures, and evaluation.
+It contains the question, serialized schema and arguments, request, and policy.
+
 ## Qualification
 
 `learned_qualify(identity, trials, {risk}) -> LearnedQualification` delegates
@@ -43,7 +54,7 @@ threshold certification to `std/eval/selective_risk`. Each `LearnedTrial` has:
 | `id` | Unique nonempty trial identifier. |
 | `expected` | Expected capability identifier; empty for an incompatible request. |
 | `selected` | Committed capability identifier; empty when abstaining. |
-| `confidence` | Confidence used by the declared threshold family. |
+| `confidence` | Minimum of applicability, route, and binding-check probabilities. |
 | `abstained` | Whether dispatch explicitly declined commitment. |
 | `execution` | `not_run`, or `passed`/`failed` with a unique receipt and workspace digest. |
 
@@ -51,6 +62,9 @@ threshold certification to `std/eval/selective_risk`. Each `LearnedTrial` has:
 trial from the assessment, explicit runtime disposition, expected label, and
 independent execution evidence. Disposition is `abstained` with a nonempty
 reason, or `committed` with the assessed capability and decision receipt.
+Committed observations also require the answered `binding` evaluation and its
+distinct `binding_receipt`. Its accepted answer must match the receipt named by
+the runtime disposition. An applicability receipt cannot substitute for it.
 The middleware emits one `disposition` checkpoint. Missing records are
 unmeasured; absence of a mutation is insufficient to establish abstention.
 
@@ -67,6 +81,10 @@ constructing observations cannot repair an earlier failed report.
 empty string when qualification is usable. Otherwise it returns
 `missing_qualification`, `stale_qualification`, `insufficient_execution_evidence`,
 `risk_not_certified`, or `inconsistent_qualification`.
+
+`learned_qualification_threshold(identity, qualification) -> Result<float, string>`
+returns the admitted threshold or the same refusal reason. Selection and
+binding use this shared qualification owner.
 
 ## Agent composition
 

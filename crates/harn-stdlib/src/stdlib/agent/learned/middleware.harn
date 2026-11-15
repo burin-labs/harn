@@ -1,4 +1,5 @@
 import { ServedMessageSemanticKind } from "std/agent/artifacts"
+import { learned_binding_request } from "std/agent/learned/binding"
 import {
   LearnedAssessment,
   LearnedCapability,
@@ -8,6 +9,7 @@ import {
   LearnedQualification,
   LearnedRequest,
 } from "std/agent/learned/contracts"
+import { learned_qualification_threshold } from "std/agent/learned/qualification"
 import { agent_completion_obligations } from "std/agent/obligations"
 import { agent_emit_event, agent_session_visible_messages } from "std/agent/state"
 import { AgentToolPostcondition, agent_tool_result_data } from "std/agent/tool_lifecycle"
@@ -94,6 +96,8 @@ type ReadyAction = {
   capability: LearnedCapability,
   evidence: DecisionEvidence,
   arguments: dict<string, unknown>,
+  binding_receipt: string,
+  binding_probability: float,
 }
 
 type PreparedAction = ReadyAction \
@@ -272,11 +276,57 @@ fn prepare_action(
   if arguments.kind == "unbound" {
     return {kind: "fallback", reason: "incomplete_arguments", detail: arguments.reason}
   }
+  let threshold = setup.dispatcher.definition.policy.applicability_accept
+  if trial == nil {
+    const admitted = match learned_qualification_threshold(
+      setup.dispatcher.identity,
+      setup.qualification,
+    ) {
+      Ok(value) -> { value }
+      Err(reason) -> { return {kind: "fallback", reason: reason} }
+    }
+    threshold = max(threshold, admitted)
+  }
+  const query = learned_binding_request(
+    harness.fs,
+    setup.request,
+    capability,
+    arguments.args,
+    setup.dispatcher.definition.policy.evaluation,
+  )
+  const binding = harness.llm.evaluate_request(
+    "stdlib.learned_binding.v1",
+    query.state,
+    query.questions,
+    query.policy,
+  )
+  checkpoint(harness.agent, call, "binding_assessed", {evaluation: binding})
+  checkpoint(
+    harness.agent,
+    call,
+    "binding_evaluation_receipt",
+    {receipt: harness.llm.evaluation_receipt(binding.receipt)},
+  )
+  if binding.kind != "answered" {
+    return {kind: "fallback", reason: "binding_evaluation_failed"}
+  }
+  const faithful = binding.value.faithful
+  if faithful.kind != "boolean" {
+    return {kind: "fallback", reason: "binding_evaluation_invalid"}
+  }
+  if !faithful.verdict {
+    return {kind: "fallback", reason: "binding_mismatch"}
+  }
+  if faithful.probability < threshold {
+    return {kind: "fallback", reason: "binding_uncertain"}
+  }
   return {
     kind: "prepared",
     capability: capability,
     evidence: assessment.evidence,
     arguments: arguments.args,
+    binding_receipt: binding.receipt,
+    binding_probability: faithful.probability,
   }
 }
 
@@ -320,6 +370,8 @@ fn build_agent_options(
       definition_digest: setup.dispatcher.identity.definition_digest,
       package_digest: action.capability.package_digest,
       decision_receipt: action.evidence.receipt,
+      binding_receipt: action.binding_receipt,
+      binding_probability: action.binding_probability,
       qualification_digest: setup.qualification?.trials_digest ?? "",
       execution_mode: trial == nil ? "qualified" : "qualification_trial",
       trial_id: trial?.id ?? "",
@@ -332,6 +384,7 @@ fn build_agent_options(
           kind: "committed",
           capability_id: action.capability.id,
           decision_receipt: action.evidence.receipt,
+          binding_receipt: action.binding_receipt,
         },
       )
     }

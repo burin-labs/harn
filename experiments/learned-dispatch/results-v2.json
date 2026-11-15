@@ -1,0 +1,25 @@
+{
+  "contract": "harn.learned_dispatch_study_result.v2",
+  "protocol": "protocol-v2.json",
+  "corpus": "corpus-v2.json",
+  "qualification": {
+    "verdict": "risk_not_certified",
+    "trials": 90,
+    "assessment_selected": 52,
+    "incompatible_assessment_selected": 13,
+    "committed": 39,
+    "verified_correct_outputs": 38,
+    "committed_errors": 1,
+    "error": "The argument binder substituted resource for the explicitly requested resource name artifacts. The executable verified its own outputs; the independent grader caught the wrong name.",
+    "accepted_error_upper_bound": 0.11595214875892411,
+    "target_error": 0.1,
+    "delta": 0.05,
+    "threshold": 0.8,
+    "provider_cost_usd": 0.272925094,
+    "report_digest": "f3fbd5b5baa3410f974700eee27ad6b10b3a92cfc03582414879b53400bc9318",
+    "candidate_freeze_sha256": "ed00a0927e03b5677e8300dc64bdb79e0e36ec15c33f7d2bd1c6b7d1640c0067"
+  },
+  "measurement_recovery": "The runner prematurely refused the last six unstarted jobs because in-flight budget reservations were treated as settled spend. It produced no report for that incomplete census. Those six previously unexecuted cases were then run through the unchanged frozen launcher and collector. All 90 original cases were collected, no observed result was replaced, and the refusal and recovery logs were retained.",
+  "interpretation": "Preflight prevented incompatible assessment selections from committing, but syntactically valid arguments can still misrepresent a request. This report was refused and not admitted. The next candidate adds a generic semantic binding check and requires a new study. The original wrong-name row remains an error.",
+  "limits": "Synthetic application and related case templates; no production accuracy or IID deployment claim. Ordinary fallback work is not credited as learned execution."
+}

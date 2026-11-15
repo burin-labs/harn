@@ -6,6 +6,7 @@ import {
 } from "std/decision"
 import { SelectiveRiskOptions, SelectiveRiskReport } from "std/eval/selective_risk"
 import { LlmCallOptions } from "std/llm/options"
+import { BooleanQuestion, EvaluationOutcome, EvaluationPolicy } from "std/predicate"
 import { ToolCatalogEntry } from "std/tools"
 
 /** Reviewed executable coordinates over the ordinary tool catalog. */
@@ -41,12 +42,28 @@ pub type LearnedObservation = {
   id: string,
   expected: string,
   assessment: LearnedAssessment,
+  binding?: EvaluationOutcome,
   disposition: {kind: "abstained", reason: string} \
-    | {kind: "committed", capability_id: string, decision_receipt: string},
+    | {kind: "committed", capability_id: string, decision_receipt: string, binding_receipt: string},
   execution: LearnedExecutionEvidence,
 }
 
 pub type LearnedPreflight = {kind: "ready"} | {kind: "declined", reason: string}
+
+pub type LearnedBindingState = {
+  request: string,
+  capability_id: string,
+  capability_meaning: string,
+  input_schema_json: string,
+  arguments_json: string,
+}
+
+pub type LearnedBindingRequest = {
+  site_id: string,
+  state: LearnedBindingState,
+  questions: {faithful: BooleanQuestion},
+  policy: EvaluationPolicy,
+}
 
 pub type LearnedIdentity = {
   definition_digest: string,
