@@ -13,16 +13,12 @@ import { with_llm_script } from "std/testing"
  * checked semantically so internal lifecycle observability can evolve
  * without regenerating this fixture.
  *
- * REGENERATING THE TAPE: when a deliberate script-observable change
- * adds or removes a host-boundary record, this fixture fails with a
- * "missing_in_recorded" / "missing_in_replay" divergence. To
- * regenerate: temporarily edit crates/harn-cli/src/commands/test/conformance.rs to
- * `std::fs::copy(tape_path, "/tmp/actual.tape")` on divergence, run
- * the filter, then
- * `cp /tmp/actual.tape conformance/tests/testbench/testbench_replay_fidelity.testbench-tape`
- * (normalize the absolute script_path to the relative form first).
- * Revert the debug edit before committing. The brittleness here is the
- * point — every regen requires explicit review.
+ * REGENERATING THE TAPE: use the current runtime from the repository root:
+ * harn test-bench run conformance/tests/testbench/testbench_replay_fidelity.harn \
+ *   --start-at 1767225600000 --emit-tape /tmp/actual.tape
+ * Review the header and every user-script record, then copy /tmp/actual.tape
+ * to conformance/tests/testbench/testbench_replay_fidelity.testbench-tape.
+ * Every regeneration requires explicit review of the observable changes.
  */
 pipeline test(harness: Harness, task: unknown) {
   with_llm_script(
