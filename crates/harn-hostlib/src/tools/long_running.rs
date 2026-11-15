@@ -1077,12 +1077,14 @@ fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHan
     })
 }
 
+#[derive(Default)]
 pub(crate) struct CancelOptions {
     pub(crate) timed_out: bool,
     pub(crate) wait_result: Option<Duration>,
 }
 
 pub(crate) struct CancelOutcome {
+    pub(crate) found: bool,
     pub(crate) cancelled: bool,
     pub(crate) result: Option<VmValue>,
 }
@@ -1091,14 +1093,21 @@ pub(crate) struct CancelOutcome {
 /// the waiter drain output/artifacts. Returns `true` if the handle was found
 /// and cancellation was newly requested.
 pub fn cancel_handle(handle_id: &str) -> bool {
-    cancel_handle_with_options(
-        handle_id,
-        CancelOptions {
-            timed_out: false,
-            wait_result: None,
-        },
-    )
-    .cancelled
+    cancel_handle_with_options(handle_id, CancelOptions::default()).cancelled
+}
+
+/// Request cancellation only when this session owns the running command.
+pub fn cancel_session_handle(
+    session_id: &str,
+    handle_id: &str,
+) -> harn_vm::tool_call_cancellations::CancelStatus {
+    use harn_vm::tool_call_cancellations::CancelStatus;
+    let outcome = cancel_handle_scoped(handle_id, CancelOptions::default(), Some(session_id));
+    match (outcome.found, outcome.cancelled) {
+        (false, _) => CancelStatus::NotFound,
+        (_, false) => CancelStatus::AlreadyCancelled,
+        (_, true) => CancelStatus::Cancelled,
+    }
 }
 
 pub(crate) fn snapshot_binding_for_handle(handle_id: &str) -> Option<harn_vm::value::DictMap> {
@@ -1130,16 +1139,37 @@ pub(crate) fn output_context_for_handle(handle_id: &str) -> Option<(Arc<OutputFe
 }
 
 pub(crate) fn cancel_handle_with_options(handle_id: &str, options: CancelOptions) -> CancelOutcome {
+    cancel_handle_scoped(handle_id, options, None)
+}
+
+fn cancel_handle_scoped(
+    handle_id: &str,
+    options: CancelOptions,
+    session_id: Option<&str>,
+) -> CancelOutcome {
     let (killer, cancel_state, result_rx) = {
         let mut store = HANDLE_STORE
             .lock()
             .expect("long-running handle store poisoned");
+        if session_id.is_some_and(|session| {
+            !store
+                .entries
+                .get(handle_id)
+                .is_some_and(|entry| entry.session_id == session)
+        }) {
+            return CancelOutcome {
+                found: false,
+                cancelled: false,
+                result: None,
+            };
+        }
         let Some((killer, cancel_state)) = store
             .entries
             .get(handle_id)
             .map(|entry| (entry.killer.clone(), entry.cancel_state.clone()))
         else {
             return CancelOutcome {
+                found: false,
                 cancelled: false,
                 result: store.terminal_result(handle_id),
             };
@@ -1159,6 +1189,7 @@ pub(crate) fn cancel_handle_with_options(handle_id: &str, options: CancelOptions
     let cancellation = cancel_state.begin_cancellation(options.timed_out);
     let Some(mut cancellation) = cancellation else {
         return CancelOutcome {
+            found: true,
             cancelled: false,
             result: match (options.wait_result, result_rx) {
                 (Some(timeout), Some(rx)) => rx.recv_timeout(timeout).ok(),
@@ -1173,6 +1204,7 @@ pub(crate) fn cancel_handle_with_options(handle_id: &str, options: CancelOptions
         _ => None,
     };
     CancelOutcome {
+        found: true,
         cancelled: true,
         result,
     }
