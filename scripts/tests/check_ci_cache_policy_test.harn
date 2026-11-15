@@ -838,6 +838,27 @@ pipeline test_public_runner_policy_reads_literal_matrix_input_and_release_paths(
 ) {
   const workflows = {
     "literal.yml": {jobs: {build: {"runs-on": "blacksmith-8vcpu-ubuntu-2404"}}},
+    "dynamic-matrix.yml": {
+      jobs: {
+        build: {
+          "runs-on": "ubuntu-24.04",
+          strategy: {matrix: gha_expression("fromJSON(inputs.matrix)")},
+        },
+      },
+    },
+    "dynamic-include.yml": {
+      jobs: {
+        build: {
+          "runs-on": gha_expression("matrix.host"),
+          strategy: {
+            matrix: {
+              host: ["ubuntu-24.04", "ubicloud-standard-8"],
+              include: gha_expression("inputs.rows"),
+            },
+          },
+        },
+      },
+    },
     "matrix.yml": {
       jobs: {
         build: {
@@ -904,6 +925,7 @@ pipeline test_public_runner_policy_reads_literal_matrix_input_and_release_paths(
     public_repository_runner_errors(workflows, release_policy),
     [
       "capacity.yml:route runner capacity decision must not accept paid route input PAID_LINUX_PROVIDER",
+      "dynamic-include.yml:build runner selection can resolve through paid token ubicloud-standard-8",
       "input.yml:build runner selection can resolve through paid token blacksmith-8vcpu-windows-2025",
       "literal.yml:build runner selection can resolve through paid token blacksmith-8vcpu-ubuntu-2404",
       "macos.yml:build runner selection can resolve through paid token macOS-latest-xlarge",
