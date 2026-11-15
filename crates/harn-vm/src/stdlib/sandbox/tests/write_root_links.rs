@@ -324,8 +324,6 @@ fn a_write_root_flipped_during_resolution_never_resolves_outside() {
 /// link it is reached through) is swapped for a link out of the workspace.
 #[test]
 fn a_write_root_flipped_after_each_look_never_resolves_outside() {
-    use std::cell::Cell;
-    use std::rc::Rc;
     let Some(Fixture { ws, outside, _dirs }) = fixture(
         "a_write_root_flipped_after_each_look_never_resolves_outside",
         false,
@@ -343,7 +341,6 @@ fn a_write_root_flipped_after_each_look_never_resolves_outside() {
             std::fs::remove_dir_all(path).unwrap();
         }
     };
-    let policy = writing_policy(&ws, &target.join("sub"));
     let depth = target.join("sub").components().count();
     let mut flips = 0;
     for starts_as_link in [false, true] {
@@ -358,23 +355,23 @@ fn a_write_root_flipped_after_each_look_never_resolves_outside() {
             } else {
                 std::fs::create_dir_all(target.join("sub")).unwrap();
             }
-            let looks = Rc::new(Cell::new(0));
-            let flipped = Rc::new(Cell::new(false));
-            crate::stdlib::sandbox::paths::AFTER_LOOK.with(|hook| {
-                let (looks, flipped) = (looks.clone(), flipped.clone());
-                let (target, parked, evil) = (target.clone(), parked.clone(), evil.clone());
-                *hook.borrow_mut() = Some(Box::new(move |_: &Path| {
-                    looks.set(looks.get() + 1);
-                    if looks.get() == at && !flipped.get() {
+            let mut looks = 0;
+            let mut flipped = false;
+            // The workspace is what a confined child can write.
+            let resolved = crate::stdlib::sandbox::paths::walk_host_links(
+                &target.join("sub"),
+                &mut |dir| dir.starts_with(&ws),
+                &mut |_| {
+                    looks += 1;
+                    if looks == at && !flipped {
                         std::fs::rename(&target, &parked).unwrap();
                         std::fs::rename(&evil, &target).unwrap();
-                        flipped.set(true);
+                        flipped = true;
                     }
-                }));
-            });
-            let granted = crate::stdlib::sandbox::process_sandbox_policy_write_roots(&policy);
-            crate::stdlib::sandbox::paths::AFTER_LOOK.with(|hook| *hook.borrow_mut() = None);
-            flips += usize::from(flipped.get());
+                },
+            );
+            let granted: Vec<PathBuf> = resolved.into_iter().collect();
+            flips += usize::from(flipped);
             assert!(
                 !granted.iter().any(|root| root.starts_with(&outside)),
                 "flipped after look {at} (root started as a link: {starts_as_link}): \
