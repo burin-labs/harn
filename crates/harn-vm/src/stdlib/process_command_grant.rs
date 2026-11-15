@@ -147,7 +147,7 @@ fn kept_variable(key: &str) -> bool {
 /// keep it alive until the child has exited, then call [`GrantedSpawn::complete`].
 pub struct GrantedSpawn {
     pub program: String,
-    pub args: Vec<String>,
+    args: Vec<String>,
     pub env: Vec<(String, String)>,
     pub remove: Vec<String>,
     /// Dropped before `_dir`: a server the seed started stops first. Held
@@ -160,6 +160,11 @@ pub struct GrantedSpawn {
 }
 
 impl GrantedSpawn {
+    /// The prepared argument vector that must accompany this grant's program.
+    pub fn args(&self) -> &[String] {
+        &self.args
+    }
+
     /// Hold while launching the program: its own sandbox profile may then
     /// read its private directory, which every other confined child is
     /// denied.

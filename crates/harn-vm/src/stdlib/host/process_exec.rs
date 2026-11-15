@@ -473,7 +473,7 @@ pub(crate) fn build_sandboxed_command(
     };
     if let Some(grant) = &grant {
         launch.program = grant.program.clone();
-        launch.args = grant.args.clone();
+        launch.args = grant.args().to_vec();
         launch.env = grant.env.clone();
         launch.env_remove.retain(|key| {
             !grant.env.iter().any(|(owned, _)| {

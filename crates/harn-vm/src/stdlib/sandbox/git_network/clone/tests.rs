@@ -88,7 +88,7 @@ fn a_destination_created_immediately_before_publication_is_preserved() {
     let destination = fixture.destination.clone();
     let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
     let (created_tx, created_rx) = std::sync::mpsc::sync_channel(1);
-    let peer = std::thread::spawn(move || {
+    let peer = crate::runtime_stack::spawn(move || {
         harn_clock::test_support::recv_within("clone ready to publish", &ready_rx);
         std::fs::create_dir(&destination).unwrap();
         std::fs::write(destination.join(".git"), b"foreign marker\n").unwrap();

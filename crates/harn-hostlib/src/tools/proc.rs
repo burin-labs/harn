@@ -173,7 +173,7 @@ pub(crate) fn apply_command_grant(
     spec: &mut SpawnSpec,
 ) {
     spec.program.clone_from(&granted.program);
-    spec.args.clone_from(&granted.args);
+    spec.args = granted.args().to_vec();
     spec.env = granted.env.iter().cloned().collect();
     spec.env_remove.extend(granted.remove.iter().cloned());
 }

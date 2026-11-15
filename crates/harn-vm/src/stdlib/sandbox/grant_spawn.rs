@@ -194,6 +194,7 @@ thread_local! {
 }
 
 struct OwnSpawnAuthority {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     read_root: PathBuf,
     #[cfg(target_os = "macos")]
     write_roots: Vec<PathBuf>,
@@ -251,6 +252,7 @@ impl OwnSpawnLaunch {
             .all(|root| root != dir && root.starts_with(dir)));
         OWN_SPAWN_LAUNCHING.with(|own| {
             *own.borrow_mut() = Some(OwnSpawnAuthority {
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
                 read_root: dir.to_path_buf(),
                 #[cfg(target_os = "macos")]
                 write_roots: write_roots.to_vec(),

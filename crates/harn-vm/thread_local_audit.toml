@@ -815,6 +815,12 @@ statics = ["OWN_SPAWN_LAUNCHING"]
 category = "thread_private"
 plan = "thread_private_sync_scope"
 
+[[thread_local]]
+path = "src/stdlib/sandbox/git_network/clone.rs"
+statics = ["BEFORE_PUBLICATION"]
+category = "thread_private"
+plan = "thread_private_test"
+
 # A test's local server origin, granted in place of github.com; set and read
 # only by tests on their own thread.
 [[thread_local]]
