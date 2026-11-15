@@ -840,7 +840,7 @@ capability_method!(agent_session_replace_messages, "harness.agent.session_replac
     // (effects = []): live session journal / reminder / budget seams are
     // runtime-owned, not model-facing state effects. Inflated contracts
     // reject under agent-loop execution policy and abort turns mid-flight.
-    [], "__cap_agent_session_replace_messages(session_id: string, messages: list, summary?: any) -> nil", "Replace session messages after compaction.");
+    [], "__cap_agent_session_replace_messages(session_id: string, messages: list, summary?: any) -> dict", "Replace session messages after compaction.");
 capability_method!(
     agent_budget_pre_call_blocked,
     "harness.agent.budget_pre_call_blocked",

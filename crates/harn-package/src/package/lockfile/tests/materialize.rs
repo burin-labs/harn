@@ -452,6 +452,155 @@ fn materialization_reuses_the_generation_without_reaching_the_source() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn prepared_readonly_generation_serves_lazy_and_eager_materialization_without_writes() {
+    for keep_install_mutex in [false, true] {
+        assert_prepared_readonly_reuse(keep_install_mutex);
+    }
+}
+
+#[cfg(unix)]
+fn assert_prepared_readonly_reuse(keep_install_mutex: bool) {
+    let (_project, workspace, root) = project_with_unreachable_source();
+    let entry = root.join("main.harn");
+    fs::write(&entry, "pipeline main() {}\n").unwrap();
+    let install_mutex = root.join(".harn/package-install.lock");
+    if !keep_install_mutex {
+        fs::remove_file(&install_mutex).unwrap();
+    }
+    let original = current_package_snapshot(&workspace.env().load_manifest_context().unwrap())
+        .unwrap()
+        .generation()
+        .to_string();
+    let readonly = ReadOnlyPreparedTree::new(&root);
+
+    let digest = ensure_dependency_alias_materialized_for_test(&entry, "acme-lib").unwrap();
+    assert!(digest.starts_with("sha256:"));
+    ensure_dependencies_materialized_in(workspace.env(), &root).unwrap();
+
+    assert_eq!(
+        install_mutex.exists(),
+        keep_install_mutex,
+        "prepared reads must preserve installation state"
+    );
+    assert!(
+        !workspace.cache_dir().exists(),
+        "prepared reads must not fetch removed sources"
+    );
+    let snapshot =
+        current_package_snapshot(&workspace.env().load_manifest_context().unwrap()).unwrap();
+    assert_eq!(snapshot.generation(), original);
+    assert!(snapshot.packages_root().join("acme-lib/lib.harn").is_file());
+    drop(readonly);
+}
+
+#[cfg(unix)]
+struct ReadOnlyPreparedTree(Vec<(PathBuf, fs::Permissions)>);
+
+#[cfg(unix)]
+impl ReadOnlyPreparedTree {
+    fn new(root: &Path) -> Self {
+        fn collect(path: &Path, original: &mut Vec<(PathBuf, fs::Permissions)>) {
+            let metadata = fs::symlink_metadata(path).unwrap();
+            if metadata.file_type().is_symlink() {
+                return;
+            }
+            original.push((path.to_path_buf(), metadata.permissions()));
+            if metadata.is_dir() {
+                for entry in fs::read_dir(path).unwrap() {
+                    collect(&entry.unwrap().path(), original);
+                }
+            }
+        }
+        let mut original = Vec::new();
+        collect(root, &mut original);
+        for (path, permissions) in &original {
+            let mut readonly = permissions.clone();
+            readonly.set_readonly(true);
+            fs::set_permissions(path, readonly).unwrap();
+        }
+        Self(original)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ReadOnlyPreparedTree {
+    fn drop(&mut self) {
+        for (path, permissions) in self.0.iter().rev() {
+            fs::set_permissions(path, permissions.clone()).unwrap();
+        }
+    }
+}
+
+#[test]
+fn eager_materialization_reloads_authority_after_a_real_full_install() {
+    let project = tempfile::tempdir().unwrap();
+    let root = project.path();
+    let workspace = TestWorkspace::new(root);
+    fs::create_dir_all(root.join(".git")).unwrap();
+    for (name, value) in [("old", 1), ("new", 2)] {
+        let dependency = root.join("vendor").join(name);
+        fs::create_dir_all(&dependency).unwrap();
+        fs::write(dependency.join(MANIFEST), "[package]\nname = \"dep\"\n").unwrap();
+        fs::write(
+            dependency.join("lib.harn"),
+            format!("pub fn value() {{ {value} }}\n"),
+        )
+        .unwrap();
+    }
+    let manifest = |name| {
+        format!(
+            "[package]\nname = \"root\"\n[dependencies]\ndep = {{ path = \"./vendor/{name}\" }}\n"
+        )
+    };
+    fs::write(root.join(MANIFEST), manifest("old")).unwrap();
+    install_packages_in(workspace.env(), false, None, false).unwrap();
+    let original =
+        current_package_snapshot(&workspace.env().load_manifest_context().unwrap()).unwrap();
+    fs::remove_dir_all(original.packages_root().join("dep")).unwrap();
+    drop(original);
+
+    let ready = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let installed = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let initializer = {
+        let workspace = workspace.clone();
+        let anchor = root.to_path_buf();
+        let ready = ready.clone();
+        let installed = installed.clone();
+        harn_parser::runtime_stack::spawn(move || {
+            ensure_dependencies_materialized_before_lock(workspace.env(), &anchor, || {
+                ready.wait();
+                installed.wait();
+            })
+        })
+    };
+    ready.wait();
+    fs::write(root.join(MANIFEST), manifest("new")).unwrap();
+    install_packages_in(workspace.env(), false, None, false).unwrap();
+    let expected =
+        current_package_snapshot(&workspace.env().load_manifest_context().unwrap()).unwrap();
+    let generation = expected.generation().to_string();
+    drop(expected);
+    installed.wait();
+    initializer.join().unwrap().unwrap();
+
+    let actual =
+        current_package_snapshot(&workspace.env().load_manifest_context().unwrap()).unwrap();
+    assert_eq!(
+        actual.generation(),
+        generation,
+        "waiting initializer must not republish old authority"
+    );
+    let active = LockFile::load(actual.lock_path()).unwrap().unwrap();
+    assert!(active.packages[0].source.ends_with("/vendor/new"));
+    assert!(
+        fs::read_to_string(actual.packages_root().join("dep/lib.harn"))
+            .unwrap()
+            .contains('2')
+    );
+}
+
 #[test]
 fn materialization_without_a_generation_reports_the_unreachable_source() {
     let (_project_tmp, workspace, root) = project_with_unreachable_source();

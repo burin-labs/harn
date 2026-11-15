@@ -502,6 +502,7 @@ async fn vm_call_llm_full_inner_request(
         let mut result = mock_llm_response(request).inspect_err(|_| {
             observed.inference_speed().abandon();
         })?;
+        observed.record_provider_response();
         observed.inference_speed().finish_local(&mut result);
         super::trigger_predicate::note_result(request, &result);
         let chunks = delta_tx
@@ -522,6 +523,7 @@ async fn vm_call_llm_full_inner_request(
             .inspect_err(|_| {
                 observed.inference_speed().abandon();
             })?;
+        observed.record_provider_response();
         super::mock::mark_live_after_mock_prefix(request, &mut result);
         observed.inference_speed().finish_local(&mut result);
         super::trigger_predicate::note_result(request, &result);
@@ -654,6 +656,7 @@ async fn dispatch_provider_request(
             return Err(error);
         }
     };
+    observed.record_provider_response();
     result.telemetry.inference_boundary_rule = boundary_rule;
     super::mock::mark_live_after_mock_prefix(request, &mut result);
     if let Some(recording) = recording {

@@ -1247,6 +1247,7 @@ impl AgentEventSink for AcpAgentEventSink {
             | AgentEvent::ToolFormatOverride { .. }
             | AgentEvent::ToolCallAudit { .. }
             | AgentEvent::ToolBatchDisposition { .. }
+            | AgentEvent::ToolBatchProposalResolution { .. }
             | AgentEvent::CompositionStart { .. }
             | AgentEvent::CompositionChildCall { .. }
             | AgentEvent::CompositionChildResult { .. }

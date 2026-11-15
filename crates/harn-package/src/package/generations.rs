@@ -28,6 +28,12 @@ pub(crate) fn publish_package_generation<F>(
 where
     F: FnOnce(&Path) -> Result<usize, PackageError>,
 {
+    // Reusing an already published generation is observational. Readers pin
+    // it with the publication lock and a shared generation lease; they need
+    // no permission to create an installation mutex in a prepared bundle.
+    if !force_rebuild && prepared_generation_matches_lock(ctx, lock)? {
+        return Ok(lock.packages.len());
+    }
     let _install_lock = acquire_package_install_lock(ctx)?;
     publish_package_generation_locked(ctx, lock, force_rebuild, materialize)
 }
@@ -195,24 +201,23 @@ fn current_generation_matches_lock(
     Ok(true)
 }
 
+pub(crate) fn prepared_generation_matches_lock(
+    ctx: &ManifestContext,
+    lock: &LockFile,
+) -> Result<bool, PackageError> {
+    let _read_lock = acquire_existing_package_install_read_lock(ctx)?;
+    let digest = package_lock_digest(&lock.encode()?);
+    current_generation_matches_lock(ctx, lock, &digest)
+}
+
 /// Whether the active immutable generation already supplies every entry in a
 /// demand-selected lock. Extra packages are harmless for this read-only reuse
 /// check: the reachable graph still controls what can be imported, while a
 /// full install continues to require exact whole-lock authority above.
-pub(crate) fn current_generation_satisfies_lock_subset(
-    ctx: &ManifestContext,
+pub(crate) fn package_snapshot_satisfies_lock_subset(
+    snapshot: &PackageSnapshot,
     requested: &LockFile,
 ) -> Result<bool, PackageError> {
-    let snapshot = match PackageSnapshot::acquire(&ctx.dir) {
-        Ok(Some(snapshot)) => snapshot,
-        Ok(None) => return Ok(false),
-        Err(harn_modules::package_snapshot::PackageSnapshotError::Io { source, .. })
-            if source.kind() == io::ErrorKind::NotFound =>
-        {
-            return Ok(false);
-        }
-        Err(error) => return Err(PackageError::Lockfile(error.to_string())),
-    };
     let materialized = LockFile::load(snapshot.lock_path())?.ok_or_else(|| {
         PackageError::Lockfile(format!(
             "{} is missing from the active package generation",
@@ -300,6 +305,32 @@ pub(crate) fn acquire_package_install_lock(ctx: &ManifestContext) -> Result<File
     )
     .map_err(|error| PackageError::Lockfile(error.to_string()))?;
     Ok(file)
+}
+
+/// Coordinate with an existing installer without creating runtime state in a
+/// prepared bundle. Absence is safe only for observational reuse: a caller
+/// that needs to publish must acquire the exclusive creating lock and reload
+/// its authority instead of carrying a derivation across that boundary.
+pub(crate) fn acquire_existing_package_install_read_lock(
+    ctx: &ManifestContext,
+) -> Result<Option<File>, PackageError> {
+    let path = ctx
+        .dir
+        .join(harn_modules::package_snapshot::PACKAGE_STATE_DIR)
+        .join(harn_modules::package_snapshot::PACKAGE_INSTALL_LOCK_FILE);
+    let file = match File::open(&path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("failed to open {}: {error}", path.display()).into()),
+    };
+    harn_flock::lock_with_deadline(
+        &file,
+        &path,
+        harn_flock::LockMode::Shared,
+        PACKAGE_INSTALL_LOCK_TIMEOUT,
+    )
+    .map_err(|error| PackageError::Lockfile(error.to_string()))?;
+    Ok(Some(file))
 }
 
 fn publish_pointer_and_collect(

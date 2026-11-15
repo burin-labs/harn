@@ -1,5 +1,6 @@
 import { AgentCompletionSignal, agent_completion_signal } from "std/agent/completion_signal"
 import { agent_completion_adjudicator_declared } from "std/agent/judge"
+import { tool_batch_pending_count } from "std/agent/loop_batch_proposals"
 import {
   AgentToolDispatch,
   __dispatch_results_list,
@@ -797,9 +798,7 @@ fn __completion_needs_verify(verdict: dict?) -> bool {
 }
 
 fn __completion_result(opts: any, payload: dict, stop_reason: string, verdict: dict? = nil) {
-  const batch_state = opts?._tool_batch_dependency_state
-  const deferred = batch_state?.deferred_signatures ?? []
-  const pending_tool_batch_effects = len(deferred) > 0
+  const pending_tool_batch_effects = tool_batch_pending_count(opts) > 0
   const verify_due = opts?.verify_completion != nil || opts?.verify_completion_judge != nil
   const turn_end_due = __turn_end_judge_due(opts, payload, true)
   // A deferred proposal remains durable for exact re-proposal, but it is not a

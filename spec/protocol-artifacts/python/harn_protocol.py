@@ -423,6 +423,7 @@ HARN_AGENT_EVENT_KINDS: tuple = (
     "subagent_join",
     "subagent_stop",
     "tool_batch_disposition",
+    "tool_batch_proposal_resolution",
     "tool_call_audit",
     "tool_format_override",
     "turn_phase_changed",
@@ -2959,6 +2960,21 @@ class HarnAgentEventSubagentStop(_HarnDataclass):
 @dataclass
 class HarnAgentEventToolBatchDisposition(_HarnDataclass):
     receipt: JsonValue
+
+@dataclass
+class HarnAgentEventToolBatchProposalResolutionEventResolution(_HarnDataclass):
+    proposal_id: str
+    source_batch_id: str
+    source_tool_call_id: str
+    tool_name: str
+    resolution: str
+    reason: str
+    confirmation_call_id: Optional[str]
+    pending_count: int
+
+@dataclass
+class HarnAgentEventToolBatchProposalResolutionEvent(_HarnDataclass):
+    resolution: HarnAgentEventToolBatchProposalResolutionEventResolution
 
 @dataclass
 class HarnAgentEventToolCallAudit(_HarnDataclass):

@@ -1561,6 +1561,7 @@ pub enum HarnAgentEventKind {
     SubagentJoin,
     SubagentStop,
     ToolBatchDisposition,
+    ToolBatchProposalResolution,
     ToolCallAudit,
     ToolFormatOverride,
     TurnPhaseChanged,
@@ -1624,6 +1625,7 @@ impl HarnAgentEventKind {
             Self::SubagentJoin => "subagent_join",
             Self::SubagentStop => "subagent_stop",
             Self::ToolBatchDisposition => "tool_batch_disposition",
+            Self::ToolBatchProposalResolution => "tool_batch_proposal_resolution",
             Self::ToolCallAudit => "tool_call_audit",
             Self::ToolFormatOverride => "tool_format_override",
             Self::TurnPhaseChanged => "turn_phase_changed",
@@ -1702,6 +1704,7 @@ impl<'de> Deserialize<'de> for HarnAgentEventKind {
             "subagent_join" => Self::SubagentJoin,
             "subagent_stop" => Self::SubagentStop,
             "tool_batch_disposition" => Self::ToolBatchDisposition,
+            "tool_batch_proposal_resolution" => Self::ToolBatchProposalResolution,
             "tool_call_audit" => Self::ToolCallAudit,
             "tool_format_override" => Self::ToolFormatOverride,
             "turn_phase_changed" => Self::TurnPhaseChanged,
@@ -2417,6 +2420,8 @@ pub const HARN_AGENT_EVENT_KIND_STEP_JUDGE_DECISION: &str = "step_judge_decision
 pub const HARN_AGENT_EVENT_KIND_SUBAGENT_JOIN: &str = "subagent_join";
 pub const HARN_AGENT_EVENT_KIND_SUBAGENT_STOP: &str = "subagent_stop";
 pub const HARN_AGENT_EVENT_KIND_TOOL_BATCH_DISPOSITION: &str = "tool_batch_disposition";
+pub const HARN_AGENT_EVENT_KIND_TOOL_BATCH_PROPOSAL_RESOLUTION: &str =
+    "tool_batch_proposal_resolution";
 pub const HARN_AGENT_EVENT_KIND_TOOL_CALL_AUDIT: &str = "tool_call_audit";
 pub const HARN_AGENT_EVENT_KIND_TOOL_FORMAT_OVERRIDE: &str = "tool_format_override";
 pub const HARN_AGENT_EVENT_KIND_TURN_PHASE_CHANGED: &str = "turn_phase_changed";
@@ -2477,6 +2482,7 @@ pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "subagent_join",
     "subagent_stop",
     "tool_batch_disposition",
+    "tool_batch_proposal_resolution",
     "tool_call_audit",
     "tool_format_override",
     "turn_phase_changed",
@@ -6151,6 +6157,23 @@ pub struct HarnAgentEventToolBatchDisposition {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventToolBatchProposalResolutionEventResolution {
+    pub proposal_id: String,
+    pub source_batch_id: String,
+    pub source_tool_call_id: String,
+    pub tool_name: String,
+    pub resolution: String,
+    pub reason: String,
+    pub confirmation_call_id: Option<String>,
+    pub pending_count: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HarnAgentEventToolBatchProposalResolutionEvent {
+    pub resolution: HarnAgentEventToolBatchProposalResolutionEventResolution,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HarnAgentEventToolCallAudit {
     #[serde(rename = "toolCallId")]
     pub tool_call_id: String,
@@ -6308,6 +6331,8 @@ pub enum HarnAgentEventPayload {
     SubagentStop(HarnAgentEventSubagentStop),
     #[serde(rename = "tool_batch_disposition")]
     ToolBatchDisposition(HarnAgentEventToolBatchDisposition),
+    #[serde(rename = "tool_batch_proposal_resolution")]
+    ToolBatchProposalResolutionEvent(HarnAgentEventToolBatchProposalResolutionEvent),
     #[serde(rename = "tool_call_audit")]
     ToolCallAudit(HarnAgentEventToolCallAudit),
     #[serde(rename = "tool_format_override")]

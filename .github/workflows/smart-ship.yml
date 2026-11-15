@@ -69,7 +69,7 @@ jobs:
       && format('{0}', github.event.workflow_run.pull_requests[0].base.repo.id) == github.repository_id
       && github.event.workflow_run.pull_requests[0].base.ref == 'main'
       && github.event.workflow_run.pull_requests[0].number > 0))
-    uses: burin-labs/.github/.github/workflows/smart-ship.yml@9e172949717d7fe80ffb070627541a45b36c6ea3
+    uses: burin-labs/.github/.github/workflows/smart-ship.yml@2e03686922fc615537d868b48e74a56a7efeac9f
     with:
       runs-on: '"ubuntu-24.04"'
       repair: false

@@ -21,7 +21,7 @@ fn host_agent_session_compact_builtin(
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "__host_agent_session_replace_messages(session_id: string, messages: list, summary?: any) -> nil",
+    sig = "__host_agent_session_replace_messages(session_id: string, messages: list, summary?: any) -> dict",
     category = "agent.host",
     runtime_only = true
 )]
@@ -34,7 +34,7 @@ fn host_agent_session_replace_messages_builtin(
         _ => {
             return Err(VmError::Runtime(format!(
                 "{HOST_SESSION_REPLACE_MESSAGES}: session_id must be a non-empty string"
-            )))
+            )));
         }
     };
     let messages_json: Vec<serde_json::Value> = match args.get(1) {
@@ -42,20 +42,22 @@ fn host_agent_session_replace_messages_builtin(
         _ => {
             return Err(VmError::Runtime(format!(
                 "{HOST_SESSION_REPLACE_MESSAGES}: messages must be a list"
-            )))
+            )));
         }
     };
     let summary = match args.get(2) {
         Some(VmValue::String(s)) if !s.is_empty() => Some(s.to_string()),
         _ => None,
     };
-    crate::agent_sessions::replace_messages_with_summary(
+    let report = crate::agent_sessions::apply_compacted_session_messages(
         &session_id,
         &messages_json,
         summary.as_deref(),
     )
     .map_err(VmError::Runtime)?;
-    Ok(VmValue::Nil)
+    Ok(json_to_vm(&serde_json::Value::Object(
+        report.count_fields(),
+    )))
 }
 
 /// Score skills against the current task context.
@@ -115,7 +117,7 @@ fn host_agent_record_native_tool_fallback_builtin(
         _ => {
             return Err(VmError::Runtime(format!(
                 "{HOST_AGENT_RECORD_NATIVE_TOOL_FALLBACK}: session_id must be a non-empty string"
-            )))
+            )));
         }
     };
     let payload = args.get(1).cloned().unwrap_or(VmValue::Nil);
@@ -176,7 +178,7 @@ fn host_agent_record_compaction_builtin(
         _ => {
             return Err(VmError::Runtime(format!(
                 "{HOST_AGENT_RECORD_COMPACTION}: session_id must be a non-empty string"
-            )))
+            )));
         }
     };
     let payload = args.get(1).cloned().unwrap_or(VmValue::Nil);
@@ -240,7 +242,7 @@ async fn host_agent_session_project_turn(
         _ => {
             return Err(VmError::Runtime(format!(
                 "{HOST_SESSION_PROJECT_TURN}: session_id must be a non-empty string"
-            )))
+            )));
         }
     };
     let options = args.get(1).cloned().unwrap_or(VmValue::Nil);
@@ -314,7 +316,7 @@ fn host_agent_session_claim_tool_format_builtin(
         _ => {
             return Err(VmError::Runtime(format!(
                 "{HOST_SESSION_CLAIM_TOOL_FORMAT}: session_id must be a non-empty string"
-            )))
+            )));
         }
     };
     let tool_format = match args.get(1) {
@@ -322,7 +324,7 @@ fn host_agent_session_claim_tool_format_builtin(
         _ => {
             return Err(VmError::Runtime(format!(
                 "{HOST_SESSION_CLAIM_TOOL_FORMAT}: tool_format must be a non-empty string"
-            )))
+            )));
         }
     };
     crate::agent_sessions::claim_tool_format(&session_id, &tool_format)

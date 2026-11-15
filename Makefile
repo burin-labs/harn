@@ -420,9 +420,11 @@ test-cargo:
 	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test --workspace
 
 .PHONY: test-hostlib-embedding
+HOSTLIB_EMBEDDING_PLATFORM ?= $(shell uname -s)
+HOSTLIB_EMBEDDING_PACKAGES = --workspace $(if $(filter Darwin,$(HOSTLIB_EMBEDDING_PLATFORM)),--exclude harn-wasm)
 test-hostlib-embedding:
-	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) build --locked --profile test -p harn-hostlib --example foreground_command
-	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test --locked -p harn-hostlib --example foreground_command
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) build --locked --profile test $(HOSTLIB_EMBEDDING_PACKAGES) --example foreground_command
+	$(HARN_RUST_TEST_ENV) $(HARN_CARGO_CMD) test --locked $(HOSTLIB_EMBEDDING_PACKAGES) --example foreground_command
 
 # Compatibility alias for the smarter default `make test`.
 test-fast:
@@ -545,7 +547,7 @@ lint-actions-source:
 		actionlint; \
 	else \
 		echo "actionlint not installed; skipping GitHub Actions lint"; \
-		echo "hint: brew install actionlint or go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12"; \
+		echo "hint: go install actionlint.kjanat.dev/cmd/actionlint@v1.16.1"; \
 	fi
 	@if grep -R -n -E 'uses: burin-labs/\.github/\.github/workflows/runner-availability\.yml@' .github/workflows \
 		| grep -v -E '@[0-9a-f]{40}([[:space:]]|$$)'; then \

@@ -15,6 +15,9 @@ pub(super) struct EnvInvocation<'a> {
 pub(super) struct UnwrappedCommand {
     pub(super) command_index: usize,
     pub(super) path_operands: Vec<String>,
+    /// False when a known wrapper could not establish its child boundary.
+    /// An ordinary external program remains resolved at its own argv boundary.
+    pub(super) resolved: bool,
 }
 
 pub(super) fn unwrapped_command_index(tokens: &[String], start: usize, end: usize) -> usize {
@@ -25,8 +28,12 @@ pub(super) fn unwrapped_command(tokens: &[String], start: usize, end: usize) -> 
     unwrapped_command_inner(tokens, start, end, false, true)
 }
 
-pub(super) fn unwrapped_shell_command_index(tokens: &[String], start: usize, end: usize) -> usize {
-    unwrapped_command_inner(tokens, start, end, true, false).command_index
+pub(super) fn unwrapped_shell_command(
+    tokens: &[String],
+    start: usize,
+    end: usize,
+) -> UnwrappedCommand {
+    unwrapped_command_inner(tokens, start, end, true, false)
 }
 
 fn unwrapped_command_inner(
@@ -38,6 +45,7 @@ fn unwrapped_command_inner(
 ) -> UnwrappedCommand {
     let mut index = start;
     let mut path_operands = Vec::new();
+    let mut resolved = true;
     while index < end {
         if shell_assignments && is_shell_assignment(&tokens[index]) {
             index += 1;
@@ -57,6 +65,7 @@ fn unwrapped_command_inner(
             _ => break,
         };
         if next <= index {
+            resolved = false;
             break;
         }
         if project_path_operands {
@@ -67,6 +76,7 @@ fn unwrapped_command_inner(
     UnwrappedCommand {
         command_index: index,
         path_operands,
+        resolved,
     }
 }
 

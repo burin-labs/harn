@@ -86,11 +86,9 @@ pub(super) fn side_effect_ceiling_tool_result(
 /// Build the tool-result body for a NAME-RESOLUTION failure: the call was
 /// refused because its name is not in the session's available tool set
 /// (`DenialGate::ToolCeiling`), not because a granted capability is missing.
-/// Permission framing is actively harmful here — on a headless run the model
-/// reads "tell the user what you need permission for", starts petitioning a
-/// user that does not exist, and stalls. Keep the wording action-oriented:
-/// name the failure class, steer off a re-send, list the callable tools, and
-/// show the call shape. Genuinely permission-gated denials (capability /
+/// Correct the name using supplied schemas or discovery without requiring a
+/// permission request for the name-resolution failure itself.
+/// Genuinely permission-gated denials (capability /
 /// side-effect ceilings, approval and host rejections) keep
 /// [`denied_tool_result`].
 pub(super) fn unavailable_tool_result(
@@ -99,16 +97,12 @@ pub(super) fn unavailable_tool_result(
 ) -> serde_json::Value {
     let reason = reason.into();
     let allowed = crate::orchestration::current_allowed_tool_names();
-    let available_clause = if allowed.is_empty() {
-        String::new()
-    } else {
-        format!(" Available tools: {}.", allowed.join(", "))
-    };
+    let permission_hints = denials::tool_permission_hint_clause(&allowed);
     let next_step = format!(
         "`{tool_name}` is not one of the available tools, so re-sending this call will \
-         fail the same way. This is a tool-name mistake to correct yourself, not \
-         something to ask the user about: pick the available tool that does what you \
-         intended and call it directly as `name({{ ... }})`.{available_clause}"
+         fail the same way. Correct the tool name using a supplied schema or advertised \
+         tool search before calling it. This name-resolution failure does not itself \
+         require new permission.{permission_hints}"
     );
     serde_json::json!({
         "error": "unknown_tool",

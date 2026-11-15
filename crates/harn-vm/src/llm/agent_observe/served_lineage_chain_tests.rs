@@ -33,7 +33,7 @@ fn calling(content: &str, id: &str) -> serde_json::Value {
 }
 
 fn answering(id: &str, content: &str) -> serde_json::Value {
-    serde_json::json!({"role": "tool", "tool_call_id": id, "content": content})
+    serde_json::json!({"role": "tool", "name": "read", "tool_call_id": id, "content": content})
 }
 
 /// Each step is the full array served to one call. Steps 3 and 5 are not

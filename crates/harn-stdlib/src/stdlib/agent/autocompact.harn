@@ -509,7 +509,7 @@ pub fn agent_autocompact_if_needed(agent: HarnessAgent, session: dict, opts: any
       requested_strategy,
       effective.threshold_modified,
     )
-    agent.session_replace_messages(session.session_id, compacted, summary)
+    const reminder_fields = agent.session_replace_messages(session.session_id, compacted, summary)
     const metadata = {
       mode: "auto",
       reason: "threshold",
@@ -522,6 +522,7 @@ pub fn agent_autocompact_if_needed(agent: HarnessAgent, session: dict, opts: any
     }
       + engine_fields
       + policy_fields
+      + reminder_fields
     agent_record_compaction(agent, session.session_id, metadata)
     const post_payload = pre_payload
       + {
@@ -533,6 +534,7 @@ pub fn agent_autocompact_if_needed(agent: HarnessAgent, session: dict, opts: any
       }
       + engine_fields
       + policy_fields
+      + reminder_fields
     __host_fire_session_hook("post_compact", post_payload)
     agent_reminder_providers_fire(agent, session.session_id, "post_compact", post_payload, opts)
   }
@@ -621,7 +623,7 @@ pub fn agent_emergency_compact(agent: HarnessAgent, session: dict, opts: dict?, 
       "observation_mask",
       false,
     )
-    agent.session_replace_messages(session.session_id, compacted, summary)
+    const reminder_fields = agent.session_replace_messages(session.session_id, compacted, summary)
     const metadata = {
       mode: "emergency",
       reason: "context_overflow",
@@ -634,6 +636,7 @@ pub fn agent_emergency_compact(agent: HarnessAgent, session: dict, opts: dict?, 
       estimated_tokens_after: estimate_tokens(compacted),
     }
       + engine_fields
+      + reminder_fields
     agent_record_compaction(agent, session.session_id, metadata)
     const post_payload = pre_payload
       + {
@@ -644,6 +647,7 @@ pub fn agent_emergency_compact(agent: HarnessAgent, session: dict, opts: dict?, 
         estimated_tokens_after: estimate_tokens(compacted),
       }
       + engine_fields
+      + reminder_fields
     __host_fire_session_hook("post_compact", post_payload)
     agent_reminder_providers_fire(agent, session.session_id, "post_compact", post_payload, opts)
   }

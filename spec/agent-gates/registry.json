@@ -305,6 +305,7 @@
   ],
   "binding_scopes": [],
   "forwarder_files": [
+    "spec/agent-gates/forwarding-tool-batch-proposals.json",
     "spec/agent-gates/reviewed-turn-preparation.json",
     "spec/agent-gates/forwarding-agentspec-runner.json",
     "spec/agent-gates/native-provider-forwarding.json",

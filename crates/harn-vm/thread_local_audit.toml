@@ -1034,3 +1034,9 @@ path = "src/test_panic_silence.rs"
 statics = ["SILENT"]
 category = "thread_private"
 plan = "thread_private_test"
+
+[[thread_local]]
+path = "src/llm/helpers/options/system_prompt.rs"
+statics = ["SYSTEM_PROMPT_METADATA_PROJECTIONS"]
+category = "thread_private"
+plan = "thread_private_test"

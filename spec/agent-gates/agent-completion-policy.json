@@ -221,12 +221,20 @@
         "reader": "workflow-loop-key-domain"
       },
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_batch_proposals.harn",
+        "reader": "tool_batch_inject_resolution_tool"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_dispatch_options.harn",
         "reader": "__loop_dispatch_options"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
-        "reader": "__tool_batch_call_classification"
+        "reader": "__tool_batch_plan"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "reader": "__tool_batch_dispatch"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/postturn.harn",
