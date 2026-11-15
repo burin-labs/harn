@@ -145,47 +145,11 @@ fn retained_resolution_keeps_gemini_response_names_and_semantic_audit() {
     );
     crate::llm_config::set_user_overrides(Some(providers));
 
-    let source = r#"
-import { agent_loop } from "std/agent/loop"
-import { AgentSpec } from "std/agent/options"
-import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
-
-pipeline main(harness: Harness) {
-  const sid = harness.agent.open()
-  const writes = harness.runtime.atomic(0)
-  let tools = tool_registry()
-  tools = tool_define(tools, "read_evidence", "Read the evidence.", {
-    parameters: {}, annotations: {kind: "read", side_effect_level: "read_only"},
-    handler: { _args -> return "Evidence ready." },
-  })
-  tools = tool_define(tools, "edit_value", "Apply the chosen edit.", {
-    parameters: {}, annotations: {kind: "edit", side_effect_level: "workspace_write"},
-    handler: { _args ->
-      harness.runtime.atomic_add(writes, 1)
-      return agent_tool_handler_result("applied", {
-        mutation_status: "applied", requires_repair_before_verify: false,
-      })
-    },
-  })
-  const options: AgentSpec = {
-    provider: "gemini", model: "gemini-2.5-flash-lite", tools: tools,
-    session_id: sid, tool_format: "native", stream: false, max_tokens: 256,
-    loop_until_done: true, max_iterations: 3, final_wrapup: false, auto_compact: false,
-  }
-  const outcome = agent_loop(harness, "Read before confirming the edit.", nil, options)
-  const stored = harness.agent.snapshot(sid).messages.find({ message ->
-    message?.tool_call_id == "confirm"
-  })
-  harness.stdio.log(json_stringify({
-    mutations: harness.runtime.atomic_get(writes), semantic_name: stored?.name,
-    status: outcome.status,
-  }))
-  harness.agent.close(sid)
-}
-"#;
+    let source =
+        include_str!("../../../../../../tests/agent/fixtures/gemini_retained_resolution.harn");
     let path = std::path::Path::new(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/src/llm/api/transport_stub_tests/gemini_retained_resolution_test.harn"
+        "/../../tests/agent/fixtures/gemini_retained_resolution.harn"
     ));
     let chunk = crate::compile_source_at_path(source, path, None).expect("fixture compiles");
     let runtime = tokio::runtime::Builder::new_current_thread()
