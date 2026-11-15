@@ -84,6 +84,10 @@ fn normalize_os_path_alias(path: &Path) -> PathBuf {
 /// link could change in between. The result names no link, so a link swapped
 /// in later cannot redirect it: Seatbelt matches the resolved path of each
 /// access, and Landlock checks the real path of the descriptor it opened.
+///
+/// Each directory keeps the name it has on disk, so on a case-insensitive
+/// volume `untrusted` and every later comparison see the canonical spelling,
+/// not the declared one.
 #[cfg(any(
     target_os = "linux",
     target_os = "macos",
@@ -128,7 +132,7 @@ pub(crate) fn resolve_through_host_links(
                 }
                 pending.extend(names);
             }
-            Ok(_) => current = next,
+            Ok(_) => current = on_disk_spelling(next)?,
             Err(_) => {
                 let mut missing = next;
                 while let Some(name) = pending.pop() {
@@ -166,6 +170,34 @@ thread_local! {
     /// test can change the tree at exactly that point.
     pub(crate) static AFTER_LOOK: std::cell::RefCell<Option<LookHook>> =
         const { std::cell::RefCell::new(None) };
+}
+
+/// `next`, which was just seen not to be a link, as it is spelled on disk.
+/// A resolution that lands anywhere but `next` up to letter case means the
+/// tree moved under the walk, and is refused.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+))]
+fn on_disk_spelling(next: PathBuf) -> Result<PathBuf, PathBuf> {
+    // Windows canonical paths carry a verbatim (`\\?\`) prefix no declared
+    // root has, so the declared spelling stands there.
+    if cfg!(windows) {
+        return Ok(next);
+    }
+    match std::fs::canonicalize(&next) {
+        Ok(real)
+            if real
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&next.to_string_lossy()) =>
+        {
+            Ok(real)
+        }
+        Ok(_) => Err(next),
+        Err(_) => Ok(next),
+    }
 }
 
 /// `path`'s root (prefix and root directory) and its remaining names, last

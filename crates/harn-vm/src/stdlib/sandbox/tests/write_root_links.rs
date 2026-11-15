@@ -178,9 +178,12 @@ fn a_socket_root_a_child_replaced_with_a_link_grants_nothing_outside() {
     std::fs::create_dir(&target).unwrap();
     let mut policy = writing_policy(&ws, &target);
     policy.process_sandbox.unix_socket_roots = vec![sockets.display().to_string()];
+    // From the workspace, isolated (`-I`): the test's own working directory is
+    // not readable inside the sandbox, and Python would import from it.
     let bind = |path: &Path| {
         format!(
-            "{python} -c \"import socket; socket.socket(socket.AF_UNIX).bind('{}')\"",
+            "cd '{}' && {python} -I -c \"import socket; socket.socket(socket.AF_UNIX).bind('{}')\"",
+            ws.display(),
             path.display()
         )
     };
@@ -381,6 +384,44 @@ fn a_write_root_flipped_after_each_look_never_resolves_outside() {
     }
     assert!(flips > 0, "the flip never fired, so nothing was measured");
     eprintln!("[a_write_root_flipped_after_each_look_never_resolves_outside] {flips} flips");
+}
+
+/// On a case-insensitive volume, a root declared with different letter case
+/// than the disk still sits in the child-writable workspace, so the link it
+/// is reached through is refused.
+#[test]
+fn a_write_root_declared_in_other_letter_case_is_still_checked() {
+    const TEST: &str = "a_write_root_declared_in_other_letter_case_is_still_checked";
+    let Some(Fixture { ws, outside, _dirs }) = fixture(TEST, false) else {
+        return;
+    };
+    let name = ws.file_name().unwrap().to_string_lossy().to_uppercase();
+    let shouted = ws.with_file_name(name);
+    if shouted == ws || !shouted.is_dir() {
+        crate::sandbox_host::boundary_not_measured(TEST, "this volume is case-sensitive");
+        return;
+    }
+    std::os::unix::fs::symlink(&outside, ws.join("target")).unwrap();
+    let policy = writing_policy(&ws, &shouted.join("target"));
+    let granted = crate::stdlib::sandbox::process_sandbox_policy_write_roots(&policy);
+    assert!(
+        !granted.iter().any(|root| root.starts_with(&outside)),
+        "a write root declared as {} was granted through its link: {granted:?}",
+        shouted.join("target").display()
+    );
+    // The protected configuration check sees the disk spelling too.
+    if let Some(home) = crate::stdlib::sandbox::sandbox_user_home_dir() {
+        let ssh = home.join(".SSH");
+        if ssh.is_dir() {
+            let policy = writing_policy(&ws, &ssh);
+            let granted = crate::stdlib::sandbox::process_sandbox_policy_write_roots(&policy);
+            assert!(
+                granted.is_empty(),
+                "{} was granted: {granted:?}",
+                ssh.display()
+            );
+        }
+    }
 }
 
 /// A write root on or over the user's own git, gh or ssh configuration is not
