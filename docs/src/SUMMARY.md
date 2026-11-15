@@ -413,6 +413,7 @@
 - [Post-merge CI tier](./dev/post-merge-tier.md)
 - [Green branch](./dev/green-branch.md)
 - [Agent shell guard](./dev/agent-shell-guard.md)
+- [Build target ownership](./dev/build-target-ownership.md)
 - [Deterministic test patterns](./dev/testing.md)
 - [Check documentation examples](./dev/check-docs-snippets.md)
 - [Windows test coverage](./dev/windows-test-coverage.md)

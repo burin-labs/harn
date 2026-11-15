@@ -127,6 +127,9 @@ clean_workspace_artifacts() {
   actual_signature="$(head -c "${#signature}" "${cache_tag}")" || return 1
   [[ "${actual_signature}" == "${signature}" ]] || return 1
 
+  # Checkout custody belongs to the consuming target, not its dependency seed.
+  rm -f -- "${target_dir}/.harn-target-owner.json" || return 1
+
   # Cargo fingerprints and dep-info contain absolute paths to the worktree that
   # produced them. Keep third-party dependencies warm, but force every
   # workspace package to be rebuilt against the consuming worktree.

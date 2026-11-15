@@ -12,6 +12,7 @@ tmp_root=$(mktemp -d)
 ambient_bin="$tmp_root/ambient-bin"
 ambient_cargo_record="$tmp_root/ambient-cargo.txt"
 ambient_rustc_record="$tmp_root/ambient-rustc.txt"
+export DEV_SETUP_TEST_OWNER_RECORD="$tmp_root/target-owners.txt"
 fixture_system_path="$ambient_bin:/usr/bin:/bin"
 mkdir -p "$ambient_bin"
 cat > "$ambient_bin/cargo" <<SH
@@ -98,6 +99,7 @@ printf '%s/debug/harn\n' "$target_dir"
 SH
   {
     printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
+    printf '%s\n' 'if [[ "${1:-}" == --record-owner ]]; then printf "%s\t%s\n" "$2" "$3" >> "$DEV_SETUP_TEST_OWNER_RECORD"; exit 0; fi'
     printf '%s\n' 'printf "%s\\n" "$PWD" >> "$DEV_SETUP_TEST_PRUNE_RECORD"'
   } > "$repo/scripts/prune_stale_targets.sh"
   chmod +x "$repo/scripts/sign_local_macos.sh" \
@@ -803,6 +805,7 @@ install_recording_pruner() {
   local repo="$1"
   {
     printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail'
+    printf '%s\n' 'if [[ "${1:-}" == --record-owner ]]; then printf "%s\t%s\n" "$2" "$3" >> "$DEV_SETUP_TEST_OWNER_RECORD"; exit 0; fi'
     printf '%s\n' 'printf "%s protect=%s\n" "$PWD" "${HARN_TARGET_GC_PROTECT-__unset__}" \'
     printf '%s\n' '  >> "$DEV_SETUP_TEST_PRUNE_RECORD"'
     printf '%s\n' '[[ "${DEV_SETUP_TEST_PRUNE_FAIL:-0}" == "1" ]] && exit 1'
@@ -955,6 +958,11 @@ fi
 
 if DEV_SETUP_TEST_VERIFY_FAIL=1 run_setup "$rust_repo" rust "$tmp_root/invalid-signature-output.txt" "$rust_cargo"; then
   echo "rust setup accepted a failed final signature verification" >&2
+  exit 1
+fi
+
+if ! grep -Fxq "$(printf '%s\t%s' "$rust_target_dir" "$rust_repo")" "$DEV_SETUP_TEST_OWNER_RECORD"; then
+  echo "setup did not register the configured target's checkout" >&2
   exit 1
 fi
 

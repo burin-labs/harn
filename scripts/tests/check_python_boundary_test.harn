@@ -33,6 +33,25 @@ pipeline test_allowlist_exact_and_prefix_rules(harness: Harness, task: unknown) 
   )
   assert_eq(target_gc_rule.allowed, true)
   assert_eq(target_gc_rule.owner, "Target-cache collector")
+  assert_eq(
+    python_boundary_rule_for("scripts/tests/prune_stale_targets_clone_owner_test.py").allowed,
+    true,
+  )
+  assert_eq(
+    embedded_python_rule_for(
+      "Makefile",
+      "python3 ./scripts/tests/prune_stale_targets_clone_owner_test.py",
+    ).allowed,
+    true,
+  )
+  assert_eq(
+    embedded_python_rule_for("scripts/prune_stale_targets.sh", r#"python3 - "$@" <<'PY'"#).allowed,
+    true,
+  )
+  assert_eq(
+    embedded_python_rule_for("scripts/other_target_gc.sh", r#"python3 - "$@" <<'PY'"#).allowed,
+    false,
+  )
   assert_eq(python_boundary_rule_for("scripts/lib/target_gc_incremental.py").allowed, true)
   assert_eq(
     python_boundary_rule_for("scripts/tests/prune_stale_targets_incremental_test.py").allowed,
