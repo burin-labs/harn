@@ -20,6 +20,8 @@ fn writing_policy(workspace: &Path) -> CapabilityPolicy {
 #[cfg(target_os = "macos")]
 #[test]
 fn granted_clone_transfer_writes_share_the_backend_root_census() {
+    use crate::stdlib::sandbox::{normalize_for_policy, workspace_env};
+
     let workspace = tempfile::tempdir().unwrap();
     let private = tempfile::tempdir().unwrap();
     let transfer = private.path().join("repository");

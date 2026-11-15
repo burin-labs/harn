@@ -73,7 +73,11 @@ fn native_clone_remains_an_ordinary_worktree_after_private_directory_handoff() {
     let template = private.join("empty-template");
     std::fs::create_dir(&source).unwrap();
     std::fs::create_dir_all(&template).unwrap();
-    let program = which::which("git").unwrap().canonicalize().unwrap();
+    let program = PathBuf::from(crate::stdlib::process::resolve_program_path_for_spawn(
+        "git",
+    ))
+    .canonicalize()
+    .expect("native Git on PATH");
     let run = |cwd: &Path, args: &[&str]| {
         let output = std::process::Command::new(&program)
             .args(args)
