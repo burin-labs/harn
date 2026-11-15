@@ -6,6 +6,7 @@ import {
 } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
 import { __dispatch_call_tally } from "std/agent/loop_result_status"
+import { agent_session_post_event } from "std/agent/state"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { __tool_registry_name } from "std/llm/call_shape"
 import { llm_text, with_llm_script } from "std/testing"
@@ -160,13 +161,19 @@ fn assert_mutation_outcome(
   body: string,
   outcome: MutationOutcome,
 ) -> nil {
-  const should_write = ["resume", "replay", "revise"].contains(variant)
+  const should_write = ["resume", "replay", "revise", "reread"].contains(variant)
   assert_eq(outcome.mutations, should_write ? 1 : 0)
   assert_eq(
     outcome.attempted,
-    variant == "discard" || variant == "compacted" || variant == "new_direction" ? 1 : 2,
+    ["reread", "reread_denied"].contains(variant) ? 3 : variant == "discard"
+      || variant == "compacted"
+      || variant == "new_direction" ? 1 : 2,
   )
-  assert_eq(outcome.succeeded, should_write || variant == "reread" ? 2 : 1)
+  assert_eq(
+    outcome.succeeded,
+    variant == "reread" ? 3 : should_write
+      || ["reread_denied", "reread_injected", "reread_inbox"].contains(variant) ? 2 : 1,
+  )
   if should_write {
     assert_eq(fs.read_text(path), variant == "revise" ? "revised" : body)
   } else {
@@ -183,8 +190,8 @@ fn assert_served_proposals(
 ) -> ServedProposalProof {
   assert_eq(
     len(calls),
-    variant == "reread" ? 4 : 3,
-    "both the confirmation and terminal must reach model serving",
+    ["reread_failed", "reread_inbox"].contains(variant) ? 4 : 3,
+    "both confirmation and terminal must reach model serving; actual requests=${len(calls)}",
   )
   assert(
     calls[0].tools.any({ tool -> (tool?.function?.name ?? __tool_registry_name(tool)) == RESOLVE }),
@@ -203,7 +210,7 @@ fn assert_served_proposals(
       }
     }
   }
-  if variant == "resume" || variant == "replay" {
+  if variant == "resume" || variant == "replay" || variant == "reread" {
     const confirmed_result = calls[2].messages.find(
       { message -> message?.tool_call_id == "confirm" },
     )
@@ -283,6 +290,17 @@ pub fn retained_proposal_trial(harness: Harness, variant: string) -> RetainedPro
       annotations: {kind: "read", side_effect_level: "read_only"},
       handler: { _args ->
         harness.runtime.atomic_add(reads, 1)
+        if harness.runtime.atomic_get(reads) == 2 {
+          if variant == "reread_failed" {
+            return agent_tool_handler_result("Read failed.", {error: "unavailable"}, "error")
+          }
+          if variant == "reread_injected" {
+            harness.agent.inject(sid, {role: "user", content: "Use a new task instead."})
+          }
+          if variant == "reread_inbox" {
+            agent_session_post_event(harness.agent, sid, "user_interrupt", "Pause this work.")
+          }
+        }
         return variant == "discard" || variant == "revise" ? "The earlier proposal is wrong; discard it." : "Evidence ready. "
           + "x" * 4000
       },
@@ -323,7 +341,7 @@ pub fn retained_proposal_trial(harness: Harness, variant: string) -> RetainedPro
               max_iterations: 4,
               final_wrapup: false,
               tool_precheck: { call ->
-                if variant == "denied" && call?.tool == "edit_value" {
+                if ["denied", "reread_denied"].contains(variant) && call?.tool == "edit_value" {
                   return {deny: true, model_cue: "The current policy refuses this edit."}
                 }
                 return nil
@@ -381,7 +399,7 @@ pub fn retained_proposal_trial(harness: Harness, variant: string) -> RetainedPro
                   if variant == "replay" {
                     next.push(decision("replay", proposal_id, "resume"))
                   }
-                  if variant == "reread" {
+                  if starts_with(variant, "reread") {
                     next.push({id: "reread", name: "read_evidence", arguments: {}})
                   }
                   if variant == "revise" {
@@ -395,7 +413,7 @@ pub fn retained_proposal_trial(harness: Harness, variant: string) -> RetainedPro
                   }
                   confirmation_bytes = len(json_stringify(next))
                   harness.llm.mock_enqueue({tool_calls: next})
-                } else if variant == "reread" && turn == 2 {
+                } else if starts_with(variant, "reread") && turn == 2 {
                   assert_eq(
                     harness.runtime.atomic_get(reads),
                     2,
@@ -403,25 +421,35 @@ pub fn retained_proposal_trial(harness: Harness, variant: string) -> RetainedPro
                   )
                   assert_eq(
                     harness.runtime.atomic_get(writes),
-                    0,
-                    "earlier confirmation cannot authorize an edit past a new read",
+                    variant == "reread" ? 1 : 0,
+                    "continuation must honor explicit intent, read failures, current policy and controls",
                   )
-                  const retained = info.dispatch.find({ result -> result?.status == "deferred" })
-                  assert(retained != nil, "the edit must be retained again after the new read")
-                  const next_id = retained.dispatch_receipt.retained_proposal_id
-                  assert(
-                    type_of(next_id) == "string" && next_id != "" && next_id != proposal_id,
-                    "new observation results require a fresh explicit confirmation",
-                  )
-                  harness.llm.mock_enqueue(
-                    {
-                      tool_calls: [
-                        decision("stale-confirm", proposal_id, "resume"),
-                        decision("discard-after-reread", next_id, "discard"),
-                      ],
-                    },
-                  )
-                } else if turn == (variant == "reread" ? 3 : 2) {
+                  if variant == "reread" {
+                    assert(
+                      info.dispatch.all({ result -> result?.status != "deferred" }),
+                      "a confirmed edit must not demand another confirmation after a successful read",
+                    )
+                  }
+                  if ["reread_failed", "reread_inbox"].contains(variant) {
+                    const retained = info.dispatch.find({ result -> result?.status == "deferred" })
+                    assert(retained != nil, "an unexecuted edit must remain explicitly resolvable")
+                    harness.llm.mock_enqueue(
+                      {
+                        tool_calls: [
+                          decision(
+                            "discard-after-read",
+                            retained.dispatch_receipt.retained_proposal_id,
+                            "discard",
+                          ),
+                        ],
+                      },
+                    )
+                  } else {
+                    harness.llm.mock_enqueue(llm_text("Finished. ##DONE##"))
+                  }
+                } else if ["reread_failed", "reread_inbox"].contains(variant) && turn == 3 {
+                  harness.llm.mock_enqueue(llm_text("Finished. ##DONE##"))
+                } else if turn == 2 {
                   harness.llm.mock_enqueue(llm_text("Finished. ##DONE##"))
                 }
                 return nil

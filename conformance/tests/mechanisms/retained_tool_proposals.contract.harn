@@ -1,6 +1,6 @@
 // Trigger: one response proposes an edit beside an observation.
 // Effect: explicit confirmation executes the original body through ordinary dispatch.
-// Negative: discard or a newer observation cannot execute the stale proposal.
+// Negative: discard or a failed observation cannot execute the proposal.
 import { retained_proposal_trial } from "../../../tests/agent/fixtures/retained_tool_proposals"
 import { contract_effect, contract_negative } from "./lib/mechanism_contract"
 
@@ -31,11 +31,20 @@ pipeline default(harness: Harness) {
     discarded.mutations != 0 || discarded.discarded != 1 || discarded.attempted != 1,
   )
   const reread = retained_proposal_trial(harness, "reread")
+  contract_effect(
+    harness.stdio,
+    "effect_current_confirmation_survives_successful_coissued_observation",
+    reread.mutations == 1 && reread.observations == 2 && reread.deferred == 1
+      && reread.confirmed == 1
+      && reread.requests == 3
+      && reread.body_copies == 1,
+  )
+  const failed_read = retained_proposal_trial(harness, "reread_failed")
   contract_negative(
     harness.stdio,
-    "negative_new_observation_requires_fresh_confirmation",
-    reread.mutations != 0 || reread.observations != 2 || reread.deferred != 2
-      || reread.confirmed != 1
-      || reread.discarded != 1,
+    "negative_failed_observation_prevents_confirmed_mutation",
+    failed_read.mutations != 0 || failed_read.observations != 2 || failed_read.deferred != 2
+      || failed_read.confirmed != 1
+      || failed_read.discarded != 1,
   )
 }

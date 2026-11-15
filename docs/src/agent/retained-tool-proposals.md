@@ -17,6 +17,14 @@ at the existing dispatch boundary. The confirmation call supplies the new
 native tool-call identifier. Current schema validation, policy, approval,
 middleware, resource guards and failed-mutation barriers still apply.
 
+A current response may resume an edit and request additional reads together.
+After those reads succeed, the dispatcher executes the confirmed edit without
+requesting another confirmation. It rechecks pending controls and the original
+run, accepted control revision and context first. A failed read or changed
+control/context prevents continuation. Fresh edits remain retained, and resumed
+verification or completion calls keep their phase barriers. Confirmation grants
+no authority to execute automatically in a later response.
+
 Pending proposals belong to one run, public user-message boundary and accepted
 control revision. Compaction invalidates them because the source proposal may
 no longer be visible to the model. A terminal run retires any remaining

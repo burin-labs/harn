@@ -85,6 +85,20 @@ fn current_scope(agent: HarnessAgent, session_id: string, options: dict) -> Tool
   return {scope: scope, user_boundary: user_boundary, context_revision: revision}
 }
 
+/**
+ * Recheck the original run, accepted controls and retained context before continuation.
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn tool_batch_scope_is_current(
+  agent: HarnessAgent,
+  session_id: string,
+  options: dict,
+  scope: string,
+) -> bool {
+  return current_scope(agent, session_id, options).scope == scope
+}
+
 fn emit_resolution(
   agent: HarnessAgent,
   session_id: string,
@@ -180,7 +194,7 @@ pub fn tool_batch_inject_resolution_tool(options: dict) -> ToolBatchToolProjecti
   const tools = tool_define(
     registry,
     TOOL_BATCH_RESOLUTION_TOOL,
-    "Review new observations before choosing whether to resume a retained, unexecuted proposal with its stored original arguments or discard it. Use one call per proposal_id from the retained result. To change arguments, discard and issue a corrected ordinary tool call. Resuming still applies current tool policy.",
+    "Resume or discard one retained proposal by proposal_id. Resume executes stored arguments under current policy, after successful coissued reads. Inspect any evidence needed to decide before resuming. To change arguments, discard and issue a new tool call.",
     {
       parameters: {
         proposal_id: {type: "string"},
