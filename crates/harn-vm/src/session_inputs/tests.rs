@@ -264,3 +264,25 @@ fn a_one_byte_tail_is_released_and_the_value_it_begins_still_redacts() {
     assert_eq!(stream.push(b"op"), b"top");
     assert_eq!(stream.finish(), b"");
 }
+
+/// Two overlapping filtered values that share their first byte: whichever one
+/// completes after that byte is released, the rest of it still redacts, and
+/// the longer match wins as it does for the whole stream.
+#[test]
+fn a_released_byte_starting_two_overlapping_values_still_redacts_either() {
+    let store = super::Store::default();
+    for value in ["stream-secret-value", "stream-secret-longer-value"] {
+        assert!(store.lock().add_filter(value));
+    }
+    let filter = super::OutputFilter(store);
+    for (rest, expected) in [
+        (&b"tream-secret-value."[..], &b"[redacted]."[..]),
+        (b"tream-secret-longer-value.", b"[redacted]."),
+    ] {
+        let mut stream = filter.stream();
+        assert_eq!(stream.push(b"a s"), b"a s");
+        let mut shown = stream.push(rest);
+        shown.extend(stream.finish());
+        assert_eq!(shown, expected, "{}", String::from_utf8_lossy(rest));
+    }
+}
