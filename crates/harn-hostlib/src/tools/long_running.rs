@@ -408,7 +408,7 @@ struct WaiterContext {
     private_filter: harn_vm::session_inputs::OutputFilter,
     /// The command grant's private directory, kept until the waiter has
     /// reaped the child and returns.
-    _granted: Option<harn_vm::stdlib::process::GrantedSpawn>,
+    granted: Option<harn_vm::stdlib::process::GrantedSpawn>,
 }
 
 struct ProgressThreadContext {
@@ -496,25 +496,22 @@ pub(crate) fn spawn_long_running_with_options(
     )?;
     let mut env = env;
     proc::apply_toolchain_path(Some(&effective_cwd), &mut env, options.env_mode);
-    let mut env_remove = options.env_remove.clone();
-    if let Some(granted) = &granted {
-        proc::apply_command_grant(granted, &mut env, &mut env_remove);
-    }
-    let spec = SpawnSpec {
+    let mut spec = SpawnSpec {
         builtin,
-        program: granted
-            .as_ref()
-            .map_or_else(|| program.clone(), |granted| granted.program.clone()),
+        program: program.clone(),
         args: args.clone(),
         cwd: Some(effective_cwd.clone()),
         env,
-        env_remove,
+        env_remove: options.env_remove.clone(),
         env_mode: options.env_mode,
         use_stdin: false,
         configure_process_group: true,
         owner_death: OwnerDeathPolicy::KillContainment,
         output_capture: process_handle::OutputCapture::Pipe,
     };
+    if let Some(granted) = &granted {
+        proc::apply_command_grant(granted, &mut spec);
+    }
     let launching = granted.as_ref().map(|granted| granted.launching());
     let handle = process_handle::spawn_process(spec).map_err(|error| {
         proc::process_error_to_hostlib(builtin, requested_cwd.as_deref(), &effective_cwd, error)
@@ -589,7 +586,7 @@ pub(crate) fn spawn_long_running_with_options(
         snapshot_binding: options.snapshot_binding.clone(),
         output_feed,
         private_filter,
-        _granted: granted,
+        granted,
     };
     let waiter_thread_name = waiter_context.handle_id.clone();
     let capture = options.capture;
@@ -645,7 +642,11 @@ pub(crate) fn spawn_long_running_with_options(
 }
 
 /// Background thread that waits for a child process and fires feedback.
-fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture: CaptureConfig) {
+fn waiter_thread(
+    mut context: WaiterContext,
+    cancel_state: Arc<CancelState>,
+    capture: CaptureConfig,
+) {
     let waiter_start = std::time::Instant::now();
 
     // Take the handle out of the store. If the entry is already gone (i.e.
@@ -767,11 +768,20 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         // No observed exit is neither a successful run nor proof of a signal.
         None => (-1, None),
     };
+    let process_succeeded = !cancelled && waited.is_ok() && exit_code == 0 && signal_name.is_none();
+    let grant_error = context
+        .granted
+        .take()
+        .and_then(|granted| granted.complete(process_succeeded).err());
+    if let Some(error) = &grant_error {
+        stderr
+            .extend_from_slice(format!("\nharn: command completion refused: {error}\n").as_bytes());
+    }
     let command_status = if timed_out {
         CommandStatus::TimedOut
     } else if cancelled {
         CommandStatus::Killed
-    } else if waited.is_err() {
+    } else if waited.is_err() || grant_error.is_some() {
         CommandStatus::Blocked
     } else {
         CommandStatus::Completed
@@ -853,7 +863,7 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
         },
     );
     payload.insert("timed_out".into(), serde_json::Value::Bool(timed_out));
-    if !cancelled && waited.is_ok() {
+    if !cancelled && waited.is_ok() && grant_error.is_none() {
         if let Some(receipt) = handle.verifier_execution_receipt() {
             payload.insert(
                 "verifier_receipt".into(),

@@ -486,6 +486,9 @@ result contains Git's normal repository config, with no login, credential
 helper or Harn control setting. The credential socket and control config stay
 outside the cloned repository. If the destination's Git marker changes before
 handoff, Harn refuses to replace it.
+The same handoff runs for foreground, background and automatically backgrounded
+commands. A failed handoff reports a blocked command even if Git itself exited
+with code zero; it does not publish a successful command receipt.
 
 For fetch, push and ls-remote, a granted Git never opens the repository's Git
 directory as its own.

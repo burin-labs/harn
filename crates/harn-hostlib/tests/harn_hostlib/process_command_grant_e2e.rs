@@ -30,6 +30,10 @@ use harn_vm::VmValue;
 
 use super::support::*;
 
+#[cfg(target_os = "macos")]
+#[path = "process_command_grant_clone.rs"]
+mod clone;
+
 const GRANTED: &str = "GH_TOKEN";
 const PROBE: &str = "harn-probe-gh-grant";
 const SECRET_ACCOUNT: &str = "gh-grant-e2e";
