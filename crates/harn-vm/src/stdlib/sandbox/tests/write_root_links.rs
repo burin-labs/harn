@@ -341,6 +341,7 @@ fn a_write_root_flipped_after_each_look_never_resolves_outside() {
             std::fs::remove_dir_all(path).unwrap();
         }
     };
+    let policy = writing_policy(&ws, &target.join("sub"));
     let depth = target.join("sub").components().count();
     let mut flips = 0;
     for starts_as_link in [false, true] {
@@ -357,10 +358,10 @@ fn a_write_root_flipped_after_each_look_never_resolves_outside() {
             }
             let mut looks = 0;
             let mut flipped = false;
-            // The workspace is what a confined child can write.
+            // The same test of a link's directory the grant path applies.
             let resolved = crate::stdlib::sandbox::paths::walk_host_links(
                 &target.join("sub"),
-                &mut |dir| dir.starts_with(&ws),
+                &mut crate::stdlib::sandbox::policy_projection::link_dir_is_untrusted(&policy),
                 &mut |_| {
                     looks += 1;
                     if looks == at && !flipped {

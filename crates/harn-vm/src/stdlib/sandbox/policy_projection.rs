@@ -157,6 +157,27 @@ fn trusted_process_roots(
     host_resolved_roots(policy, declared.iter().map(PathBuf::from), usage)
 }
 
+/// Whether a link in `dir` is one a confined child under `policy` could have
+/// placed: `dir` is under a root the child can write. The writable set is
+/// computed only when a declared root first crosses a link.
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "openbsd",
+    target_os = "windows"
+))]
+pub(crate) fn link_dir_is_untrusted(
+    policy: &CapabilityPolicy,
+) -> impl FnMut(&std::path::Path) -> bool + '_ {
+    let mut child_writable: Option<Vec<PathBuf>> = None;
+    move |dir| {
+        child_writable
+            .get_or_insert_with(|| process_sandbox_writable_roots(policy))
+            .iter()
+            .any(|root| dir.starts_with(root))
+    }
+}
+
 /// Host-declared roots, each resolved only through links the host placed.
 ///
 /// A root is resolved for every spawn, so a link along its path decides where
@@ -176,14 +197,7 @@ pub(crate) fn host_resolved_roots(
     declared: impl IntoIterator<Item = PathBuf>,
     usage: RootUse,
 ) -> Vec<PathBuf> {
-    // Computed only when a declared root crosses a link.
-    let mut child_writable: Option<Vec<PathBuf>> = None;
-    let mut untrusted = |dir: &std::path::Path| {
-        child_writable
-            .get_or_insert_with(|| process_sandbox_writable_roots(policy))
-            .iter()
-            .any(|root| dir.starts_with(root))
-    };
+    let mut untrusted = link_dir_is_untrusted(policy);
     let protected = match usage {
         RootUse::Write => crate::user_dirs::home_dir()
             .filter(|home| home.is_absolute())
