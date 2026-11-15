@@ -380,15 +380,12 @@ impl ToolCatalog {
             .components
             .as_ref()
             .map(|components| &components.schemas);
+        let mut references = OfflineSchemaResources::new(component_schemas);
         if let Some(components) = component_schemas {
             for (name, schema) in components {
                 require_non_empty(name, "components.schemas key")?;
                 validate_schema_document(schema, false, &format!("components.schemas.{name}"))?;
-                validate_refs(
-                    schema,
-                    component_schemas,
-                    &format!("components.schemas.{name}"),
-                )?;
+                references.validate(schema, &format!("components.schemas.{name}"))?;
             }
         }
 
@@ -486,11 +483,7 @@ impl ToolCatalog {
                 component_schemas,
                 &format!("{context}.inputSchema"),
             )?;
-            validate_refs(
-                &tool.input_schema,
-                component_schemas,
-                &format!("{context}.inputSchema"),
-            )?;
+            references.validate(&tool.input_schema, &format!("{context}.inputSchema"))?;
             if let Some(output_schema) = tool.output_schema.as_ref() {
                 validate_schema_document(output_schema, false, &format!("{context}.outputSchema"))?;
                 validate_portable_schema_extensions(
@@ -502,11 +495,7 @@ impl ToolCatalog {
                     component_schemas,
                     &format!("{context}.outputSchema"),
                 )?;
-                validate_refs(
-                    output_schema,
-                    component_schemas,
-                    &format!("{context}.outputSchema"),
-                )?;
+                references.validate(output_schema, &format!("{context}.outputSchema"))?;
             }
             if let Some(error_schema) = tool.error_schema.as_ref() {
                 validate_schema_document(error_schema, false, &format!("{context}.errorSchema"))?;
@@ -519,11 +508,7 @@ impl ToolCatalog {
                     component_schemas,
                     &format!("{context}.errorSchema"),
                 )?;
-                validate_refs(
-                    error_schema,
-                    component_schemas,
-                    &format!("{context}.errorSchema"),
-                )?;
+                references.validate(error_schema, &format!("{context}.errorSchema"))?;
             }
         }
         validate_cli_command_tree(&self.tools)?;
@@ -685,51 +670,86 @@ fn validate_schema_document(
 const OFFLINE_SCHEMA_ROOT_URI: &str = "https://harn.invalid/tool-schema";
 const OFFLINE_EXTERNAL_SCHEMA_URI: &str = "https://harn.invalid/external-schema";
 
-fn validate_refs(
-    value: &JsonValue,
-    components: Option<&BTreeMap<String, JsonValue>>,
-    field: &str,
-) -> Result<(), String> {
-    let component_uris = components
-        .into_iter()
-        .flat_map(|schemas| schemas.keys())
-        .enumerate()
-        .map(|(index, name)| {
-            (
-                name.clone(),
-                format!("https://harn.invalid/tool-components/{index}"),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-    let validation_schema = refs_for_offline_validation(value.clone(), &component_uris)?;
-    let mut resources = components
-        .into_iter()
-        .flat_map(|schemas| schemas.iter())
-        .map(|(name, schema)| {
-            let uri = component_uris
-                .get(name)
-                .expect("every component has a synthetic validation URI")
-                .clone();
-            refs_for_offline_validation(schema.clone(), &component_uris).map(|schema| (uri, schema))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    resources.push((
-        OFFLINE_EXTERNAL_SCHEMA_URI.to_string(),
-        JsonValue::Bool(true),
-    ));
+#[cfg(test)]
+thread_local! {
+    static OFFLINE_REGISTRY_PREPARATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
-    let registry = jsonschema::Registry::new()
-        .draft(jsonschema::Draft::Draft202012)
-        .extend(resources)
-        .and_then(|builder| builder.prepare())
-        .map_err(|error| format!("{field} contains invalid schema resources: {error}"))?;
-    jsonschema::options()
-        .with_draft(jsonschema::Draft::Draft202012)
-        .with_registry(&registry)
-        .with_base_uri(OFFLINE_SCHEMA_ROOT_URI)
-        .build(&validation_schema)
-        .map(|_| ())
-        .map_err(|error| format!("{field} contains an unresolved schema reference: {error}"))
+struct OfflineSchemaResources<'a> {
+    components: Option<&'a BTreeMap<String, JsonValue>>,
+    component_uris: BTreeMap<String, String>,
+    registry: Option<jsonschema::Registry<'static>>,
+}
+
+impl<'a> OfflineSchemaResources<'a> {
+    fn new(components: Option<&'a BTreeMap<String, JsonValue>>) -> Self {
+        Self {
+            components,
+            component_uris: components
+                .into_iter()
+                .flat_map(|schemas| schemas.keys())
+                .enumerate()
+                .map(|(index, name)| {
+                    (
+                        name.clone(),
+                        format!("https://harn.invalid/tool-components/{index}"),
+                    )
+                })
+                .collect(),
+            registry: None,
+        }
+    }
+
+    fn validate(&mut self, value: &JsonValue, field: &str) -> Result<(), String> {
+        let validation_schema = refs_for_offline_validation(value.clone(), &self.component_uris)?;
+        jsonschema::options()
+            .with_draft(jsonschema::Draft::Draft202012)
+            .with_registry(self.registry(field)?)
+            .with_base_uri(OFFLINE_SCHEMA_ROOT_URI)
+            .build(&validation_schema)
+            .map(|_| ())
+            .map_err(|error| format!("{field} contains an unresolved schema reference: {error}"))
+    }
+
+    fn registry(&mut self, field: &str) -> Result<&jsonschema::Registry<'static>, String> {
+        if self.registry.is_none() {
+            let mut resources = self
+                .components
+                .into_iter()
+                .flat_map(|schemas| schemas.iter())
+                .map(|(name, schema)| {
+                    let uri = self
+                        .component_uris
+                        .get(name)
+                        .expect("every component has a synthetic validation URI")
+                        .clone();
+                    refs_for_offline_validation(schema.clone(), &self.component_uris)
+                        .map(|schema| (uri, schema))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            resources.push((
+                OFFLINE_EXTERNAL_SCHEMA_URI.to_string(),
+                JsonValue::Bool(true),
+            ));
+            self.registry = Some(
+                jsonschema::Registry::new()
+                    .draft(jsonschema::Draft::Draft202012)
+                    .extend(resources)
+                    .and_then(|builder| {
+                        #[cfg(test)]
+                        OFFLINE_REGISTRY_PREPARATIONS.with(|count| count.set(count.get() + 1));
+                        builder.prepare()
+                    })
+                    .map_err(|error| {
+                        format!("{field} contains invalid schema resources: {error}")
+                    })?,
+            );
+        }
+        Ok(self
+            .registry
+            .as_ref()
+            .expect("offline resources were prepared"))
+    }
 }
 
 /// Whether any node in `schema` references the registry's shared components.
