@@ -159,3 +159,43 @@ fn a_live_child_with_no_write_roots_cannot_write_outside_the_workspace() {
         String::from_utf8_lossy(&admitted.stderr)
     );
 }
+
+/// The public writable set a host checks before any sandbox exists covers
+/// every root the rendered profile grants write under: under the default
+/// presets (session temp and toolchain caches), named write roots and socket
+/// roots. A grant outside it is a planted-file path the host would trust.
+#[test]
+fn the_public_writable_set_covers_every_rendered_write_grant() {
+    let workspace = tempfile::tempdir().expect("workspace");
+    let named = tempfile::tempdir().expect("write root");
+    let sockets = tempfile::tempdir().expect("socket root");
+    let workspace_path = std::fs::canonicalize(workspace.path()).expect("canonical workspace");
+    let mut policy = system_runtime_only_policy(&workspace_path.display().to_string());
+    policy.process_sandbox.presets = None;
+    policy.process_sandbox.write_roots = vec![named.path().display().to_string()];
+    policy.process_sandbox.unix_socket_roots = vec![sockets.path().display().to_string()];
+
+    let writable = super::super::process_sandbox_writable_roots(&policy);
+    let grants = write_grants(&render_profile(&policy));
+    assert!(
+        grants.len() > 3,
+        "the policy rendered too few grants: {grants:?}"
+    );
+    let resolve = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    for grant in grants {
+        let grant = resolve(Path::new(&grant));
+        assert!(
+            writable.iter().any(|root| grant.starts_with(root)),
+            "{} is granted write but missing from {writable:?}",
+            grant.display()
+        );
+    }
+    for root in [named.path(), sockets.path()] {
+        let root = resolve(root);
+        assert!(
+            writable.contains(&root),
+            "{} missing from {writable:?}",
+            root.display()
+        );
+    }
+}
