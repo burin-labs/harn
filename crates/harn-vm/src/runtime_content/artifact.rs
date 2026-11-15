@@ -17,7 +17,7 @@ pub(super) fn linked_id() -> Option<String> {
     // runtime, so dyld supplies its loaded executable or dylib's Mach-O header.
     let found = unsafe {
         libc::dladdr(
-            super::runtime_content_fingerprint as *const () as *const libc::c_void,
+            (super::runtime_content_fingerprint as *const ()).cast::<libc::c_void>(),
             image.as_mut_ptr(),
         )
     };
