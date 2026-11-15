@@ -1,5 +1,61 @@
 import { triage_normalize, triage_start_my_day } from "std/triage"
 
+struct TriageTestIssue {
+  html_url: string
+  node_id: string
+  title: string
+  number: int
+}
+
+struct TriageTestRepository {
+  html_url: string
+  full_name: string
+}
+
+struct TriageTestSender {
+  login: string
+  html_url: string
+}
+
+struct TriageTestPayload {
+  issue: TriageTestIssue
+  repository: TriageTestRepository
+  sender: TriageTestSender
+}
+
+struct TriageTestEnvelope {
+  provider: string
+  provider_payload: TriageTestPayload
+}
+
+pipeline test_triage_struct_envelope_payload_and_references() {
+  const issue = TriageTestIssue {
+    html_url: "https://example.test/issue/7",
+    node_id: "issue-7",
+    title: "Struct issue",
+    number: 7,
+  }
+  const repository = TriageTestRepository {
+    html_url: "https://example.test/repo",
+    full_name: "owner/repo",
+  }
+  const sender = TriageTestSender {login: "mona", html_url: "https://example.test/mona"}
+  const payload = TriageTestPayload {issue: issue, repository: repository, sender: sender}
+  const input = TriageTestEnvelope {provider: "github", provider_payload: payload}
+  assert_eq(type_of(input), "struct")
+  assert_eq(type_of(payload), "struct")
+  assert_eq(type_of(issue), "struct")
+  const event = triage_normalize(input)
+  assert_eq(event.source_url, issue.html_url)
+  assert_eq(event.source_id, issue.node_id)
+  assert_eq(event.summary, "owner/repo: Issue #7: Struct issue")
+  assert_eq(
+    event.actors,
+    [{kind: "user", id: "mona", display_name: "mona", url: "https://example.test/mona"}],
+  )
+  assert_eq(event.raw_payload, payload)
+}
+
 pipeline test_triage_reference_views_preserve_raw_fields_and_text_coercion() {
   const payload = {
     repository: {full_name: "owner/repo", html_url: "https://example.test/repo", extension: true},

@@ -107,7 +107,8 @@ type TriageRawReference = {
 }
 
 fn __triage_reference(value: unknown) -> TriageRawReference? {
-  if type_of(value) != "dict" {
+  const kind = type_of(value)
+  if kind != "dict" && kind != "struct" {
     return nil
   }
   return schema_expect(value, schema_of(TriageRawReference))
