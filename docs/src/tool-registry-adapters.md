@@ -95,8 +95,9 @@ field rather than presentation metadata.
 ## Runtime value conversion
 
 A runtime registry can combine declared wire values, such as bytes, with ordinary
-JSON fields. An object with `additionalProperties: true` keeps its JSON values,
-including keys that resemble byte or enum envelopes. Declared byte fields still
+JSON fields. An object with `additionalProperties: true` uses Harn's existing
+JSON value conversion, including keys that resemble byte or enum envelopes.
+Declared byte fields still
 become native bytes before handler entry. The original catalog schemas enforce
 required properties, enums, patterns and other JSON Schema constraints before
 invocation and before publishing a result.

@@ -93,7 +93,10 @@ fn runtime_islands_do_not_weaken_the_original_schema_or_typed_output() {
 
 #[test]
 fn unsupported_schema_cannot_hide_declared_wire_types_behind_references() {
-    let mut raw = catalog(json!({"allOf":[{"$ref":"#/components/schemas/Hidden"}]}));
+    let mut raw = catalog(json!({"type":"object","additionalProperties":true}));
+    let hidden = json!({"allOf":[{"$ref":"#/components/schemas/Hidden"}]});
+    raw.tools[0].input_schema["properties"]["metadata"] = hidden.clone();
+    raw.tools[0].output_schema.as_mut().unwrap()["properties"]["metadata"] = hidden;
     raw.components = Some(crate::tool_registry::ToolCatalogComponents {
         schemas: std::collections::BTreeMap::from([(
             "Hidden".into(),
@@ -233,7 +236,7 @@ fn runtime_union_members_validate_their_resolved_json_schema() {
         .unwrap()
         .unwrap();
     let text = wire.decode(&json!("ok-text")).unwrap();
-    assert_eq!(text.as_str(), Some("ok-text"));
+    assert!(matches!(&text, crate::VmValue::String(value) if value.as_str() == "ok-text"));
     assert_eq!(wire.encode(&text).unwrap(), json!("ok-text"));
     let bytes = wire.decode(&json!({"$bytes_b64":"YWJj"})).unwrap();
     assert!(matches!(&bytes, VmValue::Bytes(value) if value.as_slice() == b"abc"));
@@ -254,11 +257,9 @@ fn runtime_union_never_guesses_between_typed_and_opaque_interpretations() {
         .prepared_wire_type("echo", ToolContractPhase::Output)
         .unwrap()
         .unwrap();
-    assert_eq!(
-        wire.decode(&json!("known opaque positive"))
-            .unwrap()
-            .as_str(),
-        Some("known opaque positive")
+    assert!(
+        matches!(wire.decode(&json!("known opaque positive")).unwrap(),
+        crate::VmValue::String(value) if value.as_str() == "known opaque positive")
     );
     assert!(wire.decode(&json!({"$bytes_b64":"YWJj"})).is_err());
     assert!(wire
@@ -353,7 +354,9 @@ fn observed_openapi_media_union_keeps_local_definition_references_in_the_origina
                     matches!(&decoded, VmValue::Bytes(bytes) if bytes.as_slice() == b"\0\x01\x02\xff")
                 );
             } else {
-                assert_eq!(decoded.as_str(), Some("plain Δ response"));
+                assert!(
+                    matches!(&decoded, crate::VmValue::String(value) if value.as_str() == "plain Δ response")
+                );
             }
             assert_eq!(wire.encode(&decoded).unwrap(), input);
         }
