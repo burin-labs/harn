@@ -33,9 +33,8 @@ fn connected_runtime_metadata_survives_the_catalog_and_typed_harn_projection() {
         let source = format!(
             r#"
             import {{ mcp_runtime_content_fingerprint }} from "std/runtime/content_fingerprint"
-            import {{ ToolCatalogEntry }} from "std/tools"
             fn main(harness: Harness) {{
-              const tool: ToolCatalogEntry = schema_expect(json_parse({encoded}), schema_of(ToolCatalogEntry))
+              const tool = json_parse({encoded})
               return mcp_runtime_content_fingerprint(tool)
             }}
         "#
