@@ -41,6 +41,10 @@ fn version_json_dispatch_renders_canonical_envelope() {
 
 #[test]
 fn version_json_ignores_runtime_revision_environment() {
+    let baseline = run_version_subprocess(true, &[]);
+    assert_eq!(baseline.exit_code, 0, "stderr={}", baseline.stderr);
+    let baseline_value: serde_json::Value =
+        serde_json::from_str(&baseline.stdout).expect("baseline version JSON");
     let harn = run_version_subprocess(
         true,
         &[
@@ -58,21 +62,33 @@ fn version_json_ignores_runtime_revision_environment() {
     let value: serde_json::Value = serde_json::from_str(&harn.stdout).expect("version JSON");
     assert_source_revision(&value);
     assert_runtime_content_fingerprint(&value);
+    assert_eq!(
+        value["data"]["runtime_content_fingerprint"],
+        baseline_value["data"]["runtime_content_fingerprint"],
+        "runtime environment must not replace the same CLI's fingerprint"
+    );
 }
 
 fn assert_runtime_content_fingerprint(value: &serde_json::Value) {
-    let mut expected = serde_json::to_value(harn_vm::runtime_content_fingerprint())
-        .expect("runtime content fingerprint serializes");
-    // The executable owns its build stamp. The linked VM owns content identity.
-    expected["source_revision"] = value["data"]["source_revision"].clone();
-    let actual = &value["data"]["runtime_content_fingerprint"];
-    assert_eq!(actual, &expected);
-    assert_eq!(actual["schema"], "harn.runtime_content_fingerprint.v1");
-    assert_eq!(actual["content_sha256"].as_str().map(str::len), Some(64));
+    let expected = harn_vm::runtime_content_fingerprint();
+    let actual: harn_vm::RuntimeContentFingerprint =
+        serde_json::from_value(value["data"]["runtime_content_fingerprint"].clone())
+            .expect("typed runtime content fingerprint");
+    // Each executable owns its native artifact identity.
+    assert_eq!(actual.schema, expected.schema);
+    assert_eq!(actual.harn_version, expected.harn_version);
+    assert_eq!(actual.compatibility, expected.compatibility);
     assert_eq!(
-        actual["embedded_stdlib_sha256"].as_str().map(str::len),
-        Some(64)
+        actual.embedded_stdlib_sha256,
+        expected.embedded_stdlib_sha256
     );
+    assert_eq!(
+        actual.source_revision.as_deref(),
+        value["data"]["source_revision"].as_str()
+    );
+    assert!(actual.artifact_id.as_ref().is_some_and(|id| !id.is_empty()));
+    assert_eq!(actual.content_sha256.len(), 64);
+    assert_eq!(actual.embedded_stdlib_sha256.len(), 64);
 }
 
 #[test]
