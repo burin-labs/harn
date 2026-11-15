@@ -14,9 +14,10 @@ fn grounded_review_still_fires_on_genuine_verifier_parse_error() {
         },
     });
     let reminder = GroundedReviewProvider
-        .evaluate(&ctx(HookEvent::PostToolUse, zig, JsonValue::Null))
+        .evaluate(&ctx(HookEvent::PostToolUse, zig, text_review_options()))
         .expect("a genuine verifier parse error must still fire");
-    assert!(reminder.body.contains("verified:"));
+    assert!(reminder.body.contains("reported:"));
+    assert!(!reminder.body.contains("verified:"));
     assert!(reminder.body.contains("error: expected ';'"));
 
     // The pass-marker exemption is line-scoped: a real `parse error:` line

@@ -285,6 +285,7 @@ fn __agent_lifecycle_add_await_tool(registry: ToolRegistry) -> ToolRegistry {
     "agent_await_resumption",
     "Suspend this agent and return control to its caller until a parent, operator, or resume trigger wakes it.",
     {
+      defer_loading: true,
       handler: __agent_await_resumption_tool,
       parameters: {
         reason: {type: "string", description: "Why this agent is parking."},

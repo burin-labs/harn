@@ -384,6 +384,7 @@ pub fn agent_progress_tool(
         metadata: {type: "object", description: "Free-form progress metadata", required: false},
       },
       returns: {type: "null"},
+      defer_loading: true,
       handler: { args -> agent_progress(agent, args) },
     },
   )
