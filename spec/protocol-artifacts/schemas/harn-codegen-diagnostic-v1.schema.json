@@ -1,0 +1,152 @@
+{
+  "$defs": {
+    "CodegenDiagnosticCode": {
+      "enum": [
+        "invalid_json",
+        "invalid_ir",
+        "unsupported_version",
+        "unsupported_feature",
+        "invalid_digest",
+        "duplicate_identity",
+        "dangling_type",
+        "invalid_selection",
+        "missing_output",
+        "unsupported_wire_type",
+        "invalid_mcp_projection",
+        "response_identity_mismatch",
+        "malformed_plugin_response",
+        "plugin_spawn_failed",
+        "plugin_timed_out",
+        "plugin_output_limit",
+        "plugin_failed",
+        "non_deterministic_output",
+        "unsafe_artifact_path",
+        "duplicate_artifact_path",
+        "invalid_source_mapping",
+        "artifact_write_failed",
+        "artifact_drift",
+        "source_unavailable"
+      ],
+      "type": "string"
+    },
+    "WireSourceRef": {
+      "description": "A declaration location, never a rejected invocation value.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "document": {
+              "type": "string"
+            },
+            "end": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "text_span",
+              "type": "string"
+            },
+            "start": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "document",
+            "start",
+            "end"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "document": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "document_pointer",
+              "type": "string"
+            },
+            "pointer": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "document",
+            "pointer"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "synthetic",
+              "type": "string"
+            },
+            "owner": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "owner"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WireTypeId": {
+      "description": "Stable semantic identity, independent of a backend's allocated symbol.",
+      "type": "string"
+    }
+  },
+  "$id": "https://harnlang.com/schemas/harn-codegen-diagnostic-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "code": {
+      "$ref": "#/$defs/CodegenDiagnosticCode"
+    },
+    "operation": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WireSourceRef"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "structural_path": {
+      "type": "string"
+    },
+    "type_id": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WireTypeId"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "code",
+    "structural_path"
+  ],
+  "title": "Harn Codegen Diagnostic",
+  "type": "object"
+}

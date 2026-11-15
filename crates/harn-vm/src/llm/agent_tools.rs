@@ -24,6 +24,7 @@ pub(super) fn denied_tool_result(tool_name: &str, reason: impl Into<String>) -> 
 async fn run_tool_handler(
     mut vm: crate::vm::Vm,
     ctx: Option<&crate::vm::AsyncBuiltinCtx>,
+    audience: crate::tool_registry::ToolAudience,
     handler: &VmClosure,
     tool_name: &str,
     tool_args: &serde_json::Value,
@@ -33,9 +34,21 @@ async fn run_tool_handler(
     let prepared = registry
         .map(|registry| super::agent_tool_governance::prepared_handler_catalog(registry, tool_name))
         .transpose()?;
-    let args_vm = crate::schema::json_to_vm_value(tool_args);
+    let args_vm = match prepared.as_deref() {
+        Some(prepared) => prepared
+            .decode_input(tool_name, tool_args)
+            .map_err(|error| VmError::CategorizedError {
+                message: error.to_string(),
+                category: ErrorCategory::SchemaValidation,
+            })?,
+        None => crate::schema::json_to_vm_value(tool_args),
+    };
     let _trusted_bridge_guard = crate::orchestration::allow_trusted_bridge_calls();
-    let outcome = crate::tool_handler_scope::scope(vm.call_closure_pub(handler, &[args_vm])).await;
+    let outcome = crate::tool_registry::preparation_scope::audience(
+        audience,
+        crate::tool_handler_scope::scope(vm.call_closure_pub(handler, &[args_vm])),
+    )
+    .await;
     let captured = vm.take_output();
     if let Some(ctx) = ctx {
         ctx.forward_output(&captured);
@@ -604,6 +617,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
                 run_tool_handler(
                     vm,
                     ctx,
+                    audience,
                     &handler,
                     tool_name,
                     tool_args,
@@ -670,6 +684,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
             run_tool_handler(
                 vm,
                 ctx,
+                audience,
                 &handler,
                 tool_name,
                 tool_args,
@@ -726,7 +741,7 @@ pub(super) async fn dispatch_tool_execution_with_mcp(
         // resolve on retry, so it breaks immediately and propagates to the
         // agent loop rather than burning the budget as a tool observation.
         let retryable = matches!(&result, Err(error)
-            if !matches!(
+            if error.permits_automatic_replay() && !matches!(
                 error,
                 VmError::CategorizedError {
                     category: ErrorCategory::ToolRejected | ErrorCategory::SchemaValidation,

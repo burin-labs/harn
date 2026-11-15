@@ -248,7 +248,14 @@ fn __connector_http_safe_error_headers(headers: dict?) {
 }
 
 fn __connector_http_error_body(response: dict, options: dict) {
-  return __connector_http_safe_error_body(response?.body, options)
+  let body = response?.body
+  if response?.body_bytes != nil {
+    const decoded = try {
+      bytes_to_string(response.body_bytes)
+    }
+    body = is_ok(decoded) ? unwrap(decoded) : nil
+  }
+  return __connector_http_safe_error_body(body, options)
 }
 
 fn __connector_http_has_fields(value: dict?) {
@@ -641,7 +648,7 @@ pub fn connector_http_json(
       category: "invalid_json",
       status: response.status,
       retryable: false,
-      body: __connector_http_safe_error_body(response.body, opts),
+      body: __connector_http_error_body(response, opts),
       provider: opts?.provider,
       operation: opts?.operation,
     },

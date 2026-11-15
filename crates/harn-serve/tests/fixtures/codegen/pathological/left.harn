@@ -1,0 +1,7 @@
+struct Detail {
+  token: string
+}
+
+pub struct Left {
+  detail: Detail
+}

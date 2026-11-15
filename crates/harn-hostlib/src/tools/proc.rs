@@ -140,6 +140,43 @@ impl CommandStatus {
     }
 }
 
+/// The command-bound grant for one spawn of `program args`, or `None`.
+///
+/// Every hostlib spawn that inherits an environment asks here, foreground and
+/// long-running alike, so a grant reaches the program on whichever path runs
+/// it. A replaced environment is the caller's own and takes no grant. The
+/// result is held until the child is reaped and wrapped around the launch with
+/// [`harn_vm::stdlib::process::GrantedSpawn::launching`].
+pub(crate) fn command_grant(
+    builtin: &'static str,
+    program: &str,
+    args: &[String],
+    cwd: &Path,
+    overlay: &BTreeMap<String, String>,
+    env_mode: EnvMode,
+) -> Result<Option<harn_vm::stdlib::process::GrantedSpawn>, HostlibError> {
+    if env_mode == EnvMode::Replace {
+        return Ok(None);
+    }
+    harn_vm::stdlib::process::granted_spawn(program, args, cwd, overlay).map_err(|error| {
+        HostlibError::Backend {
+            builtin,
+            message: error.to_string(),
+        }
+    })
+}
+
+/// A granted spawn sets only what `granted_spawn` chose and removes every
+/// other inherited name, so no caller or ambient variable reaches it.
+pub(crate) fn apply_command_grant(
+    granted: &harn_vm::stdlib::process::GrantedSpawn,
+    env: &mut BTreeMap<String, String>,
+    env_remove: &mut Vec<String>,
+) {
+    *env = granted.env.iter().cloned().collect();
+    env_remove.extend(granted.remove.iter().cloned());
+}
+
 /// Spawn the configured command, capture stdout + stderr in full, and
 /// enforce the timeout. Translates spawn / sandbox failures into
 /// `HostlibError::Backend` so the surrounding builtin gets a uniform
@@ -170,24 +207,23 @@ pub(crate) fn run_with_filter(
         CaptureTransport::Pipe => None,
         CaptureTransport::File => Some(FileCapture::new(req.builtin)?),
     };
-    // The one seam a command-bound grant on a program that runs others
-    // reaches: inheriting, piped, and redacted below. Held until the child is
-    // reaped, because it owns the spawn's private directory.
-    let granted = if req.env_mode == EnvMode::Replace || file_capture.is_some() {
+    // Held until the child is reaped, because it owns the spawn's private
+    // directory. A file capture is not redacted, so it takes no grant.
+    let granted = if file_capture.is_some() {
         None
     } else {
-        harn_vm::stdlib::process::granted_spawn(&req.program, &req.args, &effective_cwd, &req.env)
-            .map_err(|error| HostlibError::Backend {
-            builtin: req.builtin,
-            message: error.to_string(),
-        })?
+        command_grant(
+            req.builtin,
+            &req.program,
+            &req.args,
+            &effective_cwd,
+            &req.env,
+            req.env_mode,
+        )?
     };
-    // A granted spawn sets only what `granted_spawn` chose and removes every
-    // other inherited name, so no caller or ambient variable reaches it.
     let mut env_remove = req.env_remove.clone();
     if let Some(granted) = &granted {
-        env = granted.env.iter().cloned().collect();
-        env_remove.extend(granted.remove.iter().cloned());
+        apply_command_grant(granted, &mut env, &mut env_remove);
     }
 
     let spec = SpawnSpec {

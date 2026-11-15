@@ -57,6 +57,7 @@ impl ExportCatalog {
                     source: Some(ToolSource {
                         kind: "harn".to_string(),
                         id: Some(function.name.clone()),
+                        location: Some(function.source.clone()),
                         binding: Some(BTreeMap::from([(
                             "callableKind".to_string(),
                             serde_json::json!(match &function.kind {
@@ -129,30 +130,20 @@ pub fn inspect(request: Request) -> Request throws InspectError { return request
         let inspect = &catalog.tools[0];
         assert_eq!(inspect.name, "inspect");
         assert_eq!(inspect.title.as_deref(), Some("Inspect a hypothesis"));
-        assert_eq!(
-            inspect.input_schema["properties"]["request"]["properties"]["hypothesis_id"]["type"],
-            "string"
+        let input = jsonschema::validator_for(&inspect.input_schema).unwrap();
+        let payload = serde_json::json!({"kind":"inspect", "hypothesis_id":"known"});
+        assert!(input.is_valid(&serde_json::json!({"request":payload})));
+        assert!(
+            !input.is_valid(&serde_json::json!({"request":{"kind":"inspect", "hypothesis_id":17}}))
         );
-        assert_eq!(
-            inspect.output_schema.as_ref().unwrap()["properties"]["kind"]["const"],
-            "inspect"
-        );
-        let variants = inspect.error_schema.as_ref().unwrap()["anyOf"]
-            .as_array()
-            .expect("imported error union");
-        assert_eq!(variants.len(), 2);
-        let variants = variants
-            .iter()
-            .map(|variant| {
-                variant["properties"]["variant"]["const"]
-                    .as_str()
-                    .expect("literal discriminant")
-            })
-            .collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(
-            variants,
-            std::collections::BTreeSet::from(["Forbidden", "NotFound"])
-        );
+        let output = jsonschema::validator_for(inspect.output_schema.as_ref().unwrap()).unwrap();
+        assert!(output.is_valid(&payload));
+        assert!(!output.is_valid(&serde_json::json!({"kind":"other", "hypothesis_id":"known"})));
+        let errors = jsonschema::validator_for(inspect.error_schema.as_ref().unwrap()).unwrap();
+        assert!(errors.is_valid(&serde_json::json!({"variant":"NotFound", "message":"missing"})));
+        assert!(errors.is_valid(&serde_json::json!({"variant":"Forbidden", "scope":"read"})));
+        assert!(!errors.is_valid(&serde_json::json!({"variant":"Unknown", "message":"missing"})));
+        assert!(!errors.is_valid(&serde_json::json!({"variant":"Forbidden", "scope":17})));
         assert_eq!(
             inspect.annotations.as_ref().unwrap().read_only_hint,
             Some(true)

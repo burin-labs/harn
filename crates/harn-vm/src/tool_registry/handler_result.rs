@@ -5,6 +5,68 @@ use crate::value::{ErrorCategory, VmError, VmValue};
 /// The versioned result discriminator consumed by the runtime and linter.
 pub const AGENT_TOOL_HANDLER_RESULT_SCHEMA: &str = "harn.agent_tool_handler_result.v2";
 
+fn literal_strings<'a>(
+    graph: &'a crate::wire::PreparedWireGraph,
+    root: &crate::wire::WireTypeId,
+) -> Option<std::collections::BTreeSet<&'a str>> {
+    use crate::wire::{WireLiteral, WireShape};
+    let mut values = std::collections::BTreeSet::new();
+    let mut visited = std::collections::BTreeSet::new();
+    let mut pending = vec![root];
+    while let Some(id) = pending.pop() {
+        if !visited.insert(id) {
+            return None;
+        }
+        match &graph.unaliased(id).ok()?.shape {
+            WireShape::Literal {
+                value: WireLiteral::String { value },
+            } => {
+                values.insert(value.as_str());
+            }
+            WireShape::Union { members } => pending.extend(members),
+            _ => return None,
+        }
+    }
+    Some(values)
+}
+
+pub(crate) fn wire_handler_output_schema(
+    wire: &crate::wire::PreparedWireType,
+) -> serde_json::Value {
+    use crate::wire::{WireLiteral, WireShape};
+
+    let projected = (|| {
+        let graph = wire.graph();
+        let WireShape::Record { fields, .. } = &graph.unaliased(wire.root()).ok()?.shape else {
+            return None;
+        };
+        let field = |name| {
+            fields
+                .iter()
+                .find(|field| field.name == name && !field.optional)
+        };
+        if !matches!(
+            &graph.unaliased(&field("schema")?.type_id).ok()?.shape,
+            WireShape::Literal { value: WireLiteral::String { value } }
+                if value == AGENT_TOOL_HANDLER_RESULT_SCHEMA
+        ) {
+            return None;
+        }
+        let text = &field("text")?.type_id;
+        if !matches!(graph.unaliased(text).ok()?.shape, WireShape::String)
+            && literal_strings(graph, text).is_none()
+        {
+            return None;
+        }
+        let alternatives = literal_strings(graph, &field("outcome")?.type_id)?;
+        if alternatives != std::collections::BTreeSet::from(["ok", "error", "rejected"]) {
+            return None;
+        }
+        graph.json_schema(&field("data")?.type_id).ok()
+    })();
+    projected.unwrap_or_else(|| wire.json_schema())
+}
+
 /// Project resolved return types that declare the complete explicit envelope.
 /// Imported aliases and local structural types share this discriminator.
 pub fn tool_handler_output_schema(schema: serde_json::Value) -> serde_json::Value {
@@ -132,6 +194,76 @@ pub(crate) fn agent_tool_handler_result_text(value: &serde_json::Value) -> Optio
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn prepared_export_envelope_projects_only_its_referenced_payload() {
+        let source = r#"
+type HandlerEnvelope<T> = {schema: "harn.agent_tool_handler_result.v2", outcome: "ok" | "error" | "rejected", text: string, data: T}
+type Payload = {label: string}
+"#;
+        let program = harn_parser::parse_source(source).unwrap();
+        let resolver = crate::TypeSchemaResolver::from_program(&program);
+        let result = harn_parser::TypeExpr::Applied {
+            name: "HandlerEnvelope".into(),
+            args: vec![harn_parser::TypeExpr::Named("Payload".into())],
+        };
+        let schema = resolver
+            .json_schema_for_tool_output_type_expr(&result)
+            .unwrap();
+        let validator = jsonschema::validator_for(&schema).unwrap();
+        assert!(validator.is_valid(&json!({"label":"known payload"})));
+        assert!(!validator.is_valid(&json!({"label":17})));
+        assert!(
+            !validator.is_valid(&json!({"schema":AGENT_TOOL_HANDLER_RESULT_SCHEMA,
+            "outcome":"ok", "text":"feedback", "data":{"label":"wrapped"}}))
+        );
+        for source in [
+            source.replace("text: string", "text: \"known feedback\""),
+            source.replace("text: string", "text: \"first\" | \"second\""),
+            format!(
+                "type Status = \"ok\" | \"error\"\n{}",
+                source.replace("\"ok\" | \"error\" | \"rejected\"", "Status | \"rejected\"")
+            ),
+        ] {
+            let program = harn_parser::parse_source(&source).unwrap();
+            let resolver = crate::TypeSchemaResolver::from_program(&program);
+            let schema = resolver
+                .json_schema_for_tool_output_type_expr(&result)
+                .unwrap();
+            let validator = jsonschema::validator_for(&schema).unwrap();
+            assert!(validator.is_valid(&json!({"label":"known payload"})));
+            assert!(!validator.is_valid(&json!({"label":17})));
+        }
+        for (from, to) in [
+            ("schema:", "schema?:"),
+            ("outcome:", "outcome?:"),
+            ("text:", "text?:"),
+            ("data:", "data?:"),
+            ("schema:", "other_schema:"),
+            ("outcome:", "other_outcome:"),
+            ("text:", "other_text:"),
+            ("data:", "other_data:"),
+            (AGENT_TOOL_HANDLER_RESULT_SCHEMA, "ordinary.domain.v2"),
+            ("\"rejected\"", "\"rejected\" | \"unknown\""),
+            ("\"ok\" | \"error\" | \"rejected\"", "string"),
+        ] {
+            let program = harn_parser::parse_source(&source.replace(from, to)).unwrap();
+            let resolver = crate::TypeSchemaResolver::from_program(&program);
+            let wire = resolver
+                .prepare_wire_type(
+                    &result,
+                    crate::wire::WireSourceRef::Synthetic {
+                        owner: "negative control".into(),
+                    },
+                )
+                .expect("near-miss has a prepared wire type");
+            assert_eq!(
+                wire_handler_output_schema(&wire),
+                wire.json_schema(),
+                "{from} -> {to}"
+            );
+        }
+    }
 
     #[test]
     fn export_schema_projection_requires_the_complete_versioned_contract() {

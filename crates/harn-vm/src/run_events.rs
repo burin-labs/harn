@@ -19,6 +19,21 @@ use std::sync::Arc;
 
 use serde::Serialize;
 
+/// Event identity available before constructing its payload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RunEventKind {
+    Stdout,
+    Stderr,
+    Transcript,
+    ToolCall,
+    ToolResult,
+    Hook,
+    PersonaStage,
+    PackRun,
+    EvidencePersisted,
+    CompilerWrapperApplied,
+}
+
 /// One observable event from a running pipeline. Variants are
 /// `#[serde(tag = "event_type")]` so wire consumers (notably the CLI
 /// `--json` NDJSON stream) can discriminate without inspecting the
@@ -100,9 +115,32 @@ pub enum RunEvent {
     CompilerWrapperApplied { payload: serde_json::Value },
 }
 
+impl RunEvent {
+    pub fn kind(&self) -> RunEventKind {
+        match self {
+            Self::Stdout { .. } => RunEventKind::Stdout,
+            Self::Stderr { .. } => RunEventKind::Stderr,
+            Self::Transcript { .. } => RunEventKind::Transcript,
+            Self::ToolCall { .. } => RunEventKind::ToolCall,
+            Self::ToolResult { .. } => RunEventKind::ToolResult,
+            Self::Hook { .. } => RunEventKind::Hook,
+            Self::PersonaStage { .. } => RunEventKind::PersonaStage,
+            Self::PackRun { .. } => RunEventKind::PackRun,
+            Self::EvidencePersisted { .. } => RunEventKind::EvidencePersisted,
+            Self::CompilerWrapperApplied { .. } => RunEventKind::CompilerWrapperApplied,
+        }
+    }
+}
+
 /// Receiver of [`RunEvent`]s. Implementations must be cheap (the VM
 /// calls [`emit`] on hot paths like every `println`).
 pub trait RunEventSink: Send + Sync {
+    /// Which events this sink consumes. Existing sinks consume every kind.
+    /// Rejecting stdout or stderr preserves the program's ordinary output path.
+    fn enabled(&self, _kind: RunEventKind) -> bool {
+        true
+    }
+
     fn emit(&self, event: RunEvent);
 }
 
@@ -131,17 +169,23 @@ pub fn scope<F: Future>(sink: Arc<dyn RunEventSink>, inner: F) -> impl Future<Ou
     crate::orchestration::scope_run_event_sink(sink, inner)
 }
 
-/// Whether the current execution has a sink. Useful as a fast-path gate
-/// for callers that would otherwise build a payload speculatively.
+/// Whether the current execution has a sink, regardless of its event interests.
+/// Use [`enabled`] before constructing a particular event's payload.
 pub fn sink_active() -> bool {
     RUN_EVENT_SINK_CONTEXT.with(|slot| slot.borrow().is_some())
+}
+
+/// Whether the current execution's sink consumes this event kind.
+pub fn enabled(kind: RunEventKind) -> bool {
+    let sink = RUN_EVENT_SINK_CONTEXT.with(|slot| slot.borrow().clone());
+    sink.is_some_and(|sink| sink.enabled(kind))
 }
 
 /// Emit `event` to the current execution's sink. No-op when no sink is active,
 /// so it is safe to call from every hook point unconditionally.
 pub fn emit(event: RunEvent) {
     let sink = RUN_EVENT_SINK_CONTEXT.with(|slot| slot.borrow().clone());
-    if let Some(sink) = sink {
+    if let Some(sink) = sink.filter(|sink| sink.enabled(event.kind())) {
         sink.emit(redact_run_event(event));
     }
 }

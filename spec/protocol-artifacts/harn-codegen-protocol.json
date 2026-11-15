@@ -1,0 +1,77 @@
+{
+  "HARN_MCP_TOOL_CONTRACT_META_KEY": "com.harnlang/toolContract",
+  "HARN_NATIVE_BINDING_META_KEY": "com.harnlang/nativeBinding",
+  "MCP_HEADER_METHOD": "Mcp-Method",
+  "MCP_HEADER_NAME": "Mcp-Name",
+  "MCP_HEADER_PROTOCOL_VERSION": "MCP-Protocol-Version",
+  "MCP_HEADER_VALUE_ENCODING": {
+    "plain_maximum": 126,
+    "plain_minimum": 32,
+    "prefix": "=?base64?",
+    "suffix": "?="
+  },
+  "MCP_HEADER_VALUE_EXAMPLES": [
+    {
+      "encoded": "echo",
+      "value": "echo"
+    },
+    {
+      "encoded": "=?base64?zpTOv866zrnOvM6u?=",
+      "value": "Δοκιμή"
+    },
+    {
+      "encoded": "=?base64?IHBhZGRlZCA=?=",
+      "value": " padded "
+    },
+    {
+      "encoded": "=?base64?bGluZTEKbGluZTI=?=",
+      "value": "line1\nline2"
+    },
+    {
+      "encoded": "=?base64?PT9iYXNlNjQ/bGl0ZXJhbD89?=",
+      "value": "=?base64?literal?="
+    },
+    {
+      "encoded": "=?base64?YQli?=",
+      "value": "a\tb"
+    },
+    {
+      "encoded": "",
+      "value": ""
+    }
+  ],
+  "MCP_MAX_STDIO_LINE_BYTES": 16777216,
+  "MCP_META_KEY_CLIENT_CAPABILITIES": "io.modelcontextprotocol/clientCapabilities",
+  "MCP_META_KEY_CLIENT_INFO": "io.modelcontextprotocol/clientInfo",
+  "MCP_META_KEY_PROTOCOL_VERSION": "io.modelcontextprotocol/protocolVersion",
+  "MCP_META_KEY_SERVER_INFO": "io.modelcontextprotocol/serverInfo",
+  "MCP_METHOD_CANCELLED_NOTIFICATION": "notifications/cancelled",
+  "MCP_METHOD_SERVER_DISCOVER": "server/discover",
+  "MCP_METHOD_TASKS_CANCEL": "tasks/cancel",
+  "MCP_METHOD_TASKS_GET": "tasks/get",
+  "MCP_METHOD_TOOLS_CALL": "tools/call",
+  "MCP_METHOD_TOOLS_LIST": "tools/list",
+  "MCP_NAME_FIELDS": {
+    "prompts/get": "name",
+    "resources/read": "uri",
+    "tasks/cancel": "taskId",
+    "tasks/get": "taskId",
+    "tasks/update": "taskId",
+    "tools/call": "name"
+  },
+  "MCP_PROTOCOL_VERSION": "2026-07-28",
+  "MCP_STDIO_LINE_LIMIT_INCLUDES_TERMINATOR": true,
+  "MCP_TASKS_EXTENSION_ID": "io.modelcontextprotocol/tasks",
+  "NATIVE_MCP_BINDING_VERSION": "harn-tools-mcp/1.0",
+  "WIRE_BYTES_TAG": "$bytes_b64",
+  "WIRE_DECIMAL_MAX_MANTISSA": "79228162514264337593543950335",
+  "WIRE_DECIMAL_MAX_SCALE": 28,
+  "WIRE_DECIMAL_PATTERN": "^-?(0|[1-9][0-9]*)(\\.[0-9]{1,28})?$",
+  "WIRE_DECIMAL_PRESERVES_NEGATIVE_ZERO": false,
+  "WIRE_DECIMAL_PRESERVES_SCALE": true,
+  "WIRE_ENUM_FIELDS_KEY": "fields",
+  "WIRE_ENUM_NAME_KEY": "enum",
+  "WIRE_ENUM_VARIANT_KEY": "variant",
+  "WIRE_INTEGER_TOKEN_PATTERN": "^(0|-?[1-9][0-9]*)$",
+  "WIRE_MAX_VALUE_DEPTH": 128
+}

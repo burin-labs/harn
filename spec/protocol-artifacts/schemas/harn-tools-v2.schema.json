@@ -728,6 +728,17 @@
           "minLength": 1,
           "pattern": ".*\\S.*",
           "type": "string"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WireSourceRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Portable declaration coordinates; never a host filesystem authority."
         }
       },
       "required": [
@@ -752,6 +763,78 @@
           "const": "required",
           "description": "The tool is only invocable as a task.",
           "type": "string"
+        }
+      ]
+    },
+    "WireSourceRef": {
+      "description": "A declaration location, never a rejected invocation value.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "document": {
+              "type": "string"
+            },
+            "end": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "text_span",
+              "type": "string"
+            },
+            "start": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "document",
+            "start",
+            "end"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "document": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "document_pointer",
+              "type": "string"
+            },
+            "pointer": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "document",
+            "pointer"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "synthetic",
+              "type": "string"
+            },
+            "owner": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "owner"
+          ],
+          "type": "object"
         }
       ]
     }

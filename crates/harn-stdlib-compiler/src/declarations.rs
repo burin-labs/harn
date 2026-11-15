@@ -9087,13 +9087,24 @@ mod declaration_0919 {
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
         exposure = "pure",
+        sig = "tool_registry_bind(catalog: ToolCatalog, handlers: dict) -> ToolRegistry",
+        category = "tools"
+    )]
+    fn tool_registry_bind_impl() {}
+}
+#[doc = "crates/harn-vm/src/stdlib/tools/registry.rs"]
+mod declaration_0920 {
+    #[allow(unused_imports)]
+    use harn_builtin_meta::*;
+    #[harn_builtin_macros::harn_builtin_metadata(
+        exposure = "pure",
         sig = "tool_invocation_binding() -> dict?",
         category = "tools"
     )]
     fn tool_invocation_binding_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools/registry.rs"]
-mod declaration_0920 {
+mod declaration_0921 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9104,7 +9115,7 @@ mod declaration_0920 {
     fn tool_schema_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools/registry.rs"]
-mod declaration_0921 {
+mod declaration_0922 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9115,7 +9126,7 @@ mod declaration_0921 {
     fn tool_registry_validate_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools/registry.rs"]
-mod declaration_0922 {
+mod declaration_0923 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9126,42 +9137,42 @@ mod declaration_0922 {
     fn tool_registry_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools.rs"]
-mod declaration_0923 {
+mod declaration_0924 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.tools.synthesize" , effects = ["state.write@dynamic"] , sig = "tool_synthesize(spec: dict) -> closure" , category = "tools")]
     fn tool_synthesize_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools.rs"]
-mod declaration_0924 {
+mod declaration_0925 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.tools.synth_invoke" , effects = ["tool.mutate@dynamic" , "state.read@arg0"] , sig = "tool_synth_invoke(id: string, args?: any) -> any" , category = "tools" , kind = "async")]
     fn tool_synth_invoke_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools.rs"]
-mod declaration_0925 {
+mod declaration_0926 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.tools.synthesis_cache" , effects = ["state.mutate@const=tool-synthesis-cache"] , sig = "tool_synthesis_cache() -> list" , category = "tools")]
     fn tool_synthesis_cache_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools.rs"]
-mod declaration_0926 {
+mod declaration_0927 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.tools.synthesis_clear" , effects = ["state.mutate@const=tool-synthesis-cache"] , sig = "tool_synthesis_clear() -> nil" , category = "tools")]
     fn tool_synthesis_clear_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools.rs"]
-mod declaration_0927 {
+mod declaration_0928 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.tools.current_registry" , effects = ["state.read@const=current-tool-registry"] , sig = "__host_current_tool_registry() -> dict | closure | nil" , category = "tools")]
     fn host_current_tool_registry_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools.rs"]
-mod declaration_0928 {
+mod declaration_0929 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9172,7 +9183,7 @@ mod declaration_0928 {
     fn plan_artifact_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools.rs"]
-mod declaration_0929 {
+mod declaration_0930 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9183,7 +9194,7 @@ mod declaration_0929 {
     fn plan_entries_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools.rs"]
-mod declaration_0930 {
+mod declaration_0931 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9194,7 +9205,7 @@ mod declaration_0930 {
     fn tool_list_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools.rs"]
-mod declaration_0931 {
+mod declaration_0932 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9205,7 +9216,7 @@ mod declaration_0931 {
     fn tool_find_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools.rs"]
-mod declaration_0932 {
+mod declaration_0933 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9216,7 +9227,7 @@ mod declaration_0932 {
     fn tool_select_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools.rs"]
-mod declaration_0933 {
+mod declaration_0934 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9227,14 +9238,14 @@ mod declaration_0933 {
     fn tool_describe_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools.rs"]
-mod declaration_0934 {
+mod declaration_0935 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.tools.remove" , effects = ["state.mutate@arg0"] , sig = "tool_remove(registry: {_type: \"tool_registry\", tools: list} | closure, name: string) -> {_type: \"tool_registry\", tools: list}" , category = "tools")]
     fn tool_remove_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools.rs"]
-mod declaration_0935 {
+mod declaration_0936 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9245,7 +9256,7 @@ mod declaration_0935 {
     fn tool_count_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools.rs"]
-mod declaration_0936 {
+mod declaration_0937 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9256,7 +9267,7 @@ mod declaration_0936 {
     fn tool_define_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools.rs"]
-mod declaration_0937 {
+mod declaration_0938 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9267,7 +9278,7 @@ mod declaration_0937 {
     fn tool_parse_call_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools.rs"]
-mod declaration_0938 {
+mod declaration_0939 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9278,7 +9289,7 @@ mod declaration_0938 {
     fn tool_format_result_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools.rs"]
-mod declaration_0939 {
+mod declaration_0940 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9289,7 +9300,7 @@ mod declaration_0939 {
     fn tool_prompt_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools.rs"]
-mod declaration_0940 {
+mod declaration_0941 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9300,7 +9311,7 @@ mod declaration_0940 {
     fn tool_surface_validate_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools.rs"]
-mod declaration_0941 {
+mod declaration_0942 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9311,7 +9322,7 @@ mod declaration_0941 {
     fn tool_bind_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools.rs"]
-mod declaration_0942 {
+mod declaration_0943 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9322,7 +9333,7 @@ mod declaration_0942 {
     fn tool_ref_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tools.rs"]
-mod declaration_0943 {
+mod declaration_0944 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9333,294 +9344,294 @@ mod declaration_0943 {
     fn tool_def_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tracing.rs"]
-mod declaration_0944 {
+mod declaration_0945 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.trace_start" , effects = ["observability.write@arg0"] , sig = "trace_start(...args: any) -> dict" , category = "tracing")]
     fn trace_start_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tracing.rs"]
-mod declaration_0945 {
+mod declaration_0946 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.trace_end" , effects = ["observability.write@arg0"] , sig = "trace_end(...args: any) -> nil" , category = "tracing")]
     fn trace_end_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tracing.rs"]
-mod declaration_0946 {
+mod declaration_0947 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.trace_id" , effects = ["observability.read@const=current-trace"] , sig = "trace_id(...args: any) -> string?" , category = "tracing")]
     fn trace_id_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tracing.rs"]
-mod declaration_0947 {
+mod declaration_0948 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.llm_info" , effects = ["observability.read@const=current-trace"] , sig = "llm_info() -> dict" , category = "tracing")]
     fn llm_info_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tracing.rs"]
-mod declaration_0948 {
+mod declaration_0949 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.enable_tracing" , effects = ["observability.mutate@const=configuration"] , sig = "enable_tracing(enabled?: bool) -> nil" , category = "tracing")]
     fn enable_tracing_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tracing.rs"]
-mod declaration_0949 {
+mod declaration_0950 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.trace_spans" , effects = ["observability.read@const=trace-spans"] , sig = "trace_spans(...args: any) -> list" , category = "tracing")]
     fn trace_spans_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tracing.rs"]
-mod declaration_0950 {
+mod declaration_0951 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.trace_summary" , effects = ["observability.read@const=trace-spans"] , sig = "trace_summary(...args: any) -> string" , category = "tracing")]
     fn trace_summary_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tracing.rs"]
-mod declaration_0951 {
+mod declaration_0952 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.lifecycle_span_start" , effects = ["observability.write@arg0"] , sig = "__lifecycle_span_start(name: string) -> int" , category = "tracing")]
     fn lifecycle_span_start_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tracing.rs"]
-mod declaration_0952 {
+mod declaration_0953 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.lifecycle_span_end" , effects = ["observability.write@arg0"] , sig = "__lifecycle_span_end(span_id: int) -> nil" , category = "tracing")]
     fn lifecycle_span_end_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/tracing.rs"]
-mod declaration_0953 {
+mod declaration_0954 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.llm_usage" , effects = ["observability.read@const=current-trace"] , sig = "llm_usage() -> dict" , category = "tracing")]
     fn llm_usage_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/transcript_project.rs"]
-mod declaration_0954 {
+mod declaration_0955 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "pure" , effects = [] , sig = "transcript_project(transcript: dict | list, options?: any) -> dict" , kind = "async" , category = "transcript")]
     fn transcript_project_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/corrections.rs"]
-mod declaration_0955 {
+mod declaration_0956 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.correction_record" , effects = ["state.write@dynamic"] , sig = "correction_record(correction: dict) -> dict" , kind = "async" , category = "triggers")]
     fn correction_record_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/corrections.rs"]
-mod declaration_0956 {
+mod declaration_0957 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.correction_query" , effects = ["state.read@dynamic"] , sig = "correction_query(filters?: dict) -> list" , kind = "async" , category = "triggers")]
     fn correction_query_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/corrections.rs"]
-mod declaration_0957 {
+mod declaration_0958 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.corrections_record" , effects = ["state.write@dynamic"] , sig = "corrections.record(correction: dict) -> string" , kind = "async" , category = "triggers")]
     fn corrections_record_ns_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/corrections.rs"]
-mod declaration_0958 {
+mod declaration_0959 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.corrections_query" , effects = ["state.read@dynamic"] , sig = "corrections.query(filters?: dict) -> list" , kind = "async" , category = "triggers")]
     fn corrections_query_ns_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/dispatch.rs"]
-mod declaration_0959 {
+mod declaration_0960 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.handler_context" , effects = ["state.read@const=trigger-dispatch"] , sig = "handler_context() -> dict | nil" , category = "triggers")]
     fn handler_context_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/dispatch.rs"]
-mod declaration_0960 {
+mod declaration_0961 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.llm.list_providers_native" , effects = ["state.read@const=provider-catalog"] , sig = "list_providers_native() -> list" , category = "triggers")]
     fn list_providers_native_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/dispatch.rs"]
-mod declaration_0961 {
+mod declaration_0962 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.trigger_list" , effects = ["state.read@const=triggers"] , sig = "trigger_list(...args: any) -> list" , category = "triggers")]
     fn trigger_list_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/dispatch.rs"]
-mod declaration_0962 {
+mod declaration_0963 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.trigger_register" , effects = ["state.mutate@dynamic"] , sig = "trigger_register(...args: any) -> TriggerHandle" , kind = "async" , category = "triggers")]
     fn trigger_register_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/dispatch.rs"]
-mod declaration_0963 {
+mod declaration_0964 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.trigger_fire" , effects = ["state.mutate@dynamic"] , sig = "trigger_fire(...args: any) -> DispatchHandle" , kind = "async" , category = "triggers")]
     fn trigger_fire_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/dispatch.rs"]
-mod declaration_0964 {
+mod declaration_0965 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.trigger_replay" , effects = ["state.mutate@dynamic"] , sig = "trigger_replay(...args: any) -> DispatchHandle" , kind = "async" , category = "triggers")]
     fn trigger_replay_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/dispatch.rs"]
-mod declaration_0965 {
+mod declaration_0966 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.trigger_test_harness" , effects = ["state.mutate@dynamic"] , sig = "trigger_test_harness(...args: any) -> dict" , kind = "async" , category = "triggers")]
     fn trigger_test_harness_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/journal.rs"]
-mod declaration_0966 {
+mod declaration_0967 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.trigger_inspect_dlq" , effects = ["state.read@dynamic"] , sig = "trigger_inspect_dlq(...args: any) -> list" , kind = "async" , category = "triggers")]
     fn trigger_inspect_dlq_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/journal.rs"]
-mod declaration_0967 {
+mod declaration_0968 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.trigger_inspect_lifecycle" , effects = ["state.read@dynamic"] , sig = "trigger_inspect_lifecycle(...args: any) -> list" , kind = "async" , category = "triggers")]
     fn trigger_inspect_lifecycle_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/journal.rs"]
-mod declaration_0968 {
+mod declaration_0969 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.trigger_inspect_action_graph" , effects = ["state.read@dynamic"] , sig = "trigger_inspect_action_graph(...args: any) -> list" , kind = "async" , category = "triggers")]
     fn trigger_inspect_action_graph_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/trust.rs"]
-mod declaration_0969 {
+mod declaration_0970 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.trust_record" , effects = ["state.write@dynamic"] , sig = "trust_record(...args: any) -> TrustRecord" , kind = "async" , category = "triggers")]
     fn trust_record_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/trust.rs"]
-mod declaration_0970 {
+mod declaration_0971 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.trust_graph_record" , effects = ["state.write@dynamic"] , sig = "trust_graph_record(...args: any) -> string" , kind = "async" , category = "triggers")]
     fn trust_graph_record_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/trust.rs"]
-mod declaration_0971 {
+mod declaration_0972 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.trust_query" , effects = ["state.read@dynamic"] , sig = "trust_query(...args: any) -> list" , kind = "async" , category = "triggers")]
     fn trust_query_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/trust.rs"]
-mod declaration_0972 {
+mod declaration_0973 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.trust_graph_query" , effects = ["state.read@dynamic"] , sig = "trust_graph_query(...args: any) -> TrustScore" , kind = "async" , category = "triggers")]
     fn trust_graph_query_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/trust.rs"]
-mod declaration_0973 {
+mod declaration_0974 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.trust_graph_policy_for" , effects = ["state.read@dynamic"] , sig = "trust_graph_policy_for(...args: any) -> CapabilityPolicy" , kind = "async" , category = "triggers")]
     fn trust_graph_policy_for_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/trust.rs"]
-mod declaration_0974 {
+mod declaration_0975 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.trust_graph_verify_chain" , effects = ["state.read@dynamic"] , sig = "trust_graph_verify_chain(...args: any) -> TrustChainReport" , kind = "async" , category = "triggers")]
     fn trust_graph_verify_chain_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/trust.rs"]
-mod declaration_0975 {
+mod declaration_0976 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.trust_query_alias" , effects = ["state.read@dynamic"] , sig = "trust.query(...args: any) -> list" , kind = "async" , category = "triggers")]
     fn trust_query_ns_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/trust.rs"]
-mod declaration_0976 {
+mod declaration_0977 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.trust_record_alias" , effects = ["state.write@dynamic"] , sig = "trust.record(...args: any) -> string" , kind = "async" , category = "triggers")]
     fn trust_record_ns_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/trust.rs"]
-mod declaration_0977 {
+mod declaration_0978 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.trust_score" , effects = ["state.read@dynamic"] , sig = "trust.score(...args: any) -> TrustScore" , kind = "async" , category = "triggers")]
     fn trust_score_ns_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/trust.rs"]
-mod declaration_0978 {
+mod declaration_0979 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.trust_policy_for" , effects = ["state.read@dynamic"] , sig = "trust.policy_for(...args: any) -> CapabilityPolicy" , kind = "async" , category = "triggers")]
     fn trust_policy_for_ns_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/trust.rs"]
-mod declaration_0979 {
+mod declaration_0980 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.trust_verify_chain" , effects = ["state.read@dynamic"] , sig = "trust.verify_chain(...args: any) -> TrustChainReport" , kind = "async" , category = "triggers")]
     fn trust_verify_chain_ns_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/webhook_intake.rs"]
-mod declaration_0980 {
+mod declaration_0981 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.webhook_intake_register" , effects = ["state.mutate@dynamic"] , sig = "webhook_intake_register(...args: any) -> dict" , kind = "async" , category = "triggers")]
     fn webhook_intake_register_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/webhook_intake.rs"]
-mod declaration_0981 {
+mod declaration_0982 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.webhook_intake_feed" , effects = ["state.mutate@dynamic"] , sig = "webhook_intake_feed(...args: any) -> dict" , kind = "async" , category = "triggers")]
     fn webhook_intake_feed_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/webhook_intake.rs"]
-mod declaration_0982 {
+mod declaration_0983 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.webhook_intake_deregister" , effects = ["state.mutate@dynamic"] , sig = "webhook_intake_deregister(...args: any) -> bool" , kind = "async" , category = "triggers")]
     fn webhook_intake_deregister_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/webhook_intake.rs"]
-mod declaration_0983 {
+mod declaration_0984 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.webhook_intake_list" , effects = ["state.read@const=webhook-intake"] , sig = "webhook_intake_list(...args: any) -> list" , category = "triggers")]
     fn webhook_intake_list_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/triggers_stdlib/webhook_intake.rs"]
-mod declaration_0984 {
+mod declaration_0985 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.webhook_intake_recent" , effects = ["state.read@const=webhook-intake"] , sig = "webhook_intake_recent(...args: any) -> list" , kind = "async" , category = "triggers")]
     fn webhook_intake_recent_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/types.rs"]
-mod declaration_0985 {
+mod declaration_0986 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9631,14 +9642,14 @@ mod declaration_0985 {
     fn type_of_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/types.rs"]
-mod declaration_0986 {
+mod declaration_0987 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "pure" , sig_expr = harn_builtin_meta :: signatures :: PORTABLE_TO_STRING , category = "types")]
     fn to_string_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/types.rs"]
-mod declaration_0987 {
+mod declaration_0988 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9649,7 +9660,7 @@ mod declaration_0987 {
     fn to_int_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/types.rs"]
-mod declaration_0988 {
+mod declaration_0989 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9660,7 +9671,7 @@ mod declaration_0988 {
     fn to_float_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/types.rs"]
-mod declaration_0989 {
+mod declaration_0990 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9676,7 +9687,7 @@ mod declaration_0989 {
     fn decimal_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/types.rs"]
-mod declaration_0990 {
+mod declaration_0991 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9688,7 +9699,7 @@ mod declaration_0990 {
     fn ok_ctor_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/types.rs"]
-mod declaration_0991 {
+mod declaration_0992 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9700,7 +9711,7 @@ mod declaration_0991 {
     fn err_ctor_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/types.rs"]
-mod declaration_0992 {
+mod declaration_0993 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9711,7 +9722,7 @@ mod declaration_0992 {
     fn is_ok_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/types.rs"]
-mod declaration_0993 {
+mod declaration_0994 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9722,7 +9733,7 @@ mod declaration_0993 {
     fn is_err_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/types.rs"]
-mod declaration_0994 {
+mod declaration_0995 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9733,7 +9744,7 @@ mod declaration_0994 {
     fn unwrap_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/types.rs"]
-mod declaration_0995 {
+mod declaration_0996 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9744,7 +9755,7 @@ mod declaration_0995 {
     fn unwrap_or_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/types.rs"]
-mod declaration_0996 {
+mod declaration_0997 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9755,7 +9766,7 @@ mod declaration_0996 {
     fn unwrap_err_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/types.rs"]
-mod declaration_0997 {
+mod declaration_0998 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9766,7 +9777,7 @@ mod declaration_0997 {
     fn unreachable_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/types.rs"]
-mod declaration_0998 {
+mod declaration_0999 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9777,7 +9788,7 @@ mod declaration_0998 {
     fn to_list_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/types.rs"]
-mod declaration_0999 {
+mod declaration_1000 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9793,85 +9804,74 @@ mod declaration_0999 {
     fn tuple_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/types.rs"]
-mod declaration_1000 {
+mod declaration_1001 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "pure" , sig_expr = harn_builtin_meta :: signatures :: PORTABLE_LEN , category = "types")]
     fn len_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/types.rs"]
-mod declaration_1001 {
+mod declaration_1002 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["state.observe@arg0"] , sig = "is_same(a: any, b: any) -> bool" , category = "types")]
     fn is_same_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/types.rs"]
-mod declaration_1002 {
+mod declaration_1003 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["state.observe@arg0"] , sig = "addr_of(value: any) -> string" , category = "types")]
     fn addr_of_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/types.rs"]
-mod declaration_1003 {
+mod declaration_1004 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["state.mutate@arg0"] , sig = "drop(handle: any) -> nil" , category = "types")]
     fn drop_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/waitpoint.rs"]
-mod declaration_1004 {
+mod declaration_1005 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.waitpoint_create" , effects = ["state.mutate@dynamic"] , sig = "__waitpoint_create(options?: string | dict | nil) -> @WAITPOINT" , kind = "async" , category = "waitpoint")]
     fn waitpoint_create_builtin_macro() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/waitpoint.rs"]
-mod declaration_1005 {
+mod declaration_1006 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.waitpoint_wait" , effects = ["state.observe@arg0"] , sig = "__waitpoint_wait(handles: string | dict | list, options?: dict) -> @WAITPOINT | list<@WAITPOINT>" , kind = "async" , category = "waitpoint")]
     fn waitpoint_wait_builtin_macro() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/waitpoint.rs"]
-mod declaration_1006 {
+mod declaration_1007 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.waitpoint_complete" , effects = ["state.mutate@arg0"] , sig = "__waitpoint_complete(handle: string | dict, value?: any, options?: dict) -> @WAITPOINT" , kind = "async" , category = "waitpoint")]
     fn waitpoint_complete_builtin_macro() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/waitpoint.rs"]
-mod declaration_1007 {
+mod declaration_1008 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.waitpoint_cancel" , effects = ["state.mutate@arg0"] , sig = "__waitpoint_cancel(handle: string | dict, options?: dict) -> @WAITPOINT" , kind = "async" , category = "waitpoint")]
     fn waitpoint_cancel_builtin_macro() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/xml.rs"]
-mod declaration_1008 {
+mod declaration_1009 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (aliases = ["__to_xml"] , exposure = "pure" , sig = "to_xml(value: any, options?: dict) -> string" , category = "xml")]
     fn to_xml_impl() {}
 }
 #[doc = "crates/harn-vm/src/stdlib/xml.rs"]
-mod declaration_1009 {
+mod declaration_1010 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (aliases = ["__from_xml"] , exposure = "pure" , sig = "from_xml(text: string, options?: dict) -> dict" , category = "xml")]
     fn from_xml_impl() {}
-}
-#[doc = "crates/harn-vm/src/step_runtime.rs"]
-mod declaration_1010 {
-    #[allow(unused_imports)]
-    use harn_builtin_meta::*;
-    #[harn_builtin_macros::harn_builtin_metadata(
-        exposure = "runtime_internal",
-        category = "step_runtime",
-        runtime_only = true
-    )]
-    fn __register_step() {}
 }
 #[doc = "crates/harn-vm/src/step_runtime.rs"]
 mod declaration_1011 {
@@ -9882,10 +9882,21 @@ mod declaration_1011 {
         category = "step_runtime",
         runtime_only = true
     )]
-    fn __register_persona() {}
+    fn __register_step() {}
 }
 #[doc = "crates/harn-vm/src/step_runtime.rs"]
 mod declaration_1012 {
+    #[allow(unused_imports)]
+    use harn_builtin_meta::*;
+    #[harn_builtin_macros::harn_builtin_metadata(
+        exposure = "runtime_internal",
+        category = "step_runtime",
+        runtime_only = true
+    )]
+    fn __register_persona() {}
+}
+#[doc = "crates/harn-vm/src/step_runtime.rs"]
+mod declaration_1013 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9897,7 +9908,7 @@ mod declaration_1012 {
     fn __persona_output_style() {}
 }
 #[doc = "crates/harn-vm/src/verification.rs"]
-mod declaration_1013 {
+mod declaration_1014 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.verification_profiles_get" , effects = ["state.read@const=verification-profiles"] , sig = "verification_profiles_get(dir?: string|nil) -> dict|nil" , category = "verification")]
@@ -9906,7 +9917,7 @@ mod declaration_1013 {
     fn verification_profiles_get_impl() {}
 }
 #[doc = "crates/harn-vm/src/verification.rs"]
-mod declaration_1014 {
+mod declaration_1015 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.verification_profiles_set" , effects = ["state.mutate@const=verification-profiles"] , sig = "verification_profiles_set(record_set: dict, dir?: string|nil) -> nil" , category = "verification")]
@@ -9917,7 +9928,7 @@ mod declaration_1014 {
     fn verification_profiles_set_impl() {}
 }
 #[doc = "crates/harn-vm/src/verification.rs"]
-mod declaration_1015 {
+mod declaration_1016 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.verification_profile_resolve" , effects = ["state.read@const=verification-profiles"] , sig = "verification_profile_resolve(query: dict, dir?: string|nil) -> dict|nil" , category = "verification")]
@@ -9927,7 +9938,7 @@ mod declaration_1015 {
     fn verification_profile_resolve_impl() {}
 }
 #[doc = "crates/harn-vm/src/verification.rs"]
-mod declaration_1016 {
+mod declaration_1017 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.verification_profile_matches" , effects = ["state.read@const=verification-profiles"] , sig = "verification_profile_matches(query: dict, dir?: string|nil) -> list" , category = "verification")]
@@ -9939,7 +9950,7 @@ mod declaration_1016 {
     fn verification_profile_matches_impl() {}
 }
 #[doc = "crates/harn-vm/src/verification.rs"]
-mod declaration_1017 {
+mod declaration_1018 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.verification_profile_record_run" , effects = ["state.write@const=verification-profiles"] , sig = "verification_profile_record_run(row_id: string, observation: dict, dir?: string|nil) -> dict|nil" , category = "verification")]
@@ -9952,7 +9963,7 @@ mod declaration_1017 {
     fn verification_profile_record_run_impl() {}
 }
 #[doc = "crates/harn-vm/src/verification.rs"]
-mod declaration_1018 {
+mod declaration_1019 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9967,7 +9978,7 @@ mod declaration_1018 {
     fn verification_diagnostic_classify_impl() {}
 }
 #[doc = "crates/harn-builtins/src/agent_state.rs"]
-mod declaration_1019 {
+mod declaration_1020 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9979,7 +9990,7 @@ mod declaration_1019 {
     fn agent_state_init_impl() {}
 }
 #[doc = "crates/harn-builtins/src/agent_state.rs"]
-mod declaration_1020 {
+mod declaration_1021 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -9991,7 +10002,7 @@ mod declaration_1020 {
     fn agent_state_resume_impl() {}
 }
 #[doc = "crates/harn-builtins/src/agent_state.rs"]
-mod declaration_1021 {
+mod declaration_1022 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10003,7 +10014,7 @@ mod declaration_1021 {
     fn agent_state_write_impl() {}
 }
 #[doc = "crates/harn-builtins/src/agent_state.rs"]
-mod declaration_1022 {
+mod declaration_1023 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10015,7 +10026,7 @@ mod declaration_1022 {
     fn agent_state_read_impl() {}
 }
 #[doc = "crates/harn-builtins/src/agent_state.rs"]
-mod declaration_1023 {
+mod declaration_1024 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10027,7 +10038,7 @@ mod declaration_1023 {
     fn agent_state_list_impl() {}
 }
 #[doc = "crates/harn-builtins/src/agent_state.rs"]
-mod declaration_1024 {
+mod declaration_1025 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10039,7 +10050,7 @@ mod declaration_1024 {
     fn agent_state_delete_impl() {}
 }
 #[doc = "crates/harn-builtins/src/agent_state.rs"]
-mod declaration_1025 {
+mod declaration_1026 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10051,7 +10062,7 @@ mod declaration_1025 {
     fn agent_state_handoff_impl() {}
 }
 #[doc = "crates/harn-builtins/src/approval_review_policy.rs"]
-mod declaration_1026 {
+mod declaration_1027 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10063,14 +10074,14 @@ mod declaration_1026 {
     fn approval_review_policy_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/artifact_emit.rs"]
-mod declaration_1027 {
+mod declaration_1028 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.agent.artifact_emit" , effects = ["state.write@dynamic" , "observability.write@dynamic"] , sig = "artifact_emit(kind: string, spec: any, options?: dict) -> dict" , kind = "async" , category = "agent.artifact" , doc = "Validate and emit a declarative renderable artifact, file-reference, or artifact-manifest event for the current agent session.")]
     fn artifact_emit_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/calendar.rs"]
-mod declaration_1028 {
+mod declaration_1029 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10081,7 +10092,7 @@ mod declaration_1028 {
     fn calendar_parts_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/calendar.rs"]
-mod declaration_1029 {
+mod declaration_1030 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10092,7 +10103,7 @@ mod declaration_1029 {
     fn calendar_from_local_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/calendar.rs"]
-mod declaration_1030 {
+mod declaration_1031 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10103,7 +10114,7 @@ mod declaration_1030 {
     fn calendar_boundary_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/calendar.rs"]
-mod declaration_1031 {
+mod declaration_1032 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10114,7 +10125,7 @@ mod declaration_1031 {
     fn calendar_add_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/calendar.rs"]
-mod declaration_1032 {
+mod declaration_1033 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10125,7 +10136,7 @@ mod declaration_1032 {
     fn calendar_date_range_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/calendar.rs"]
-mod declaration_1033 {
+mod declaration_1034 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10136,7 +10147,7 @@ mod declaration_1033 {
     fn calendar_next_weekday_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/calendar.rs"]
-mod declaration_1034 {
+mod declaration_1035 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10147,7 +10158,7 @@ mod declaration_1034 {
     fn calendar_countries_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/calendar.rs"]
-mod declaration_1035 {
+mod declaration_1036 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10158,7 +10169,7 @@ mod declaration_1035 {
     fn calendar_country_info_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/calendar.rs"]
-mod declaration_1036 {
+mod declaration_1037 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10169,7 +10180,7 @@ mod declaration_1036 {
     fn calendar_supported_holiday_calendars_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/calendar.rs"]
-mod declaration_1037 {
+mod declaration_1038 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10180,7 +10191,7 @@ mod declaration_1037 {
     fn calendar_holidays_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/calendar.rs"]
-mod declaration_1038 {
+mod declaration_1039 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10191,7 +10202,7 @@ mod declaration_1038 {
     fn calendar_is_holiday_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/calendar.rs"]
-mod declaration_1039 {
+mod declaration_1040 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10202,7 +10213,7 @@ mod declaration_1039 {
     fn calendar_is_business_day_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/calendar.rs"]
-mod declaration_1040 {
+mod declaration_1041 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10213,7 +10224,7 @@ mod declaration_1040 {
     fn calendar_next_business_day_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/calendar.rs"]
-mod declaration_1041 {
+mod declaration_1042 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10224,7 +10235,7 @@ mod declaration_1041 {
     fn calendar_add_business_days_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/calendar.rs"]
-mod declaration_1042 {
+mod declaration_1043 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10235,7 +10246,7 @@ mod declaration_1042 {
     fn calendar_business_days_between_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/calendar.rs"]
-mod declaration_1043 {
+mod declaration_1044 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10246,35 +10257,35 @@ mod declaration_1043 {
     fn calendar_business_window_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/channel_guardrails.rs"]
-mod declaration_1044 {
+mod declaration_1045 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.channels.guardrail_register" , effects = ["state.mutate@const=channel-guardrails"] , sig = "channel_guardrail_register(config: dict) -> string" , category = "channel_guardrails")]
     fn channel_guardrail_register_impl() {}
 }
 #[doc = "crates/harn-builtins/src/channel_guardrails.rs"]
-mod declaration_1045 {
+mod declaration_1046 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.channels.guardrail_unregister" , effects = ["state.mutate@const=channel-guardrails"] , sig = "channel_guardrail_unregister(id: string) -> bool" , category = "channel_guardrails")]
     fn channel_guardrail_unregister_impl() {}
 }
 #[doc = "crates/harn-builtins/src/channel_guardrails.rs"]
-mod declaration_1046 {
+mod declaration_1047 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.channels.guardrail_list" , effects = ["state.read@const=channel-guardrails"] , sig = "channel_guardrail_list() -> list" , category = "channel_guardrails")]
     fn channel_guardrail_list_impl() {}
 }
 #[doc = "crates/harn-builtins/src/channel_guardrails.rs"]
-mod declaration_1047 {
+mod declaration_1048 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.channels.guardrail_clear" , effects = ["state.mutate@const=channel-guardrails"] , sig = "channel_guardrail_clear() -> nil" , category = "channel_guardrails")]
     fn channel_guardrail_clear_impl() {}
 }
 #[doc = "crates/harn-builtins/src/channels.rs"]
-mod declaration_1048 {
+mod declaration_1049 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10286,7 +10297,7 @@ mod declaration_1048 {
     fn emit_channel_impl() {}
 }
 #[doc = "crates/harn-builtins/src/channels.rs"]
-mod declaration_1049 {
+mod declaration_1050 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10298,7 +10309,7 @@ mod declaration_1049 {
     fn channel_events_impl() {}
 }
 #[doc = "crates/harn-builtins/src/channels.rs"]
-mod declaration_1050 {
+mod declaration_1051 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10310,7 +10321,7 @@ mod declaration_1050 {
     fn channel_subscribe_impl() {}
 }
 #[doc = "crates/harn-builtins/src/channels.rs"]
-mod declaration_1051 {
+mod declaration_1052 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10322,7 +10333,7 @@ mod declaration_1051 {
     fn channel_consumer_cursor_impl() {}
 }
 #[doc = "crates/harn-builtins/src/channels.rs"]
-mod declaration_1052 {
+mod declaration_1053 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10334,7 +10345,7 @@ mod declaration_1052 {
     fn channel_ack_impl() {}
 }
 #[doc = "crates/harn-builtins/src/channels.rs"]
-mod declaration_1053 {
+mod declaration_1054 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10346,7 +10357,7 @@ mod declaration_1053 {
     fn flush_trigger_aggregations_impl() {}
 }
 #[doc = "crates/harn-builtins/src/command_policy.rs"]
-mod declaration_1054 {
+mod declaration_1055 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10357,21 +10368,21 @@ mod declaration_1054 {
     fn command_policy_impl() {}
 }
 #[doc = "crates/harn-builtins/src/command_policy.rs"]
-mod declaration_1055 {
+mod declaration_1056 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.command_policy_push" , effects = ["state.mutate@const=command-policy"] , sig = "command_policy_push(policy: dict) -> nil" , category = "command_policy")]
     fn command_policy_push_impl() {}
 }
 #[doc = "crates/harn-builtins/src/command_policy.rs"]
-mod declaration_1056 {
+mod declaration_1057 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.command_policy_pop" , effects = ["state.mutate@const=command-policy"] , sig = "command_policy_pop() -> nil" , category = "command_policy")]
     fn command_policy_pop_impl() {}
 }
 #[doc = "crates/harn-builtins/src/command_policy.rs"]
-mod declaration_1057 {
+mod declaration_1058 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10382,7 +10393,7 @@ mod declaration_1057 {
     fn command_risk_scan_impl() {}
 }
 #[doc = "crates/harn-builtins/src/command_policy.rs"]
-mod declaration_1058 {
+mod declaration_1059 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10393,7 +10404,7 @@ mod declaration_1058 {
     fn command_result_scan_impl() {}
 }
 #[doc = "crates/harn-builtins/src/command_policy.rs"]
-mod declaration_1059 {
+mod declaration_1060 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10404,7 +10415,7 @@ mod declaration_1059 {
     fn command_llm_risk_scan_impl() {}
 }
 #[doc = "crates/harn-builtins/src/command_policy.rs"]
-mod declaration_1060 {
+mod declaration_1061 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10415,21 +10426,21 @@ mod declaration_1060 {
     fn command_workspace_effect_impl() {}
 }
 #[doc = "crates/harn-builtins/src/compaction.rs"]
-mod declaration_1061 {
+mod declaration_1062 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.agent.compaction_policy" , effects = ["state.mutate@dynamic"] , runtime_control_plane = true , sig = "compaction.policy(opts: dict) -> dict" , category = "compaction")]
     fn compaction_policy_impl() {}
 }
 #[doc = "crates/harn-builtins/src/compaction.rs"]
-mod declaration_1062 {
+mod declaration_1063 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.agent.compaction_check" , effects = ["state.read@dynamic"] , sig = "compaction.check(session_id?: string) -> dict" , category = "compaction")]
     fn compaction_check_impl() {}
 }
 #[doc = "crates/harn-builtins/src/compaction.rs"]
-mod declaration_1063 {
+mod declaration_1064 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.agent.compaction_run" , effects = ["state.mutate@dynamic" , "llm.write@dynamic"] , sig = "compaction.run(session_id?: string, plan?: dict) -> dict" , kind = "async" , category = "compaction")]
@@ -10437,7 +10448,7 @@ mod declaration_1063 {
 }
 #[cfg(feature = "compression")]
 #[doc = "crates/harn-builtins/src/compression.rs"]
-mod declaration_1064 {
+mod declaration_1065 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10449,7 +10460,7 @@ mod declaration_1064 {
 }
 #[cfg(feature = "compression")]
 #[doc = "crates/harn-builtins/src/compression.rs"]
-mod declaration_1065 {
+mod declaration_1066 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10461,7 +10472,7 @@ mod declaration_1065 {
 }
 #[cfg(feature = "compression")]
 #[doc = "crates/harn-builtins/src/compression.rs"]
-mod declaration_1066 {
+mod declaration_1067 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10473,7 +10484,7 @@ mod declaration_1066 {
 }
 #[cfg(feature = "compression")]
 #[doc = "crates/harn-builtins/src/compression.rs"]
-mod declaration_1067 {
+mod declaration_1068 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10485,7 +10496,7 @@ mod declaration_1067 {
 }
 #[cfg(feature = "compression")]
 #[doc = "crates/harn-builtins/src/compression.rs"]
-mod declaration_1068 {
+mod declaration_1069 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10497,7 +10508,7 @@ mod declaration_1068 {
 }
 #[cfg(feature = "compression")]
 #[doc = "crates/harn-builtins/src/compression.rs"]
-mod declaration_1069 {
+mod declaration_1070 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10509,7 +10520,7 @@ mod declaration_1069 {
 }
 #[cfg(feature = "compression")]
 #[doc = "crates/harn-builtins/src/compression.rs"]
-mod declaration_1070 {
+mod declaration_1071 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10521,7 +10532,7 @@ mod declaration_1070 {
 }
 #[cfg(feature = "compression")]
 #[doc = "crates/harn-builtins/src/compression.rs"]
-mod declaration_1071 {
+mod declaration_1072 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10533,7 +10544,7 @@ mod declaration_1071 {
 }
 #[cfg(feature = "compression")]
 #[doc = "crates/harn-builtins/src/compression.rs"]
-mod declaration_1072 {
+mod declaration_1073 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10545,7 +10556,7 @@ mod declaration_1072 {
 }
 #[cfg(feature = "compression")]
 #[doc = "crates/harn-builtins/src/compression.rs"]
-mod declaration_1073 {
+mod declaration_1074 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10556,14 +10567,14 @@ mod declaration_1073 {
     fn zip_extract_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/config.rs"]
-mod declaration_1074 {
+mod declaration_1075 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "pure" , effects = [] , sig = "parse_env_file(text: string) -> Result<dict<string, string>, {line: int, message: string}>" , category = "config" , doc = "Parse literal KEY=VALUE lines. Comments, export prefixes, and matching outer quotes are supported. No shell execution, variable expansion, or escape decoding occurs. Duplicate keys use the last value. Errors report a line and reason without input text.")]
     fn parse_env_file_impl() {}
 }
 #[doc = "crates/harn-builtins/src/cookies.rs"]
-mod declaration_1075 {
+mod declaration_1076 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10574,7 +10585,7 @@ mod declaration_1075 {
     fn cookie_parse_impl() {}
 }
 #[doc = "crates/harn-builtins/src/cookies.rs"]
-mod declaration_1076 {
+mod declaration_1077 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10585,14 +10596,14 @@ mod declaration_1076 {
     fn cookie_serialize_impl() {}
 }
 #[doc = "crates/harn-builtins/src/cookies.rs"]
-mod declaration_1077 {
+mod declaration_1078 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.net.cookie_delete" , effects = ["state.mutate@arg0"] , sig = "cookie_delete(name: string, options?: dict?) -> string" , category = "cookies")]
     fn cookie_delete_impl() {}
 }
 #[doc = "crates/harn-builtins/src/cookies.rs"]
-mod declaration_1078 {
+mod declaration_1079 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10603,7 +10614,7 @@ mod declaration_1078 {
     fn cookie_sign_impl() {}
 }
 #[doc = "crates/harn-builtins/src/cookies.rs"]
-mod declaration_1079 {
+mod declaration_1080 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10614,7 +10625,7 @@ mod declaration_1079 {
     fn cookie_verify_impl() {}
 }
 #[doc = "crates/harn-builtins/src/cookies.rs"]
-mod declaration_1080 {
+mod declaration_1081 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10625,7 +10636,7 @@ mod declaration_1080 {
     fn session_sign_impl() {}
 }
 #[doc = "crates/harn-builtins/src/cookies.rs"]
-mod declaration_1081 {
+mod declaration_1082 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10636,7 +10647,7 @@ mod declaration_1081 {
     fn session_verify_impl() {}
 }
 #[doc = "crates/harn-builtins/src/cookies.rs"]
-mod declaration_1082 {
+mod declaration_1083 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10647,7 +10658,7 @@ mod declaration_1082 {
     fn session_cookie_impl() {}
 }
 #[doc = "crates/harn-builtins/src/cookies.rs"]
-mod declaration_1083 {
+mod declaration_1084 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10658,7 +10669,7 @@ mod declaration_1083 {
     fn session_from_cookies_impl() {}
 }
 #[doc = "crates/harn-builtins/src/cookies.rs"]
-mod declaration_1084 {
+mod declaration_1085 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10669,7 +10680,7 @@ mod declaration_1084 {
     fn cookie_round_trip_impl() {}
 }
 #[doc = "crates/harn-builtins/src/cron.rs"]
-mod declaration_1085 {
+mod declaration_1086 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10680,7 +10691,7 @@ mod declaration_1085 {
     fn cron_is_valid_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/csv.rs"]
-mod declaration_1086 {
+mod declaration_1087 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10691,7 +10702,7 @@ mod declaration_1086 {
     fn csv_parse_impl() {}
 }
 #[doc = "crates/harn-builtins/src/csv.rs"]
-mod declaration_1087 {
+mod declaration_1088 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10702,7 +10713,7 @@ mod declaration_1087 {
     fn csv_stringify_impl() {}
 }
 #[doc = "crates/harn-builtins/src/diff.rs"]
-mod declaration_1088 {
+mod declaration_1089 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10714,7 +10725,7 @@ mod declaration_1088 {
 }
 #[cfg(feature = "content")]
 #[doc = "crates/harn-builtins/src/document.rs"]
-mod declaration_1089 {
+mod declaration_1090 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10727,7 +10738,7 @@ mod declaration_1089 {
 }
 #[cfg(feature = "content")]
 #[doc = "crates/harn-builtins/src/document.rs"]
-mod declaration_1090 {
+mod declaration_1091 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10740,7 +10751,7 @@ mod declaration_1090 {
 }
 #[cfg(feature = "content")]
 #[doc = "crates/harn-builtins/src/document.rs"]
-mod declaration_1091 {
+mod declaration_1092 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10752,140 +10763,140 @@ mod declaration_1091 {
     fn document_pdf_capabilities_impl() {}
 }
 #[doc = "crates/harn-builtins/src/durable_step.rs"]
-mod declaration_1092 {
+mod declaration_1093 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.step_run" , effects = ["state.mutate@dynamic" , "clock.read@const=wall"] , sig = "step.run(...args: any) -> any" , kind = "async" , category = "durable_step")]
     fn step_run_impl() {}
 }
 #[doc = "crates/harn-builtins/src/durable_step.rs"]
-mod declaration_1093 {
+mod declaration_1094 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.step_inspect" , effects = ["state.read@arg0"] , sig = "step.inspect(namespace_or_options?: string | dict | nil) -> list" , kind = "async" , category = "durable_step")]
     fn step_inspect_impl() {}
 }
 #[doc = "crates/harn-builtins/src/event_log/hypothesis_host_attestation.rs"]
-mod declaration_1094 {
+mod declaration_1095 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.hypothesis_operation_request" , effects = ["authority.write@const=hypothesis.operation"] , sig = "event_log.hypothesis_operation_request(request: dict) -> dict?" , kind = "async" , category = "event_log")]
     fn hypothesis_operation_request_impl() {}
 }
 #[doc = "crates/harn-builtins/src/event_log/hypothesis_host_attestation.rs"]
-mod declaration_1095 {
+mod declaration_1096 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.hypothesis_event_authority_request" , effects = ["authority.write@arg0"] , sig = "event_log.hypothesis_authority_request(authority_kind: string, event_fingerprint: string, plan_fingerprint: string, hypothesis_id: string, operation_receipt_id: string, run_id?: string, event?: any) -> resource" , kind = "async" , category = "event_log")]
     fn hypothesis_event_authority_request_impl() {}
 }
 #[doc = "crates/harn-builtins/src/event_log.rs"]
-mod declaration_1096 {
+mod declaration_1097 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.event_log_describe" , effects = ["state.read@dynamic"] , sig = "event_log.describe() -> dict" , kind = "async" , category = "event_log")]
     fn event_log_describe_impl() {}
 }
 #[doc = "crates/harn-builtins/src/event_log.rs"]
-mod declaration_1097 {
+mod declaration_1098 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.event_log_emit" , effects = ["observability.write@arg0"] , sig = "event_log.emit(topic: string, kind: string, payload?: any, headers?: dict) -> int" , kind = "async" , category = "event_log")]
     fn event_log_emit_impl() {}
 }
 #[doc = "crates/harn-builtins/src/event_log.rs"]
-mod declaration_1098 {
+mod declaration_1099 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.event_log_emit_idempotent" , effects = ["observability.write@arg0"] , sig = "event_log.emit_idempotent(topic: string, kind: string, idempotency_key: string, payload?: any, headers?: dict) -> dict" , kind = "async" , category = "event_log")]
     fn event_log_emit_idempotent_impl() {}
 }
 #[doc = "crates/harn-builtins/src/event_log.rs"]
-mod declaration_1099 {
+mod declaration_1100 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.event_log_emit_idempotent_chained" , effects = ["observability.write@arg0"] , sig = "event_log.emit_idempotent_chained(topic: string, kind: string, idempotency_key: string, expected_head: string?, payload?: any, headers?: dict) -> dict" , kind = "async" , category = "event_log")]
     fn event_log_emit_idempotent_chained_impl() {}
 }
 #[doc = "crates/harn-builtins/src/event_log.rs"]
-mod declaration_1100 {
+mod declaration_1101 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.hypothesis_event_authority_mint" , effects = ["authority.write@arg1"] , sig = "event_log.hypothesis_authority_mint(native_attestation: resource, authority_kind: string, event_fingerprint: string, plan_fingerprint: string, hypothesis_id: string, run_id?: string) -> resource" , kind = "async" , category = "event_log")]
     fn hypothesis_event_authority_mint_impl() {}
 }
 #[doc = "crates/harn-builtins/src/event_log.rs"]
-mod declaration_1101 {
+mod declaration_1102 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.hypothesis_event_append" , effects = ["observability.write@const=hypotheses.events.v1"] , sig = "event_log.hypothesis_event_append(proof: resource, kind: string, idempotency_key: string, expected_head: string?, event_fingerprint: string, plan_fingerprint: string, hypothesis_id: string, run_id: string?, payload: any, headers?: dict) -> dict" , kind = "async" , category = "event_log")]
     fn hypothesis_event_append_impl() {}
 }
 #[doc = "crates/harn-builtins/src/event_log.rs"]
-mod declaration_1102 {
+mod declaration_1103 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.event_log_latest" , effects = ["state.read@arg0"] , sig = "event_log.latest(topic: string) -> int | nil" , kind = "async" , category = "event_log")]
     fn event_log_latest_impl() {}
 }
 #[doc = "crates/harn-builtins/src/event_log.rs"]
-mod declaration_1103 {
+mod declaration_1104 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.event_log_verify" , effects = ["state.read@arg0"] , sig = "event_log.verify(topic: string) -> {verified: bool, errors: list<string>, event_count: int, last_hash: string?}" , kind = "async" , category = "event_log")]
     fn event_log_verify_impl() {}
 }
 #[doc = "crates/harn-builtins/src/event_log.rs"]
-mod declaration_1104 {
+mod declaration_1105 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.event_log_read" , effects = ["state.read@arg0"] , sig = "event_log.read(topic_or_options: string | dict, from_cursor?: int | nil, limit?: int) -> list" , kind = "async" , category = "event_log")]
     fn event_log_read_impl() {}
 }
 #[doc = "crates/harn-builtins/src/event_log.rs"]
-mod declaration_1105 {
+mod declaration_1106 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.hypothesis_event_snapshot" , effects = ["state.read@const=hypotheses.events.v1"] , sig = "event_log.hypothesis_event_snapshot(hypothesis_id: string) -> {verified: bool, errors: list<string>, scanned_event_count: int, last_hash: string?, records: list}" , kind = "async" , category = "event_log")]
     fn hypothesis_event_snapshot_impl() {}
 }
 #[doc = "crates/harn-builtins/src/event_log.rs"]
-mod declaration_1106 {
+mod declaration_1107 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.event_log_subscribe" , effects = ["state.observe@arg0"] , sig = "event_log.subscribe(topic_or_options: string | dict, from_cursor?: int | nil) -> stream" , kind = "async" , category = "event_log")]
     fn event_log_subscribe_impl() {}
 }
 #[doc = "crates/harn-builtins/src/event_log.rs"]
-mod declaration_1107 {
+mod declaration_1108 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.obs.event_log_topics" , effects = ["state.read@const=event-log"] , sig = "event_log.topics() -> list<string>" , kind = "async" , category = "event_log")]
     fn event_log_topics_impl() {}
 }
 #[doc = "crates/harn-builtins/src/external_agent.rs"]
-mod declaration_1108 {
+mod declaration_1109 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.agent.external_agent_delegate" , effects = ["worker.mutate@dynamic"] , sig = "__external_agent_delegate(task: string, options: dict) -> dict" , kind = "async" , category = "agents")]
     fn external_agent_delegate_impl() {}
 }
 #[doc = "crates/harn-builtins/src/grounding.rs"]
-mod declaration_1109 {
+mod declaration_1110 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.fs.verify_imports" , effects = ["fs.read@arg0"] , sig = "__verify_imports(paths: list|string, options?: dict) -> dict" , category = "grounding")]
     fn verify_imports_impl() {}
 }
 #[doc = "crates/harn-builtins/src/hitl_read.rs"]
-mod declaration_1110 {
+mod declaration_1111 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.interaction.hitl_pending" , effects = ["state.read@const=hitl"] , sig = "hitl_pending(filters?: dict) -> list" , kind = "async" , category = "hitl")]
     fn hitl_pending_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/http_response.rs"]
-mod declaration_1111 {
+mod declaration_1112 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10896,7 +10907,7 @@ mod declaration_1111 {
     fn http_ok_impl() {}
 }
 #[doc = "crates/harn-builtins/src/http_response.rs"]
-mod declaration_1112 {
+mod declaration_1113 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10907,7 +10918,7 @@ mod declaration_1112 {
     fn http_created_impl() {}
 }
 #[doc = "crates/harn-builtins/src/http_response.rs"]
-mod declaration_1113 {
+mod declaration_1114 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10918,7 +10929,7 @@ mod declaration_1113 {
     fn http_no_content_impl() {}
 }
 #[doc = "crates/harn-builtins/src/http_response.rs"]
-mod declaration_1114 {
+mod declaration_1115 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10929,7 +10940,7 @@ mod declaration_1114 {
     fn http_error_impl() {}
 }
 #[doc = "crates/harn-builtins/src/http_response.rs"]
-mod declaration_1115 {
+mod declaration_1116 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10940,7 +10951,7 @@ mod declaration_1115 {
     fn http_reply_impl() {}
 }
 #[doc = "crates/harn-builtins/src/http_response.rs"]
-mod declaration_1116 {
+mod declaration_1117 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10953,21 +10964,21 @@ mod declaration_1116 {
     fn http_reply_from_impl() {}
 }
 #[doc = "crates/harn-builtins/src/http_response.rs"]
-mod declaration_1117 {
+mod declaration_1118 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["state.mutate@arg0"] , sig = "http_stream(source: any, content_type?: string?) -> dict" , kind = "async" , category = "http_response")]
     fn http_stream_impl() {}
 }
 #[doc = "crates/harn-builtins/src/http_response.rs"]
-mod declaration_1118 {
+mod declaration_1119 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["state.mutate@arg0"] , sig = "http_sse(source: any, retry_ms?: int?) -> dict" , kind = "async" , category = "http_response")]
     fn http_sse_impl() {}
 }
 #[doc = "crates/harn-builtins/src/http_response.rs"]
-mod declaration_1119 {
+mod declaration_1120 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10978,7 +10989,7 @@ mod declaration_1119 {
     fn http_etag_impl() {}
 }
 #[doc = "crates/harn-builtins/src/http_response.rs"]
-mod declaration_1120 {
+mod declaration_1121 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -10989,7 +11000,7 @@ mod declaration_1120 {
     fn http_choose_impl() {}
 }
 #[doc = "crates/harn-builtins/src/http_response.rs"]
-mod declaration_1121 {
+mod declaration_1122 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11000,7 +11011,7 @@ mod declaration_1121 {
     fn http_not_modified_impl() {}
 }
 #[doc = "crates/harn-builtins/src/http_response.rs"]
-mod declaration_1122 {
+mod declaration_1123 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11011,7 +11022,7 @@ mod declaration_1122 {
     fn http_push_hints_impl() {}
 }
 #[doc = "crates/harn-builtins/src/http_response.rs"]
-mod declaration_1123 {
+mod declaration_1124 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11022,35 +11033,35 @@ mod declaration_1123 {
     fn http_upgrade_ws_impl() {}
 }
 #[doc = "crates/harn-builtins/src/lifecycle_receipts.rs"]
-mod declaration_1124 {
+mod declaration_1125 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.agent.lifecycle_receipt_record_suspension" , effects = ["state.write@arg0"] , runtime_control_plane = true , sig = "lifecycle_receipt_record_suspension(receipt: dict) -> dict" , category = "lifecycle_receipts")]
     fn lifecycle_receipt_record_suspension_impl() {}
 }
 #[doc = "crates/harn-builtins/src/lifecycle_receipts.rs"]
-mod declaration_1125 {
+mod declaration_1126 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.agent.lifecycle_receipt_record_resumption" , effects = ["state.write@arg0"] , runtime_control_plane = true , sig = "lifecycle_receipt_record_resumption(receipt: dict) -> dict" , category = "lifecycle_receipts")]
     fn lifecycle_receipt_record_resumption_impl() {}
 }
 #[doc = "crates/harn-builtins/src/lifecycle_receipts.rs"]
-mod declaration_1126 {
+mod declaration_1127 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.agent.lifecycle_receipt_record_drain_decision" , effects = ["state.write@arg0"] , runtime_control_plane = true , sig = "lifecycle_receipt_record_drain_decision(receipt: dict) -> dict" , category = "lifecycle_receipts")]
     fn lifecycle_receipt_record_drain_decision_impl() {}
 }
 #[doc = "crates/harn-builtins/src/lifecycle_receipts.rs"]
-mod declaration_1127 {
+mod declaration_1128 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.agent.lifecycle_receipts_snapshot" , effects = ["state.read@const=lifecycle-receipts"] , sig = "lifecycle_receipts_snapshot() -> list" , category = "lifecycle_receipts")]
     fn lifecycle_receipts_snapshot_impl() {}
 }
 #[doc = "crates/harn-builtins/src/lifecycle_receipts.rs"]
-mod declaration_1128 {
+mod declaration_1129 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11061,7 +11072,7 @@ mod declaration_1128 {
     fn verify_lifecycle_receipt_signature_impl() {}
 }
 #[doc = "crates/harn-builtins/src/lifecycle_receipts.rs"]
-mod declaration_1129 {
+mod declaration_1130 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11072,28 +11083,28 @@ mod declaration_1129 {
     fn lifecycle_resume_input_hash_impl() {}
 }
 #[doc = "crates/harn-builtins/src/lifecycle_receipts.rs"]
-mod declaration_1130 {
+mod declaration_1131 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.agent.lifecycle_drain_decision_prompt_hash" , effects = ["state.read@arg0"] , sig = "lifecycle_drain_decision_prompt_hash(prompt: string) -> string" , category = "lifecycle_receipts")]
     fn lifecycle_drain_decision_prompt_hash_impl() {}
 }
 #[doc = "crates/harn-builtins/src/lifecycle_receipts.rs"]
-mod declaration_1131 {
+mod declaration_1132 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.agent.lifecycle_replay_resume_input" , effects = ["state.read@arg0"] , sig = "lifecycle_replay_resume_input(receipt: dict, candidate?: any) -> dict" , category = "lifecycle_receipts")]
     fn lifecycle_replay_resume_input_impl() {}
 }
 #[doc = "crates/harn-builtins/src/lifecycle_receipts.rs"]
-mod declaration_1132 {
+mod declaration_1133 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.agent.lifecycle_replay_drain_decision" , effects = ["state.read@arg0"] , sig = "lifecycle_replay_drain_decision(receipt: dict, candidate_prompt?: string) -> dict" , category = "lifecycle_receipts")]
     fn lifecycle_replay_drain_decision_impl() {}
 }
 #[doc = "crates/harn-builtins/src/makefile.rs"]
-mod declaration_1133 {
+mod declaration_1134 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "pure" , effects = [] , sig = "makefile_filenames() -> list<string>" , category = "project")]
@@ -11101,7 +11112,7 @@ mod declaration_1133 {
     fn makefile_filenames_impl() {}
 }
 #[doc = "crates/harn-builtins/src/makefile.rs"]
-mod declaration_1134 {
+mod declaration_1135 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "pure" , effects = [] , sig = "makefile_parse(text: string) -> list<{name: string, command: string, recipe_preview: list<string>, recipe_line_count: int}>" , category = "project")]
@@ -11110,7 +11121,7 @@ mod declaration_1134 {
 }
 #[cfg(feature = "content")]
 #[doc = "crates/harn-builtins/src/markup.rs"]
-mod declaration_1135 {
+mod declaration_1136 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "pure" , effects = [] , sig = "markdown_parse(text: string, options?: {mdx?: bool}) -> {headings: list<{level: int, text: string, anchor: string, line: int, offset: int}>, links: list<{destination: string, image: bool, line: int, offset: int}>, blocks: list<{text: string, heading: bool, line: int}>, text: string}" , category = "markdown")]
@@ -11118,7 +11129,7 @@ mod declaration_1135 {
     fn markdown_parse_impl() {}
 }
 #[doc = "crates/harn-builtins/src/multipart.rs"]
-mod declaration_1136 {
+mod declaration_1137 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11129,7 +11140,7 @@ mod declaration_1136 {
     fn multipart_parse_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/multipart.rs"]
-mod declaration_1137 {
+mod declaration_1138 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11140,7 +11151,7 @@ mod declaration_1137 {
     fn multipart_field_bytes_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/multipart.rs"]
-mod declaration_1138 {
+mod declaration_1139 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11151,7 +11162,7 @@ mod declaration_1138 {
     fn multipart_field_text_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/multipart.rs"]
-mod declaration_1139 {
+mod declaration_1140 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11162,7 +11173,7 @@ mod declaration_1139 {
     fn multipart_form_data_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/net.rs"]
-mod declaration_1140 {
+mod declaration_1141 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11173,7 +11184,7 @@ mod declaration_1140 {
     fn net_unix_socket_json_request_impl() {}
 }
 #[doc = "crates/harn-builtins/src/oauth_dynreg.rs"]
-mod declaration_1141 {
+mod declaration_1142 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11184,7 +11195,7 @@ mod declaration_1141 {
     fn oauth_dynreg_store_handle_impl() {}
 }
 #[doc = "crates/harn-builtins/src/oauth_dynreg.rs"]
-mod declaration_1142 {
+mod declaration_1143 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11195,7 +11206,7 @@ mod declaration_1142 {
     fn oauth_dynreg_validate_metadata_impl() {}
 }
 #[doc = "crates/harn-builtins/src/oauth_dynreg.rs"]
-mod declaration_1143 {
+mod declaration_1144 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11206,7 +11217,7 @@ mod declaration_1143 {
     fn oauth_dynreg_build_client_metadata_impl() {}
 }
 #[doc = "crates/harn-builtins/src/oauth_dynreg.rs"]
-mod declaration_1144 {
+mod declaration_1145 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11217,7 +11228,7 @@ mod declaration_1144 {
     fn oauth_dynreg_build_authorization_server_metadata_impl() {}
 }
 #[doc = "crates/harn-builtins/src/oauth_dynreg.rs"]
-mod declaration_1145 {
+mod declaration_1146 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11228,7 +11239,7 @@ mod declaration_1145 {
     fn oauth_dynreg_register_impl() {}
 }
 #[doc = "crates/harn-builtins/src/oauth_dynreg.rs"]
-mod declaration_1146 {
+mod declaration_1147 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11239,7 +11250,7 @@ mod declaration_1146 {
     fn oauth_dynreg_get_impl() {}
 }
 #[doc = "crates/harn-builtins/src/oauth_dynreg.rs"]
-mod declaration_1147 {
+mod declaration_1148 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11250,7 +11261,7 @@ mod declaration_1147 {
     fn oauth_dynreg_list_impl() {}
 }
 #[doc = "crates/harn-builtins/src/oauth_storage.rs"]
-mod declaration_1148 {
+mod declaration_1149 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11261,7 +11272,7 @@ mod declaration_1148 {
     fn oauth_storage_memory_handle_impl() {}
 }
 #[doc = "crates/harn-builtins/src/oauth_storage.rs"]
-mod declaration_1149 {
+mod declaration_1150 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11272,7 +11283,7 @@ mod declaration_1149 {
     fn oauth_storage_file_handle_impl() {}
 }
 #[doc = "crates/harn-builtins/src/oauth_storage.rs"]
-mod declaration_1150 {
+mod declaration_1151 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11283,7 +11294,7 @@ mod declaration_1150 {
     fn oauth_storage_cloud_handle_impl() {}
 }
 #[doc = "crates/harn-builtins/src/oauth_storage.rs"]
-mod declaration_1151 {
+mod declaration_1152 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11295,7 +11306,7 @@ mod declaration_1151 {
     fn oauth_storage_get_impl() {}
 }
 #[doc = "crates/harn-builtins/src/oauth_storage.rs"]
-mod declaration_1152 {
+mod declaration_1153 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11307,7 +11318,7 @@ mod declaration_1152 {
     fn oauth_storage_set_impl() {}
 }
 #[doc = "crates/harn-builtins/src/oauth_storage.rs"]
-mod declaration_1153 {
+mod declaration_1154 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11319,7 +11330,7 @@ mod declaration_1153 {
     fn oauth_storage_delete_impl() {}
 }
 #[doc = "crates/harn-builtins/src/oauth_storage.rs"]
-mod declaration_1154 {
+mod declaration_1155 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11331,7 +11342,7 @@ mod declaration_1154 {
     fn oauth_storage_with_refresh_lock_impl() {}
 }
 #[doc = "crates/harn-builtins/src/path.rs"]
-mod declaration_1155 {
+mod declaration_1156 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11342,7 +11353,7 @@ mod declaration_1155 {
     fn path_parts_impl() {}
 }
 #[doc = "crates/harn-builtins/src/path.rs"]
-mod declaration_1156 {
+mod declaration_1157 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11353,7 +11364,7 @@ mod declaration_1156 {
     fn path_parent_impl() {}
 }
 #[doc = "crates/harn-builtins/src/path.rs"]
-mod declaration_1157 {
+mod declaration_1158 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11364,7 +11375,7 @@ mod declaration_1157 {
     fn path_basename_impl() {}
 }
 #[doc = "crates/harn-builtins/src/path.rs"]
-mod declaration_1158 {
+mod declaration_1159 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11375,7 +11386,7 @@ mod declaration_1158 {
     fn path_stem_impl() {}
 }
 #[doc = "crates/harn-builtins/src/path.rs"]
-mod declaration_1159 {
+mod declaration_1160 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11386,7 +11397,7 @@ mod declaration_1159 {
     fn path_extension_impl() {}
 }
 #[doc = "crates/harn-builtins/src/path.rs"]
-mod declaration_1160 {
+mod declaration_1161 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11397,7 +11408,7 @@ mod declaration_1160 {
     fn path_with_extension_impl() {}
 }
 #[doc = "crates/harn-builtins/src/path.rs"]
-mod declaration_1161 {
+mod declaration_1162 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11408,7 +11419,7 @@ mod declaration_1161 {
     fn path_with_stem_impl() {}
 }
 #[doc = "crates/harn-builtins/src/path.rs"]
-mod declaration_1162 {
+mod declaration_1163 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11419,7 +11430,7 @@ mod declaration_1162 {
     fn path_is_absolute_impl() {}
 }
 #[doc = "crates/harn-builtins/src/path.rs"]
-mod declaration_1163 {
+mod declaration_1164 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11430,7 +11441,7 @@ mod declaration_1163 {
     fn path_is_relative_impl() {}
 }
 #[doc = "crates/harn-builtins/src/path.rs"]
-mod declaration_1164 {
+mod declaration_1165 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11441,7 +11452,7 @@ mod declaration_1164 {
     fn path_normalize_impl() {}
 }
 #[doc = "crates/harn-builtins/src/path.rs"]
-mod declaration_1165 {
+mod declaration_1166 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11452,7 +11463,7 @@ mod declaration_1165 {
     fn path_relative_to_impl() {}
 }
 #[doc = "crates/harn-builtins/src/path.rs"]
-mod declaration_1166 {
+mod declaration_1167 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11463,7 +11474,7 @@ mod declaration_1166 {
     fn path_to_posix_impl() {}
 }
 #[doc = "crates/harn-builtins/src/path.rs"]
-mod declaration_1167 {
+mod declaration_1168 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11474,14 +11485,14 @@ mod declaration_1167 {
     fn path_to_native_impl() {}
 }
 #[doc = "crates/harn-builtins/src/path.rs"]
-mod declaration_1168 {
+mod declaration_1169 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.fs.workspace_info" , effects = ["fs.read@dynamic"] , sig = "path_workspace_info(path: string?, workspace_root?: string) -> dict" , category = "path")]
     fn path_workspace_info_impl() {}
 }
 #[doc = "crates/harn-builtins/src/path.rs"]
-mod declaration_1169 {
+mod declaration_1170 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11492,14 +11503,14 @@ mod declaration_1169 {
     fn path_workspace_normalize_impl() {}
 }
 #[doc = "crates/harn-builtins/src/path.rs"]
-mod declaration_1170 {
+mod declaration_1171 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.fs.workspace_canonicalize_existing" , effects = ["fs.read@arg0"] , sig = "path_workspace_canonicalize_existing(path: string?, workspace_root?: string) -> string?" , category = "path" , doc = "Canonicalize an existing path and return its workspace-relative spelling only when it remains under the existing workspace root.")]
     fn path_workspace_canonicalize_existing_impl() {}
 }
 #[doc = "crates/harn-builtins/src/path.rs"]
-mod declaration_1171 {
+mod declaration_1172 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11510,7 +11521,7 @@ mod declaration_1171 {
     fn path_segments_impl() {}
 }
 #[doc = "crates/harn-builtins/src/path_scope_guard.rs"]
-mod declaration_1172 {
+mod declaration_1173 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.register_path_scope_guard" , effects = ["state.mutate@const=path-scope-guard"] , sig = "register_path_scope_guard(opts?: dict|nil) -> nil" , category = "agent.path_scope_guard")]
@@ -11526,7 +11537,7 @@ mod declaration_1172 {
     fn register_path_scope_guard() {}
 }
 #[doc = "crates/harn-builtins/src/path_scope_guard.rs"]
-mod declaration_1173 {
+mod declaration_1174 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.clear_path_scope_guard" , effects = ["state.mutate@const=path-scope-guard"] , sig = "clear_path_scope_guard() -> nil" , category = "agent.path_scope_guard")]
@@ -11534,7 +11545,7 @@ mod declaration_1173 {
     fn clear_path_scope_guard() {}
 }
 #[doc = "crates/harn-builtins/src/portable.rs"]
-mod declaration_1174 {
+mod declaration_1175 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11545,7 +11556,7 @@ mod declaration_1174 {
     fn portable_compile_impl() {}
 }
 #[doc = "crates/harn-builtins/src/portable.rs"]
-mod declaration_1175 {
+mod declaration_1176 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11556,7 +11567,7 @@ mod declaration_1175 {
     fn portable_start_impl() {}
 }
 #[doc = "crates/harn-builtins/src/portable.rs"]
-mod declaration_1176 {
+mod declaration_1177 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -11568,7 +11579,7 @@ mod declaration_1176 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/advisory.rs"]
-mod declaration_1177 {
+mod declaration_1178 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.write@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_advisory_xact_lock" , & [Param :: new ("args" , TY_ANY)] , TY_BOOL ,) , kind = "async" , category = "postgres")]
@@ -11576,7 +11587,7 @@ mod declaration_1177 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/advisory.rs"]
-mod declaration_1178 {
+mod declaration_1179 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.write@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_try_advisory_xact_lock" , & [Param :: new ("args" , TY_ANY)] , TY_BOOL ,) , kind = "async" , category = "postgres")]
@@ -11584,7 +11595,7 @@ mod declaration_1178 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/advisory.rs"]
-mod declaration_1179 {
+mod declaration_1180 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.write@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_with_advisory_lock" , & [Param :: new ("args" , TY_ANY)] , TY_ANY ,) , kind = "async" , category = "postgres")]
@@ -11592,7 +11603,7 @@ mod declaration_1179 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/introspect.rs"]
-mod declaration_1180 {
+mod declaration_1181 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.read@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_introspect_tables" , & [Param :: new ("args" , TY_ANY)] , TY_LIST ,) , kind = "async" , category = "postgres")]
@@ -11600,7 +11611,7 @@ mod declaration_1180 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/introspect.rs"]
-mod declaration_1181 {
+mod declaration_1182 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.read@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_introspect_columns" , & [Param :: new ("args" , TY_ANY)] , TY_LIST ,) , kind = "async" , category = "postgres")]
@@ -11608,7 +11619,7 @@ mod declaration_1181 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/introspect.rs"]
-mod declaration_1182 {
+mod declaration_1183 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.read@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_introspect_indexes" , & [Param :: new ("args" , TY_ANY)] , TY_LIST ,) , kind = "async" , category = "postgres")]
@@ -11616,7 +11627,7 @@ mod declaration_1182 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/introspect.rs"]
-mod declaration_1183 {
+mod declaration_1184 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.read@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_pool_stats" , & [Param :: new ("args" , TY_ANY)] , TY_DICT) , kind = "async" , category = "postgres")]
@@ -11624,7 +11635,7 @@ mod declaration_1183 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/introspect.rs"]
-mod declaration_1184 {
+mod declaration_1185 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.write@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_partition_attach" , & [Param :: new ("args" , TY_ANY)] , TY_BOOL ,) , kind = "async" , category = "postgres")]
@@ -11632,7 +11643,7 @@ mod declaration_1184 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/introspect.rs"]
-mod declaration_1185 {
+mod declaration_1186 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.write@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_partition_detach" , & [Param :: new ("args" , TY_ANY)] , TY_BOOL ,) , kind = "async" , category = "postgres")]
@@ -11640,7 +11651,7 @@ mod declaration_1185 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/introspect.rs"]
-mod declaration_1186 {
+mod declaration_1187 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.write@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_partition_prune" , & [Param :: new ("args" , TY_ANY)] , TY_LIST ,) , kind = "async" , category = "postgres")]
@@ -11648,7 +11659,7 @@ mod declaration_1186 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/introspect.rs"]
-mod declaration_1187 {
+mod declaration_1188 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.write@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_partition_retain" , & [Param :: new ("args" , TY_ANY)] , TY_LIST ,) , kind = "async" , category = "postgres")]
@@ -11656,7 +11667,7 @@ mod declaration_1187 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/introspect.rs"]
-mod declaration_1188 {
+mod declaration_1189 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.write@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_partition_create_for_window" , & [Param :: new ("args" , TY_ANY)] , TY_LIST ,) , kind = "async" , category = "postgres")]
@@ -11664,7 +11675,7 @@ mod declaration_1188 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/jsonb.rs"]
-mod declaration_1189 {
+mod declaration_1190 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "pure" , sig_expr = BuiltinSignature :: variadic ("pg.jsonb.path" , & [Param :: new ("args" , TY_ANY)] , TY_LIST) , kind = "async" , category = "postgres")]
@@ -11672,7 +11683,7 @@ mod declaration_1189 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/jsonb.rs"]
-mod declaration_1190 {
+mod declaration_1191 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "pure" , sig_expr = BuiltinSignature :: variadic ("pg.jsonb.merge" , & [Param :: new ("args" , TY_ANY)] , TY_ANY) , kind = "async" , category = "postgres")]
@@ -11680,7 +11691,7 @@ mod declaration_1190 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/jsonb.rs"]
-mod declaration_1191 {
+mod declaration_1192 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "pure" , sig_expr = BuiltinSignature :: variadic ("pg.jsonb.contains" , & [Param :: new ("args" , TY_ANY)] , TY_BOOL) , kind = "async" , category = "postgres")]
@@ -11688,7 +11699,7 @@ mod declaration_1191 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/listen.rs"]
-mod declaration_1192 {
+mod declaration_1193 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.write@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_listen" , & [Param :: new ("args" , TY_ANY)] , TY_RESOURCE) , kind = "async" , category = "postgres")]
@@ -11696,7 +11707,7 @@ mod declaration_1192 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/listen.rs"]
-mod declaration_1193 {
+mod declaration_1194 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.read@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_listener_recv" , & [Param :: new ("args" , TY_ANY)] , TY_DICT_OR_NIL ,) , kind = "async" , category = "postgres")]
@@ -11704,7 +11715,7 @@ mod declaration_1193 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/listen.rs"]
-mod declaration_1194 {
+mod declaration_1195 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.write@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_listener_close" , & [Param :: new ("args" , TY_ANY)] , TY_BOOL ,) , kind = "async" , category = "postgres")]
@@ -11712,7 +11723,7 @@ mod declaration_1194 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/listen.rs"]
-mod declaration_1195 {
+mod declaration_1196 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.write@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_notify" , & [Param :: new ("args" , TY_ANY)] , TY_BOOL) , kind = "async" , category = "postgres")]
@@ -11720,7 +11731,7 @@ mod declaration_1195 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/mod.rs"]
-mod declaration_1196 {
+mod declaration_1197 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "runtime_internal" , sig_expr = BuiltinSignature :: variadic ("pg_pool" , & [Param :: new ("args" , TY_ANY)] , TY_RESOURCE) , kind = "async" , category = "postgres")]
@@ -11728,7 +11739,7 @@ mod declaration_1196 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/mod.rs"]
-mod declaration_1197 {
+mod declaration_1198 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "runtime_internal" , sig_expr = BuiltinSignature :: variadic ("pg_connect" , & [Param :: new ("args" , TY_ANY)] , TY_RESOURCE) , kind = "async" , category = "postgres")]
@@ -11736,7 +11747,7 @@ mod declaration_1197 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/mod.rs"]
-mod declaration_1198 {
+mod declaration_1199 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.write@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_close" , & [Param :: new ("args" , TY_ANY)] , TY_BOOL) , kind = "async" , category = "postgres")]
@@ -11744,7 +11755,7 @@ mod declaration_1198 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/mod.rs"]
-mod declaration_1199 {
+mod declaration_1200 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["state.mutate@const=postgres-statement-cache"] , sig_expr = BuiltinSignature :: variadic ("pg_stmt_cache_clear" , & [Param :: new ("args" , TY_ANY)] , TY_DICT) , kind = "async" , category = "postgres")]
@@ -11752,7 +11763,7 @@ mod declaration_1199 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/mod.rs"]
-mod declaration_1200 {
+mod declaration_1201 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.read@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_query" , & [Param :: new ("args" , TY_ANY)] , TY_LIST) , kind = "async" , category = "postgres")]
@@ -11760,7 +11771,7 @@ mod declaration_1200 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/mod.rs"]
-mod declaration_1201 {
+mod declaration_1202 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.read@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_query_one" , & [Param :: new ("args" , TY_ANY)] , TY_ANY) , kind = "async" , category = "postgres")]
@@ -11768,7 +11779,7 @@ mod declaration_1201 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/mod.rs"]
-mod declaration_1202 {
+mod declaration_1203 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.write@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_execute" , & [Param :: new ("args" , TY_ANY)] , TY_DICT) , kind = "async" , category = "postgres")]
@@ -11776,7 +11787,7 @@ mod declaration_1202 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/mod.rs"]
-mod declaration_1203 {
+mod declaration_1204 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.write@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_transaction" , & [Param :: new ("args" , TY_ANY)] , TY_ANY) , kind = "async" , category = "postgres")]
@@ -11784,7 +11795,7 @@ mod declaration_1203 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/mod.rs"]
-mod declaration_1204 {
+mod declaration_1205 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.write@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_savepoint" , & [Param :: new ("args" , TY_ANY)] , TY_BOOL) , kind = "async" , category = "postgres")]
@@ -11792,7 +11803,7 @@ mod declaration_1204 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/mod.rs"]
-mod declaration_1205 {
+mod declaration_1206 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.write@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_release_savepoint" , & [Param :: new ("args" , TY_ANY)] , TY_BOOL) , kind = "async" , category = "postgres")]
@@ -11800,7 +11811,7 @@ mod declaration_1205 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/mod.rs"]
-mod declaration_1206 {
+mod declaration_1207 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.write@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_rollback_to_savepoint" , & [Param :: new ("args" , TY_ANY)] , TY_BOOL) , kind = "async" , category = "postgres")]
@@ -11808,7 +11819,7 @@ mod declaration_1206 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/mod.rs"]
-mod declaration_1207 {
+mod declaration_1208 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["network.write@const=postgres"] , sig_expr = BuiltinSignature :: variadic ("pg_migrate" , & [Param :: new ("args" , TY_ANY)] , TY_DICT) , kind = "async" , category = "postgres")]
@@ -11816,7 +11827,7 @@ mod declaration_1207 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/mod.rs"]
-mod declaration_1208 {
+mod declaration_1209 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.testing.pg_mock_pool" , effects = ["state.mutate@dynamic"] , sig_expr = BuiltinSignature :: variadic ("pg_mock_pool" , & [Param :: new ("args" , TY_ANY)] , TY_RESOURCE) , category = "postgres")]
@@ -11824,63 +11835,63 @@ mod declaration_1208 {
 }
 #[cfg(feature = "postgres")]
 #[doc = "crates/harn-builtins/src/postgres/mod.rs"]
-mod declaration_1209 {
+mod declaration_1210 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["state.read@arg0"] , sig_expr = BuiltinSignature :: variadic ("pg_mock_calls" , & [Param :: new ("args" , TY_ANY)] , TY_LIST) , category = "postgres")]
     fn pg_mock_calls_impl() {}
 }
 #[doc = "crates/harn-builtins/src/project/builtins.rs"]
-mod declaration_1210 {
+mod declaration_1211 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.project.context_profile" , effects = ["fs.read@arg0"] , sig = "__cap_project_context_profile(path?: string, options?: dict) -> ProjectContextProfile" , aliases = ["project_context_profile_native"] , category = "project")]
     fn project_context_profile_native_impl() {}
 }
 #[doc = "crates/harn-builtins/src/project/builtins.rs"]
-mod declaration_1211 {
+mod declaration_1212 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.project.fingerprint" , effects = ["fs.read@arg0"] , sig = "__cap_project_fingerprint(path?: string) -> ProjectFingerprint" , aliases = ["project_fingerprint"] , category = "project")]
     fn project_fingerprint_impl() {}
 }
 #[doc = "crates/harn-builtins/src/project/builtins.rs"]
-mod declaration_1212 {
+mod declaration_1213 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.project.scan" , effects = ["fs.read@arg0"] , sig = "__cap_project_scan(path?: string, options?: dict) -> dict" , aliases = ["project_scan_native"] , category = "project")]
     fn project_scan_native_impl() {}
 }
 #[doc = "crates/harn-builtins/src/project/builtins.rs"]
-mod declaration_1213 {
+mod declaration_1214 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.project.scan_tree" , effects = ["fs.read@arg0"] , sig = "__cap_project_scan_tree(path?: string, options?: dict) -> dict" , aliases = ["project_scan_tree_native"] , category = "project")]
     fn project_scan_tree_native_impl() {}
 }
 #[doc = "crates/harn-builtins/src/project/builtins.rs"]
-mod declaration_1214 {
+mod declaration_1215 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.project.walk_tree" , effects = ["fs.read@arg0"] , sig = "__cap_project_walk_tree(path?: string, options?: dict) -> list" , aliases = ["project_walk_tree_native"] , category = "project")]
     fn project_walk_tree_native_impl() {}
 }
 #[doc = "crates/harn-builtins/src/project/builtins.rs"]
-mod declaration_1215 {
+mod declaration_1216 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.project.catalog" , effects = [] , sig = "__cap_project_catalog() -> list" , aliases = ["project_catalog_native"] , category = "project")]
     fn project_catalog_native_impl() {}
 }
 #[doc = "crates/harn-builtins/src/secret_scan.rs"]
-mod declaration_1216 {
+mod declaration_1217 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "pure" , effects = [] , sig_expr = harn_builtin_meta :: signatures :: PORTABLE_SECRET_PATTERN_CATALOG , category = "security")]
     fn secret_pattern_catalog_impl() {}
 }
 #[doc = "crates/harn-builtins/src/secret_scan.rs"]
-mod declaration_1217 {
+mod declaration_1218 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "pure" , sig_expr = harn_builtin_meta :: signatures :: PORTABLE_SECRET_SCAN , category = "security")]
@@ -11888,7 +11899,7 @@ mod declaration_1217 {
 }
 #[cfg(feature = "sqlite")]
 #[doc = "crates/harn-builtins/src/sqlite/mod.rs"]
-mod declaration_1218 {
+mod declaration_1219 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "runtime_internal" , sig_expr = BuiltinSignature :: variadic ("sqlite_open" , & [Param :: new ("args" , TY_ANY)] , TY_RESOURCE) , kind = "async" , category = "sqlite")]
@@ -11896,7 +11907,7 @@ mod declaration_1218 {
 }
 #[cfg(feature = "sqlite")]
 #[doc = "crates/harn-builtins/src/sqlite/mod.rs"]
-mod declaration_1219 {
+mod declaration_1220 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["fs.write@arg0.path"] , sig_expr = BuiltinSignature :: variadic ("sqlite_close" , & [Param :: new ("args" , TY_ANY)] , TY_BOOL) , kind = "async" , category = "sqlite")]
@@ -11904,7 +11915,7 @@ mod declaration_1219 {
 }
 #[cfg(feature = "sqlite")]
 #[doc = "crates/harn-builtins/src/sqlite/mod.rs"]
-mod declaration_1220 {
+mod declaration_1221 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["fs.read@arg0.path"] , sig_expr = BuiltinSignature :: variadic ("sqlite_query" , & [Param :: new ("args" , TY_ANY)] , TY_LIST) , kind = "async" , category = "sqlite")]
@@ -11912,7 +11923,7 @@ mod declaration_1220 {
 }
 #[cfg(feature = "sqlite")]
 #[doc = "crates/harn-builtins/src/sqlite/mod.rs"]
-mod declaration_1221 {
+mod declaration_1222 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["fs.read@arg0.path"] , sig_expr = BuiltinSignature :: variadic ("sqlite_query_one" , & [Param :: new ("args" , TY_ANY)] , TY_ANY) , kind = "async" , category = "sqlite")]
@@ -11920,7 +11931,7 @@ mod declaration_1221 {
 }
 #[cfg(feature = "sqlite")]
 #[doc = "crates/harn-builtins/src/sqlite/mod.rs"]
-mod declaration_1222 {
+mod declaration_1223 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["fs.write@arg0.path"] , sig_expr = BuiltinSignature :: variadic ("sqlite_execute" , & [Param :: new ("args" , TY_ANY)] , TY_DICT) , kind = "async" , category = "sqlite")]
@@ -11928,7 +11939,7 @@ mod declaration_1222 {
 }
 #[cfg(feature = "sqlite")]
 #[doc = "crates/harn-builtins/src/sqlite/mod.rs"]
-mod declaration_1223 {
+mod declaration_1224 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["fs.write@arg0.path"] , sig_expr = BuiltinSignature :: variadic ("sqlite_transaction" , & [Param :: new ("args" , TY_ANY)] , TY_ANY) , kind = "async" , category = "sqlite")]
@@ -11936,7 +11947,7 @@ mod declaration_1223 {
 }
 #[cfg(feature = "sqlite")]
 #[doc = "crates/harn-builtins/src/sqlite/mod.rs"]
-mod declaration_1224 {
+mod declaration_1225 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["fs.write@arg0.path"] , sig_expr = BuiltinSignature :: variadic ("sqlite_savepoint" , & [Param :: new ("args" , TY_ANY)] , TY_BOOL) , kind = "async" , category = "sqlite")]
@@ -11944,7 +11955,7 @@ mod declaration_1224 {
 }
 #[cfg(feature = "sqlite")]
 #[doc = "crates/harn-builtins/src/sqlite/mod.rs"]
-mod declaration_1225 {
+mod declaration_1226 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["fs.write@arg0.path"] , sig_expr = BuiltinSignature :: variadic ("sqlite_release_savepoint" , & [Param :: new ("args" , TY_ANY)] , TY_BOOL) , kind = "async" , category = "sqlite")]
@@ -11952,7 +11963,7 @@ mod declaration_1225 {
 }
 #[cfg(feature = "sqlite")]
 #[doc = "crates/harn-builtins/src/sqlite/mod.rs"]
-mod declaration_1226 {
+mod declaration_1227 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["fs.write@arg0.path"] , sig_expr = BuiltinSignature :: variadic ("sqlite_rollback_to_savepoint" , & [Param :: new ("args" , TY_ANY)] , TY_BOOL) , kind = "async" , category = "sqlite")]
@@ -11960,7 +11971,7 @@ mod declaration_1226 {
 }
 #[cfg(feature = "sqlite")]
 #[doc = "crates/harn-builtins/src/sqlite/mod.rs"]
-mod declaration_1227 {
+mod declaration_1228 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["fs.write@arg0.path"] , sig_expr = BuiltinSignature :: variadic ("sqlite_migrate" , & [Param :: new ("args" , TY_ANY)] , TY_DICT) , kind = "async" , category = "sqlite")]
@@ -11968,7 +11979,7 @@ mod declaration_1227 {
 }
 #[cfg(feature = "sqlite")]
 #[doc = "crates/harn-builtins/src/sqlite/mod.rs"]
-mod declaration_1228 {
+mod declaration_1229 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.testing.sqlite_mock_db" , effects = ["state.mutate@dynamic"] , sig_expr = BuiltinSignature :: variadic ("sqlite_mock_db" , & [Param :: new ("args" , TY_ANY)] , TY_RESOURCE) , category = "sqlite")]
@@ -11976,63 +11987,63 @@ mod declaration_1228 {
 }
 #[cfg(feature = "sqlite")]
 #[doc = "crates/harn-builtins/src/sqlite/mod.rs"]
-mod declaration_1229 {
+mod declaration_1230 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "capability_arg:0" , effects = ["state.read@arg0"] , sig_expr = BuiltinSignature :: variadic ("sqlite_mock_calls" , & [Param :: new ("args" , TY_ANY)] , TY_LIST) , category = "sqlite")]
     fn sqlite_mock_calls_impl() {}
 }
 #[doc = "crates/harn-builtins/src/testbench.rs"]
-mod declaration_1230 {
+mod declaration_1231 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.testing.is_active" , effects = ["state.read@const=testbench"] , sig = "testbench_is_active() -> bool" , category = "testbench")]
     fn testbench_is_active_impl() {}
 }
 #[doc = "crates/harn-builtins/src/testbench.rs"]
-mod declaration_1231 {
+mod declaration_1232 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.testing.fs_diff" , effects = ["state.read@const=testbench"] , sig = "testbench_fs_diff() -> list" , category = "testbench")]
     fn testbench_fs_diff_impl() {}
 }
 #[doc = "crates/harn-builtins/src/testbench.rs"]
-mod declaration_1232 {
+mod declaration_1233 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.testing.clock_leaks" , effects = ["state.read@const=testbench"] , sig = "testbench_clock_leaks() -> list" , category = "testbench")]
     fn testbench_clock_leaks_impl() {}
 }
 #[doc = "crates/harn-builtins/src/timing.rs"]
-mod declaration_1233 {
+mod declaration_1234 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.clock.timing_start" , effects = ["clock.read@const=monotonic"] , sig = "__timing_start(name: string, attributes?: dict) -> dict" , category = "timing")]
     fn timing_start_impl() {}
 }
 #[doc = "crates/harn-builtins/src/timing.rs"]
-mod declaration_1234 {
+mod declaration_1235 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.clock.timing_now_monotonic_ms" , effects = ["clock.read@const=monotonic"] , sig = "__timing_now_monotonic_ms() -> int" , category = "timing")]
     fn timing_now_monotonic_ms_impl() {}
 }
 #[doc = "crates/harn-builtins/src/timing.rs"]
-mod declaration_1235 {
+mod declaration_1236 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.clock.timing_event" , effects = ["clock.read@const=monotonic" , "observability.write@dynamic"] , sig = "__timing_event(handle: dict, name: string, attributes?: dict) -> bool" , category = "timing")]
     fn timing_event_impl() {}
 }
 #[doc = "crates/harn-builtins/src/timing.rs"]
-mod declaration_1236 {
+mod declaration_1237 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.clock.timing_end" , effects = ["clock.read@const=monotonic" , "observability.write@dynamic"] , sig = "__timing_end(handle: dict, final_attributes?: dict) -> dict" , category = "timing")]
     fn timing_end_impl() {}
 }
 #[doc = "crates/harn-builtins/src/tool_hooks.rs"]
-mod declaration_1237 {
+mod declaration_1238 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12043,7 +12054,7 @@ mod declaration_1237 {
     fn tool_rule_impl() {}
 }
 #[doc = "crates/harn-builtins/src/tool_hooks.rs"]
-mod declaration_1238 {
+mod declaration_1239 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12054,84 +12065,84 @@ mod declaration_1238 {
     fn catalogue_impl() {}
 }
 #[doc = "crates/harn-builtins/src/tool_hooks.rs"]
-mod declaration_1239 {
+mod declaration_1240 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.tools.hooks_registry" , effects = ["state.read@const=tool-hooks"] , sig = "tool_hooks_registry() -> dict" , category = "tool_hooks")]
     fn tool_hooks_registry_impl() {}
 }
 #[doc = "crates/harn-builtins/src/tool_hooks.rs"]
-mod declaration_1240 {
+mod declaration_1241 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.tools.hooks_register" , effects = ["state.mutate@const=tool-hooks"] , sig = "tool_hooks_register(registry: dict, catalogue: dict) -> dict" , category = "tool_hooks")]
     fn tool_hooks_register_impl() {}
 }
 #[doc = "crates/harn-builtins/src/tool_hooks.rs"]
-mod declaration_1241 {
+mod declaration_1242 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.tools.hooks_unregister" , effects = ["state.mutate@const=tool-hooks"] , sig = "tool_hooks_unregister(registry: dict, catalogue_id: string) -> dict" , category = "tool_hooks")]
     fn tool_hooks_unregister_impl() {}
 }
 #[doc = "crates/harn-builtins/src/tool_hooks.rs"]
-mod declaration_1242 {
+mod declaration_1243 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.tools.hooks_filter" , effects = ["state.read@const=tool-hooks"] , sig = "tool_hooks_filter(registry: dict, stacks?: any) -> dict" , category = "tool_hooks")]
     fn tool_hooks_filter_impl() {}
 }
 #[doc = "crates/harn-builtins/src/tool_hooks.rs"]
-mod declaration_1243 {
+mod declaration_1244 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.tools.hooks_list" , effects = ["state.read@const=tool-hooks"] , sig = "tool_hooks_list(registry: dict) -> list" , category = "tool_hooks")]
     fn tool_hooks_list_impl() {}
 }
 #[doc = "crates/harn-builtins/src/tool_hooks.rs"]
-mod declaration_1244 {
+mod declaration_1245 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.tools.hooks_match" , effects = ["state.read@const=tool-hooks"] , sig = "tool_hooks_match(registry: dict, command: string, context?: any) -> list" , category = "tool_hooks" , kind = "async")]
     fn tool_hooks_match_impl() {}
 }
 #[doc = "crates/harn-builtins/src/tool_hooks.rs"]
-mod declaration_1245 {
+mod declaration_1246 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.tools.hooks_emit_audit" , effects = ["observability.write@dynamic"] , sig = "tool_hooks_emit_audit(kind: string, payload?: any) -> dict" , category = "tool_hooks")]
     fn tool_hooks_emit_audit_impl() {}
 }
 #[doc = "crates/harn-builtins/src/tool_hooks.rs"]
-mod declaration_1246 {
+mod declaration_1247 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.tools.hooks_inject_reminder" , effects = ["state.write@dynamic"] , sig = "tool_hooks_inject_reminder(options: dict) -> dict" , category = "tool_hooks")]
     fn tool_hooks_inject_reminder_impl() {}
 }
 #[doc = "crates/harn-builtins/src/tool_hooks.rs"]
-mod declaration_1247 {
+mod declaration_1248 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.tools.classifier_cache_get" , effects = ["state.read@arg0"] , sig = "__tool_hooks_classifier_cache_get(key: string, now_ms?: int) -> any" , category = "tool_hooks")]
     fn tool_hooks_classifier_cache_get_impl() {}
 }
 #[doc = "crates/harn-builtins/src/tool_hooks.rs"]
-mod declaration_1248 {
+mod declaration_1249 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.tools.classifier_cache_put" , effects = ["state.write@arg0"] , sig = "__tool_hooks_classifier_cache_put(key: string, value: any, now_ms?: int, ttl_ms?: int) -> nil" , category = "tool_hooks")]
     fn tool_hooks_classifier_cache_put_impl() {}
 }
 #[doc = "crates/harn-builtins/src/tool_hooks.rs"]
-mod declaration_1249 {
+mod declaration_1250 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.tools.classifier_cache_clear" , effects = ["state.mutate@const=tool-hook-classifier-cache"] , sig = "__tool_hooks_classifier_cache_clear() -> nil" , category = "tool_hooks")]
     fn tool_hooks_classifier_cache_clear_impl() {}
 }
 #[doc = "crates/harn-builtins/src/tui.rs"]
-mod declaration_1250 {
+mod declaration_1251 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12143,7 +12154,7 @@ mod declaration_1250 {
     fn __tui_page() {}
 }
 #[doc = "crates/harn-builtins/src/tui.rs"]
-mod declaration_1251 {
+mod declaration_1252 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.term.clear" , effects = ["stdio.write@const=terminal"] , sig = "__tui_clear() -> nil" , category = "tui")]
@@ -12151,7 +12162,7 @@ mod declaration_1251 {
     fn __tui_clear() {}
 }
 #[doc = "crates/harn-builtins/src/tui.rs"]
-mod declaration_1252 {
+mod declaration_1253 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.term.terminal_width" , effects = ["stdio.observe@const=terminal"] , sig = "__tui_terminal_width(default_width?: int) -> int" , category = "tui")]
@@ -12159,7 +12170,7 @@ mod declaration_1252 {
     fn __tui_terminal_width() {}
 }
 #[doc = "crates/harn-builtins/src/url_parse.rs"]
-mod declaration_1253 {
+mod declaration_1254 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12170,7 +12181,7 @@ mod declaration_1253 {
     fn url_parse_impl() {}
 }
 #[doc = "crates/harn-builtins/src/url_parse.rs"]
-mod declaration_1254 {
+mod declaration_1255 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12181,7 +12192,7 @@ mod declaration_1254 {
     fn url_build_impl() {}
 }
 #[doc = "crates/harn-builtins/src/url_parse.rs"]
-mod declaration_1255 {
+mod declaration_1256 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12192,7 +12203,7 @@ mod declaration_1255 {
     fn query_parse_impl() {}
 }
 #[doc = "crates/harn-builtins/src/url_parse.rs"]
-mod declaration_1256 {
+mod declaration_1257 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12204,7 +12215,7 @@ mod declaration_1256 {
 }
 #[cfg(feature = "content")]
 #[doc = "crates/harn-builtins/src/web.rs"]
-mod declaration_1257 {
+mod declaration_1258 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12216,7 +12227,7 @@ mod declaration_1257 {
 }
 #[cfg(feature = "content")]
 #[doc = "crates/harn-builtins/src/web.rs"]
-mod declaration_1258 {
+mod declaration_1259 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12228,7 +12239,7 @@ mod declaration_1258 {
 }
 #[cfg(feature = "content")]
 #[doc = "crates/harn-builtins/src/web.rs"]
-mod declaration_1259 {
+mod declaration_1260 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12239,7 +12250,7 @@ mod declaration_1259 {
     fn web_origin_url_impl() {}
 }
 #[doc = "crates/harn-builtins/src/workflow_messages.rs"]
-mod declaration_1260 {
+mod declaration_1261 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.workflow_signal" , effects = ["state.write@dynamic"] , sig = "workflow.signal(target: string|dict, name: string, payload?: any) -> dict" , category = "workflow.messages")]
@@ -12247,7 +12258,7 @@ mod declaration_1260 {
     fn workflow_signal_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/workflow_messages.rs"]
-mod declaration_1261 {
+mod declaration_1262 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.workflow_query" , effects = ["state.read@dynamic"] , sig = "workflow.query(target: string|dict, name: string) -> any" , category = "workflow.messages")]
@@ -12255,7 +12266,7 @@ mod declaration_1261 {
     fn workflow_query_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/workflow_messages.rs"]
-mod declaration_1262 {
+mod declaration_1263 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.workflow_update" , effects = ["state.mutate@dynamic"] , sig = "workflow.update(target: string|dict, name: string, payload?: any, options?: dict|nil) -> any" , kind = "async" , category = "workflow.messages")]
@@ -12263,7 +12274,7 @@ mod declaration_1262 {
     fn workflow_update_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/workflow_messages.rs"]
-mod declaration_1263 {
+mod declaration_1264 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.workflow_publish_query" , effects = ["state.write@dynamic"] , sig = "workflow.publish_query(target: string|dict, name: string, value?: any) -> dict" , category = "workflow.messages")]
@@ -12271,7 +12282,7 @@ mod declaration_1263 {
     fn workflow_publish_query_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/workflow_messages.rs"]
-mod declaration_1264 {
+mod declaration_1265 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.workflow_receive" , effects = ["state.observe@dynamic" , "state.mutate@dynamic"] , sig = "workflow.receive(target: string | dict, timeout_ms?: int) -> {workflow_id: string, seq: int, kind: \"signal\" | \"update\" | \"control\", name: string, request_id: string?, payload: unknown, enqueued_at: string}?" , kind = "async" , category = "workflow.messages")]
@@ -12279,7 +12290,7 @@ mod declaration_1264 {
     fn workflow_receive_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/workflow_messages.rs"]
-mod declaration_1265 {
+mod declaration_1266 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.workflow_respond_update" , effects = ["state.write@dynamic"] , sig = "workflow.respond_update(target: string|dict, request_id: string, value?: any, name?: string|nil) -> dict" , category = "workflow.messages")]
@@ -12287,7 +12298,7 @@ mod declaration_1265 {
     fn workflow_respond_update_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/workflow_messages.rs"]
-mod declaration_1266 {
+mod declaration_1267 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.workflow_pause" , effects = ["state.mutate@dynamic"] , sig = "workflow.pause(target: string|dict) -> dict" , category = "workflow.messages")]
@@ -12295,7 +12306,7 @@ mod declaration_1266 {
     fn workflow_pause_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/workflow_messages.rs"]
-mod declaration_1267 {
+mod declaration_1268 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.workflow_resume" , effects = ["state.mutate@dynamic"] , sig = "workflow.resume(target: string|dict) -> dict" , category = "workflow.messages")]
@@ -12303,7 +12314,7 @@ mod declaration_1267 {
     fn workflow_resume_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/workflow_messages.rs"]
-mod declaration_1268 {
+mod declaration_1269 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.workflow_status" , effects = ["state.read@dynamic"] , sig = "workflow.status(target: string|dict) -> dict" , category = "workflow.messages")]
@@ -12311,7 +12322,7 @@ mod declaration_1268 {
     fn workflow_status_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/workflow_messages.rs"]
-mod declaration_1269 {
+mod declaration_1270 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.workflow_continue_as_new" , effects = ["state.mutate@dynamic"] , sig = "workflow.continue_as_new(target: string|dict) -> dict" , category = "workflow.messages")]
@@ -12319,7 +12330,7 @@ mod declaration_1269 {
     fn workflow_continue_as_new_builtin() {}
 }
 #[doc = "crates/harn-builtins/src/workflow_messages.rs"]
-mod declaration_1270 {
+mod declaration_1271 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     # [harn_builtin_macros :: harn_builtin_metadata (exposure = "harness.runtime.continue_as_new" , effects = ["state.mutate@dynamic"] , sig = "continue_as_new(target: string|dict) -> dict" , category = "workflow.messages")]
@@ -12327,7 +12338,7 @@ mod declaration_1270 {
     fn continue_as_new_builtin() {}
 }
 #[doc = "crates/harn-flow/src/builtins.rs"]
-mod declaration_1271 {
+mod declaration_1272 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12338,7 +12349,7 @@ mod declaration_1271 {
     fn flow_invariant_allow_impl() {}
 }
 #[doc = "crates/harn-flow/src/builtins.rs"]
-mod declaration_1272 {
+mod declaration_1273 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12349,7 +12360,7 @@ mod declaration_1272 {
     fn flow_invariant_warn_impl() {}
 }
 #[doc = "crates/harn-flow/src/builtins.rs"]
-mod declaration_1273 {
+mod declaration_1274 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12360,7 +12371,7 @@ mod declaration_1273 {
     fn flow_invariant_block_impl() {}
 }
 #[doc = "crates/harn-flow/src/builtins.rs"]
-mod declaration_1274 {
+mod declaration_1275 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12371,7 +12382,7 @@ mod declaration_1274 {
     fn flow_invariant_require_approval_impl() {}
 }
 #[doc = "crates/harn-flow/src/builtins.rs"]
-mod declaration_1275 {
+mod declaration_1276 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12382,7 +12393,7 @@ mod declaration_1275 {
     fn flow_evidence_atom_impl() {}
 }
 #[doc = "crates/harn-flow/src/builtins.rs"]
-mod declaration_1276 {
+mod declaration_1277 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12393,7 +12404,7 @@ mod declaration_1276 {
     fn flow_evidence_metadata_impl() {}
 }
 #[doc = "crates/harn-flow/src/builtins.rs"]
-mod declaration_1277 {
+mod declaration_1278 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12404,7 +12415,7 @@ mod declaration_1277 {
     fn flow_evidence_transcript_impl() {}
 }
 #[doc = "crates/harn-flow/src/builtins.rs"]
-mod declaration_1278 {
+mod declaration_1279 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12415,7 +12426,7 @@ mod declaration_1278 {
     fn flow_evidence_citation_impl() {}
 }
 #[doc = "crates/harn-flow/src/builtins.rs"]
-mod declaration_1279 {
+mod declaration_1280 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12426,7 +12437,7 @@ mod declaration_1279 {
     fn flow_remediation_impl() {}
 }
 #[doc = "crates/harn-flow/src/builtins.rs"]
-mod declaration_1280 {
+mod declaration_1281 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12437,7 +12448,7 @@ mod declaration_1280 {
     fn flow_with_evidence_impl() {}
 }
 #[doc = "crates/harn-flow/src/builtins.rs"]
-mod declaration_1281 {
+mod declaration_1282 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12448,7 +12459,7 @@ mod declaration_1281 {
     fn flow_with_remediation_impl() {}
 }
 #[doc = "crates/harn-flow/src/builtins.rs"]
-mod declaration_1282 {
+mod declaration_1283 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12459,7 +12470,7 @@ mod declaration_1282 {
     fn flow_with_confidence_impl() {}
 }
 #[doc = "crates/harn-flow/src/builtins.rs"]
-mod declaration_1283 {
+mod declaration_1284 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12470,7 +12481,7 @@ mod declaration_1283 {
     fn flow_invariant_kind_impl() {}
 }
 #[doc = "crates/harn-flow/src/builtins.rs"]
-mod declaration_1284 {
+mod declaration_1285 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12481,7 +12492,7 @@ mod declaration_1284 {
     fn flow_invariant_is_blocking_impl() {}
 }
 #[doc = "crates/harn-flow/src/builtins.rs"]
-mod declaration_1285 {
+mod declaration_1286 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -12492,7 +12503,7 @@ mod declaration_1285 {
     fn flow_invariant_confidence_impl() {}
 }
 #[doc = "crates/harn-flow/src/builtins.rs"]
-mod declaration_1286 {
+mod declaration_1287 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
     #[harn_builtin_macros::harn_builtin_metadata(
@@ -13422,436 +13433,437 @@ static DEFINITIONS: &[&harn_vm_core::builtin_support::VmBuiltinDef] = &[
     &declaration_0916::TOKEN_REDACTION_CUSTOM_PATTERNS_IMPL_DEF,
     &declaration_0917::TOKEN_REDACTION_DRAIN_AUDIT_IMPL_DEF,
     &declaration_0918::TOOL_PROJECT_IMPL_DEF,
-    &declaration_0919::TOOL_INVOCATION_BINDING_IMPL_DEF,
-    &declaration_0920::TOOL_SCHEMA_IMPL_DEF,
-    &declaration_0921::TOOL_REGISTRY_VALIDATE_IMPL_DEF,
-    &declaration_0922::TOOL_REGISTRY_IMPL_DEF,
-    &declaration_0923::TOOL_SYNTHESIZE_IMPL_DEF,
-    &declaration_0924::TOOL_SYNTH_INVOKE_IMPL_DEF,
-    &declaration_0925::TOOL_SYNTHESIS_CACHE_IMPL_DEF,
-    &declaration_0926::TOOL_SYNTHESIS_CLEAR_IMPL_DEF,
-    &declaration_0927::HOST_CURRENT_TOOL_REGISTRY_IMPL_DEF,
-    &declaration_0928::PLAN_ARTIFACT_IMPL_DEF,
-    &declaration_0929::PLAN_ENTRIES_IMPL_DEF,
-    &declaration_0930::TOOL_LIST_IMPL_DEF,
-    &declaration_0931::TOOL_FIND_IMPL_DEF,
-    &declaration_0932::TOOL_SELECT_IMPL_DEF,
-    &declaration_0933::TOOL_DESCRIBE_IMPL_DEF,
-    &declaration_0934::TOOL_REMOVE_IMPL_DEF,
-    &declaration_0935::TOOL_COUNT_IMPL_DEF,
-    &declaration_0936::TOOL_DEFINE_IMPL_DEF,
-    &declaration_0937::TOOL_PARSE_CALL_IMPL_DEF,
-    &declaration_0938::TOOL_FORMAT_RESULT_IMPL_DEF,
-    &declaration_0939::TOOL_PROMPT_IMPL_DEF,
-    &declaration_0940::TOOL_SURFACE_VALIDATE_IMPL_DEF,
-    &declaration_0941::TOOL_BIND_IMPL_DEF,
-    &declaration_0942::TOOL_REF_IMPL_DEF,
-    &declaration_0943::TOOL_DEF_IMPL_DEF,
-    &declaration_0944::TRACE_START_IMPL_DEF,
-    &declaration_0945::TRACE_END_IMPL_DEF,
-    &declaration_0946::TRACE_ID_IMPL_DEF,
-    &declaration_0947::LLM_INFO_IMPL_DEF,
-    &declaration_0948::ENABLE_TRACING_IMPL_DEF,
-    &declaration_0949::TRACE_SPANS_IMPL_DEF,
-    &declaration_0950::TRACE_SUMMARY_IMPL_DEF,
-    &declaration_0951::LIFECYCLE_SPAN_START_IMPL_DEF,
-    &declaration_0952::LIFECYCLE_SPAN_END_IMPL_DEF,
-    &declaration_0953::LLM_USAGE_IMPL_DEF,
-    &declaration_0954::TRANSCRIPT_PROJECT_IMPL_DEF,
-    &declaration_0955::CORRECTION_RECORD_IMPL_DEF,
-    &declaration_0956::CORRECTION_QUERY_IMPL_DEF,
-    &declaration_0957::CORRECTIONS_RECORD_NS_IMPL_DEF,
-    &declaration_0958::CORRECTIONS_QUERY_NS_IMPL_DEF,
-    &declaration_0959::HANDLER_CONTEXT_IMPL_DEF,
-    &declaration_0960::LIST_PROVIDERS_NATIVE_IMPL_DEF,
-    &declaration_0961::TRIGGER_LIST_IMPL_DEF,
-    &declaration_0962::TRIGGER_REGISTER_IMPL_DEF,
-    &declaration_0963::TRIGGER_FIRE_IMPL_DEF,
-    &declaration_0964::TRIGGER_REPLAY_IMPL_DEF,
-    &declaration_0965::TRIGGER_TEST_HARNESS_IMPL_DEF,
-    &declaration_0966::TRIGGER_INSPECT_DLQ_IMPL_DEF,
-    &declaration_0967::TRIGGER_INSPECT_LIFECYCLE_IMPL_DEF,
-    &declaration_0968::TRIGGER_INSPECT_ACTION_GRAPH_IMPL_DEF,
-    &declaration_0969::TRUST_RECORD_IMPL_DEF,
-    &declaration_0970::TRUST_GRAPH_RECORD_IMPL_DEF,
-    &declaration_0971::TRUST_QUERY_IMPL_DEF,
-    &declaration_0972::TRUST_GRAPH_QUERY_IMPL_DEF,
-    &declaration_0973::TRUST_GRAPH_POLICY_FOR_IMPL_DEF,
-    &declaration_0974::TRUST_GRAPH_VERIFY_CHAIN_IMPL_DEF,
-    &declaration_0975::TRUST_QUERY_NS_IMPL_DEF,
-    &declaration_0976::TRUST_RECORD_NS_IMPL_DEF,
-    &declaration_0977::TRUST_SCORE_NS_IMPL_DEF,
-    &declaration_0978::TRUST_POLICY_FOR_NS_IMPL_DEF,
-    &declaration_0979::TRUST_VERIFY_CHAIN_NS_IMPL_DEF,
-    &declaration_0980::WEBHOOK_INTAKE_REGISTER_IMPL_DEF,
-    &declaration_0981::WEBHOOK_INTAKE_FEED_IMPL_DEF,
-    &declaration_0982::WEBHOOK_INTAKE_DEREGISTER_IMPL_DEF,
-    &declaration_0983::WEBHOOK_INTAKE_LIST_IMPL_DEF,
-    &declaration_0984::WEBHOOK_INTAKE_RECENT_IMPL_DEF,
-    &declaration_0985::TYPE_OF_IMPL_DEF,
-    &declaration_0986::TO_STRING_IMPL_DEF,
-    &declaration_0987::TO_INT_IMPL_DEF,
-    &declaration_0988::TO_FLOAT_IMPL_DEF,
-    &declaration_0989::DECIMAL_IMPL_DEF,
-    &declaration_0990::OK_CTOR_IMPL_DEF,
-    &declaration_0991::ERR_CTOR_IMPL_DEF,
-    &declaration_0992::IS_OK_IMPL_DEF,
-    &declaration_0993::IS_ERR_IMPL_DEF,
-    &declaration_0994::UNWRAP_IMPL_DEF,
-    &declaration_0995::UNWRAP_OR_IMPL_DEF,
-    &declaration_0996::UNWRAP_ERR_IMPL_DEF,
-    &declaration_0997::UNREACHABLE_IMPL_DEF,
-    &declaration_0998::TO_LIST_IMPL_DEF,
-    &declaration_0999::TUPLE_IMPL_DEF,
-    &declaration_1000::LEN_IMPL_DEF,
-    &declaration_1001::IS_SAME_IMPL_DEF,
-    &declaration_1002::ADDR_OF_IMPL_DEF,
-    &declaration_1003::DROP_IMPL_DEF,
-    &declaration_1004::WAITPOINT_CREATE_BUILTIN_MACRO_DEF,
-    &declaration_1005::WAITPOINT_WAIT_BUILTIN_MACRO_DEF,
-    &declaration_1006::WAITPOINT_COMPLETE_BUILTIN_MACRO_DEF,
-    &declaration_1007::WAITPOINT_CANCEL_BUILTIN_MACRO_DEF,
-    &declaration_1008::TO_XML_IMPL_DEF,
-    &declaration_1009::FROM_XML_IMPL_DEF,
-    &declaration_1010::__REGISTER_STEP_DEF,
-    &declaration_1011::__REGISTER_PERSONA_DEF,
-    &declaration_1012::__PERSONA_OUTPUT_STYLE_DEF,
-    &declaration_1013::VERIFICATION_PROFILES_GET_IMPL_DEF,
-    &declaration_1014::VERIFICATION_PROFILES_SET_IMPL_DEF,
-    &declaration_1015::VERIFICATION_PROFILE_RESOLVE_IMPL_DEF,
-    &declaration_1016::VERIFICATION_PROFILE_MATCHES_IMPL_DEF,
-    &declaration_1017::VERIFICATION_PROFILE_RECORD_RUN_IMPL_DEF,
-    &declaration_1018::VERIFICATION_DIAGNOSTIC_CLASSIFY_IMPL_DEF,
-    &declaration_1019::AGENT_STATE_INIT_IMPL_DEF,
-    &declaration_1020::AGENT_STATE_RESUME_IMPL_DEF,
-    &declaration_1021::AGENT_STATE_WRITE_IMPL_DEF,
-    &declaration_1022::AGENT_STATE_READ_IMPL_DEF,
-    &declaration_1023::AGENT_STATE_LIST_IMPL_DEF,
-    &declaration_1024::AGENT_STATE_DELETE_IMPL_DEF,
-    &declaration_1025::AGENT_STATE_HANDOFF_IMPL_DEF,
-    &declaration_1026::APPROVAL_REVIEW_POLICY_BUILTIN_DEF,
-    &declaration_1027::ARTIFACT_EMIT_BUILTIN_DEF,
-    &declaration_1028::CALENDAR_PARTS_BUILTIN_DEF,
-    &declaration_1029::CALENDAR_FROM_LOCAL_BUILTIN_DEF,
-    &declaration_1030::CALENDAR_BOUNDARY_BUILTIN_DEF,
-    &declaration_1031::CALENDAR_ADD_BUILTIN_DEF,
-    &declaration_1032::CALENDAR_DATE_RANGE_BUILTIN_DEF,
-    &declaration_1033::CALENDAR_NEXT_WEEKDAY_BUILTIN_DEF,
-    &declaration_1034::CALENDAR_COUNTRIES_BUILTIN_DEF,
-    &declaration_1035::CALENDAR_COUNTRY_INFO_BUILTIN_DEF,
-    &declaration_1036::CALENDAR_SUPPORTED_HOLIDAY_CALENDARS_BUILTIN_DEF,
-    &declaration_1037::CALENDAR_HOLIDAYS_BUILTIN_DEF,
-    &declaration_1038::CALENDAR_IS_HOLIDAY_BUILTIN_DEF,
-    &declaration_1039::CALENDAR_IS_BUSINESS_DAY_BUILTIN_DEF,
-    &declaration_1040::CALENDAR_NEXT_BUSINESS_DAY_BUILTIN_DEF,
-    &declaration_1041::CALENDAR_ADD_BUSINESS_DAYS_BUILTIN_DEF,
-    &declaration_1042::CALENDAR_BUSINESS_DAYS_BETWEEN_BUILTIN_DEF,
-    &declaration_1043::CALENDAR_BUSINESS_WINDOW_BUILTIN_DEF,
-    &declaration_1044::CHANNEL_GUARDRAIL_REGISTER_IMPL_DEF,
-    &declaration_1045::CHANNEL_GUARDRAIL_UNREGISTER_IMPL_DEF,
-    &declaration_1046::CHANNEL_GUARDRAIL_LIST_IMPL_DEF,
-    &declaration_1047::CHANNEL_GUARDRAIL_CLEAR_IMPL_DEF,
-    &declaration_1048::EMIT_CHANNEL_IMPL_DEF,
-    &declaration_1049::CHANNEL_EVENTS_IMPL_DEF,
-    &declaration_1050::CHANNEL_SUBSCRIBE_IMPL_DEF,
-    &declaration_1051::CHANNEL_CONSUMER_CURSOR_IMPL_DEF,
-    &declaration_1052::CHANNEL_ACK_IMPL_DEF,
-    &declaration_1053::FLUSH_TRIGGER_AGGREGATIONS_IMPL_DEF,
-    &declaration_1054::COMMAND_POLICY_IMPL_DEF,
-    &declaration_1055::COMMAND_POLICY_PUSH_IMPL_DEF,
-    &declaration_1056::COMMAND_POLICY_POP_IMPL_DEF,
-    &declaration_1057::COMMAND_RISK_SCAN_IMPL_DEF,
-    &declaration_1058::COMMAND_RESULT_SCAN_IMPL_DEF,
-    &declaration_1059::COMMAND_LLM_RISK_SCAN_IMPL_DEF,
-    &declaration_1060::COMMAND_WORKSPACE_EFFECT_IMPL_DEF,
-    &declaration_1061::COMPACTION_POLICY_IMPL_DEF,
-    &declaration_1062::COMPACTION_CHECK_IMPL_DEF,
-    &declaration_1063::COMPACTION_RUN_IMPL_DEF,
+    &declaration_0919::TOOL_REGISTRY_BIND_IMPL_DEF,
+    &declaration_0920::TOOL_INVOCATION_BINDING_IMPL_DEF,
+    &declaration_0921::TOOL_SCHEMA_IMPL_DEF,
+    &declaration_0922::TOOL_REGISTRY_VALIDATE_IMPL_DEF,
+    &declaration_0923::TOOL_REGISTRY_IMPL_DEF,
+    &declaration_0924::TOOL_SYNTHESIZE_IMPL_DEF,
+    &declaration_0925::TOOL_SYNTH_INVOKE_IMPL_DEF,
+    &declaration_0926::TOOL_SYNTHESIS_CACHE_IMPL_DEF,
+    &declaration_0927::TOOL_SYNTHESIS_CLEAR_IMPL_DEF,
+    &declaration_0928::HOST_CURRENT_TOOL_REGISTRY_IMPL_DEF,
+    &declaration_0929::PLAN_ARTIFACT_IMPL_DEF,
+    &declaration_0930::PLAN_ENTRIES_IMPL_DEF,
+    &declaration_0931::TOOL_LIST_IMPL_DEF,
+    &declaration_0932::TOOL_FIND_IMPL_DEF,
+    &declaration_0933::TOOL_SELECT_IMPL_DEF,
+    &declaration_0934::TOOL_DESCRIBE_IMPL_DEF,
+    &declaration_0935::TOOL_REMOVE_IMPL_DEF,
+    &declaration_0936::TOOL_COUNT_IMPL_DEF,
+    &declaration_0937::TOOL_DEFINE_IMPL_DEF,
+    &declaration_0938::TOOL_PARSE_CALL_IMPL_DEF,
+    &declaration_0939::TOOL_FORMAT_RESULT_IMPL_DEF,
+    &declaration_0940::TOOL_PROMPT_IMPL_DEF,
+    &declaration_0941::TOOL_SURFACE_VALIDATE_IMPL_DEF,
+    &declaration_0942::TOOL_BIND_IMPL_DEF,
+    &declaration_0943::TOOL_REF_IMPL_DEF,
+    &declaration_0944::TOOL_DEF_IMPL_DEF,
+    &declaration_0945::TRACE_START_IMPL_DEF,
+    &declaration_0946::TRACE_END_IMPL_DEF,
+    &declaration_0947::TRACE_ID_IMPL_DEF,
+    &declaration_0948::LLM_INFO_IMPL_DEF,
+    &declaration_0949::ENABLE_TRACING_IMPL_DEF,
+    &declaration_0950::TRACE_SPANS_IMPL_DEF,
+    &declaration_0951::TRACE_SUMMARY_IMPL_DEF,
+    &declaration_0952::LIFECYCLE_SPAN_START_IMPL_DEF,
+    &declaration_0953::LIFECYCLE_SPAN_END_IMPL_DEF,
+    &declaration_0954::LLM_USAGE_IMPL_DEF,
+    &declaration_0955::TRANSCRIPT_PROJECT_IMPL_DEF,
+    &declaration_0956::CORRECTION_RECORD_IMPL_DEF,
+    &declaration_0957::CORRECTION_QUERY_IMPL_DEF,
+    &declaration_0958::CORRECTIONS_RECORD_NS_IMPL_DEF,
+    &declaration_0959::CORRECTIONS_QUERY_NS_IMPL_DEF,
+    &declaration_0960::HANDLER_CONTEXT_IMPL_DEF,
+    &declaration_0961::LIST_PROVIDERS_NATIVE_IMPL_DEF,
+    &declaration_0962::TRIGGER_LIST_IMPL_DEF,
+    &declaration_0963::TRIGGER_REGISTER_IMPL_DEF,
+    &declaration_0964::TRIGGER_FIRE_IMPL_DEF,
+    &declaration_0965::TRIGGER_REPLAY_IMPL_DEF,
+    &declaration_0966::TRIGGER_TEST_HARNESS_IMPL_DEF,
+    &declaration_0967::TRIGGER_INSPECT_DLQ_IMPL_DEF,
+    &declaration_0968::TRIGGER_INSPECT_LIFECYCLE_IMPL_DEF,
+    &declaration_0969::TRIGGER_INSPECT_ACTION_GRAPH_IMPL_DEF,
+    &declaration_0970::TRUST_RECORD_IMPL_DEF,
+    &declaration_0971::TRUST_GRAPH_RECORD_IMPL_DEF,
+    &declaration_0972::TRUST_QUERY_IMPL_DEF,
+    &declaration_0973::TRUST_GRAPH_QUERY_IMPL_DEF,
+    &declaration_0974::TRUST_GRAPH_POLICY_FOR_IMPL_DEF,
+    &declaration_0975::TRUST_GRAPH_VERIFY_CHAIN_IMPL_DEF,
+    &declaration_0976::TRUST_QUERY_NS_IMPL_DEF,
+    &declaration_0977::TRUST_RECORD_NS_IMPL_DEF,
+    &declaration_0978::TRUST_SCORE_NS_IMPL_DEF,
+    &declaration_0979::TRUST_POLICY_FOR_NS_IMPL_DEF,
+    &declaration_0980::TRUST_VERIFY_CHAIN_NS_IMPL_DEF,
+    &declaration_0981::WEBHOOK_INTAKE_REGISTER_IMPL_DEF,
+    &declaration_0982::WEBHOOK_INTAKE_FEED_IMPL_DEF,
+    &declaration_0983::WEBHOOK_INTAKE_DEREGISTER_IMPL_DEF,
+    &declaration_0984::WEBHOOK_INTAKE_LIST_IMPL_DEF,
+    &declaration_0985::WEBHOOK_INTAKE_RECENT_IMPL_DEF,
+    &declaration_0986::TYPE_OF_IMPL_DEF,
+    &declaration_0987::TO_STRING_IMPL_DEF,
+    &declaration_0988::TO_INT_IMPL_DEF,
+    &declaration_0989::TO_FLOAT_IMPL_DEF,
+    &declaration_0990::DECIMAL_IMPL_DEF,
+    &declaration_0991::OK_CTOR_IMPL_DEF,
+    &declaration_0992::ERR_CTOR_IMPL_DEF,
+    &declaration_0993::IS_OK_IMPL_DEF,
+    &declaration_0994::IS_ERR_IMPL_DEF,
+    &declaration_0995::UNWRAP_IMPL_DEF,
+    &declaration_0996::UNWRAP_OR_IMPL_DEF,
+    &declaration_0997::UNWRAP_ERR_IMPL_DEF,
+    &declaration_0998::UNREACHABLE_IMPL_DEF,
+    &declaration_0999::TO_LIST_IMPL_DEF,
+    &declaration_1000::TUPLE_IMPL_DEF,
+    &declaration_1001::LEN_IMPL_DEF,
+    &declaration_1002::IS_SAME_IMPL_DEF,
+    &declaration_1003::ADDR_OF_IMPL_DEF,
+    &declaration_1004::DROP_IMPL_DEF,
+    &declaration_1005::WAITPOINT_CREATE_BUILTIN_MACRO_DEF,
+    &declaration_1006::WAITPOINT_WAIT_BUILTIN_MACRO_DEF,
+    &declaration_1007::WAITPOINT_COMPLETE_BUILTIN_MACRO_DEF,
+    &declaration_1008::WAITPOINT_CANCEL_BUILTIN_MACRO_DEF,
+    &declaration_1009::TO_XML_IMPL_DEF,
+    &declaration_1010::FROM_XML_IMPL_DEF,
+    &declaration_1011::__REGISTER_STEP_DEF,
+    &declaration_1012::__REGISTER_PERSONA_DEF,
+    &declaration_1013::__PERSONA_OUTPUT_STYLE_DEF,
+    &declaration_1014::VERIFICATION_PROFILES_GET_IMPL_DEF,
+    &declaration_1015::VERIFICATION_PROFILES_SET_IMPL_DEF,
+    &declaration_1016::VERIFICATION_PROFILE_RESOLVE_IMPL_DEF,
+    &declaration_1017::VERIFICATION_PROFILE_MATCHES_IMPL_DEF,
+    &declaration_1018::VERIFICATION_PROFILE_RECORD_RUN_IMPL_DEF,
+    &declaration_1019::VERIFICATION_DIAGNOSTIC_CLASSIFY_IMPL_DEF,
+    &declaration_1020::AGENT_STATE_INIT_IMPL_DEF,
+    &declaration_1021::AGENT_STATE_RESUME_IMPL_DEF,
+    &declaration_1022::AGENT_STATE_WRITE_IMPL_DEF,
+    &declaration_1023::AGENT_STATE_READ_IMPL_DEF,
+    &declaration_1024::AGENT_STATE_LIST_IMPL_DEF,
+    &declaration_1025::AGENT_STATE_DELETE_IMPL_DEF,
+    &declaration_1026::AGENT_STATE_HANDOFF_IMPL_DEF,
+    &declaration_1027::APPROVAL_REVIEW_POLICY_BUILTIN_DEF,
+    &declaration_1028::ARTIFACT_EMIT_BUILTIN_DEF,
+    &declaration_1029::CALENDAR_PARTS_BUILTIN_DEF,
+    &declaration_1030::CALENDAR_FROM_LOCAL_BUILTIN_DEF,
+    &declaration_1031::CALENDAR_BOUNDARY_BUILTIN_DEF,
+    &declaration_1032::CALENDAR_ADD_BUILTIN_DEF,
+    &declaration_1033::CALENDAR_DATE_RANGE_BUILTIN_DEF,
+    &declaration_1034::CALENDAR_NEXT_WEEKDAY_BUILTIN_DEF,
+    &declaration_1035::CALENDAR_COUNTRIES_BUILTIN_DEF,
+    &declaration_1036::CALENDAR_COUNTRY_INFO_BUILTIN_DEF,
+    &declaration_1037::CALENDAR_SUPPORTED_HOLIDAY_CALENDARS_BUILTIN_DEF,
+    &declaration_1038::CALENDAR_HOLIDAYS_BUILTIN_DEF,
+    &declaration_1039::CALENDAR_IS_HOLIDAY_BUILTIN_DEF,
+    &declaration_1040::CALENDAR_IS_BUSINESS_DAY_BUILTIN_DEF,
+    &declaration_1041::CALENDAR_NEXT_BUSINESS_DAY_BUILTIN_DEF,
+    &declaration_1042::CALENDAR_ADD_BUSINESS_DAYS_BUILTIN_DEF,
+    &declaration_1043::CALENDAR_BUSINESS_DAYS_BETWEEN_BUILTIN_DEF,
+    &declaration_1044::CALENDAR_BUSINESS_WINDOW_BUILTIN_DEF,
+    &declaration_1045::CHANNEL_GUARDRAIL_REGISTER_IMPL_DEF,
+    &declaration_1046::CHANNEL_GUARDRAIL_UNREGISTER_IMPL_DEF,
+    &declaration_1047::CHANNEL_GUARDRAIL_LIST_IMPL_DEF,
+    &declaration_1048::CHANNEL_GUARDRAIL_CLEAR_IMPL_DEF,
+    &declaration_1049::EMIT_CHANNEL_IMPL_DEF,
+    &declaration_1050::CHANNEL_EVENTS_IMPL_DEF,
+    &declaration_1051::CHANNEL_SUBSCRIBE_IMPL_DEF,
+    &declaration_1052::CHANNEL_CONSUMER_CURSOR_IMPL_DEF,
+    &declaration_1053::CHANNEL_ACK_IMPL_DEF,
+    &declaration_1054::FLUSH_TRIGGER_AGGREGATIONS_IMPL_DEF,
+    &declaration_1055::COMMAND_POLICY_IMPL_DEF,
+    &declaration_1056::COMMAND_POLICY_PUSH_IMPL_DEF,
+    &declaration_1057::COMMAND_POLICY_POP_IMPL_DEF,
+    &declaration_1058::COMMAND_RISK_SCAN_IMPL_DEF,
+    &declaration_1059::COMMAND_RESULT_SCAN_IMPL_DEF,
+    &declaration_1060::COMMAND_LLM_RISK_SCAN_IMPL_DEF,
+    &declaration_1061::COMMAND_WORKSPACE_EFFECT_IMPL_DEF,
+    &declaration_1062::COMPACTION_POLICY_IMPL_DEF,
+    &declaration_1063::COMPACTION_CHECK_IMPL_DEF,
+    &declaration_1064::COMPACTION_RUN_IMPL_DEF,
     #[cfg(feature = "compression")]
-    &declaration_1064::GZIP_ENCODE_BUILTIN_DEF,
+    &declaration_1065::GZIP_ENCODE_BUILTIN_DEF,
     #[cfg(feature = "compression")]
-    &declaration_1065::GZIP_DECODE_BUILTIN_DEF,
+    &declaration_1066::GZIP_DECODE_BUILTIN_DEF,
     #[cfg(feature = "compression")]
-    &declaration_1066::ZSTD_ENCODE_BUILTIN_DEF,
+    &declaration_1067::ZSTD_ENCODE_BUILTIN_DEF,
     #[cfg(feature = "compression")]
-    &declaration_1067::ZSTD_DECODE_BUILTIN_DEF,
+    &declaration_1068::ZSTD_DECODE_BUILTIN_DEF,
     #[cfg(feature = "compression")]
-    &declaration_1068::BROTLI_ENCODE_BUILTIN_DEF,
+    &declaration_1069::BROTLI_ENCODE_BUILTIN_DEF,
     #[cfg(feature = "compression")]
-    &declaration_1069::BROTLI_DECODE_BUILTIN_DEF,
+    &declaration_1070::BROTLI_DECODE_BUILTIN_DEF,
     #[cfg(feature = "compression")]
-    &declaration_1070::TAR_CREATE_BUILTIN_DEF,
+    &declaration_1071::TAR_CREATE_BUILTIN_DEF,
     #[cfg(feature = "compression")]
-    &declaration_1071::TAR_EXTRACT_BUILTIN_DEF,
+    &declaration_1072::TAR_EXTRACT_BUILTIN_DEF,
     #[cfg(feature = "compression")]
-    &declaration_1072::ZIP_CREATE_BUILTIN_DEF,
+    &declaration_1073::ZIP_CREATE_BUILTIN_DEF,
     #[cfg(feature = "compression")]
-    &declaration_1073::ZIP_EXTRACT_BUILTIN_DEF,
-    &declaration_1074::PARSE_ENV_FILE_IMPL_DEF,
-    &declaration_1075::COOKIE_PARSE_IMPL_DEF,
-    &declaration_1076::COOKIE_SERIALIZE_IMPL_DEF,
-    &declaration_1077::COOKIE_DELETE_IMPL_DEF,
-    &declaration_1078::COOKIE_SIGN_IMPL_DEF,
-    &declaration_1079::COOKIE_VERIFY_IMPL_DEF,
-    &declaration_1080::SESSION_SIGN_IMPL_DEF,
-    &declaration_1081::SESSION_VERIFY_IMPL_DEF,
-    &declaration_1082::SESSION_COOKIE_IMPL_DEF,
-    &declaration_1083::SESSION_FROM_COOKIES_IMPL_DEF,
-    &declaration_1084::COOKIE_ROUND_TRIP_IMPL_DEF,
-    &declaration_1085::CRON_IS_VALID_BUILTIN_DEF,
-    &declaration_1086::CSV_PARSE_IMPL_DEF,
-    &declaration_1087::CSV_STRINGIFY_IMPL_DEF,
-    &declaration_1088::DIFF_LINE_ARTIFACT_IMPL_DEF,
+    &declaration_1074::ZIP_EXTRACT_BUILTIN_DEF,
+    &declaration_1075::PARSE_ENV_FILE_IMPL_DEF,
+    &declaration_1076::COOKIE_PARSE_IMPL_DEF,
+    &declaration_1077::COOKIE_SERIALIZE_IMPL_DEF,
+    &declaration_1078::COOKIE_DELETE_IMPL_DEF,
+    &declaration_1079::COOKIE_SIGN_IMPL_DEF,
+    &declaration_1080::COOKIE_VERIFY_IMPL_DEF,
+    &declaration_1081::SESSION_SIGN_IMPL_DEF,
+    &declaration_1082::SESSION_VERIFY_IMPL_DEF,
+    &declaration_1083::SESSION_COOKIE_IMPL_DEF,
+    &declaration_1084::SESSION_FROM_COOKIES_IMPL_DEF,
+    &declaration_1085::COOKIE_ROUND_TRIP_IMPL_DEF,
+    &declaration_1086::CRON_IS_VALID_BUILTIN_DEF,
+    &declaration_1087::CSV_PARSE_IMPL_DEF,
+    &declaration_1088::CSV_STRINGIFY_IMPL_DEF,
+    &declaration_1089::DIFF_LINE_ARTIFACT_IMPL_DEF,
     #[cfg(feature = "content")]
-    &declaration_1089::DOCUMENT_RENDER_PDF_IMPL_DEF,
+    &declaration_1090::DOCUMENT_RENDER_PDF_IMPL_DEF,
     #[cfg(feature = "content")]
-    &declaration_1090::DOCUMENT_EXTRACT_TEXT_IMPL_DEF,
+    &declaration_1091::DOCUMENT_EXTRACT_TEXT_IMPL_DEF,
     #[cfg(feature = "content")]
-    &declaration_1091::DOCUMENT_PDF_CAPABILITIES_IMPL_DEF,
-    &declaration_1092::STEP_RUN_IMPL_DEF,
-    &declaration_1093::STEP_INSPECT_IMPL_DEF,
-    &declaration_1094::HYPOTHESIS_OPERATION_REQUEST_IMPL_DEF,
-    &declaration_1095::HYPOTHESIS_EVENT_AUTHORITY_REQUEST_IMPL_DEF,
-    &declaration_1096::EVENT_LOG_DESCRIBE_IMPL_DEF,
-    &declaration_1097::EVENT_LOG_EMIT_IMPL_DEF,
-    &declaration_1098::EVENT_LOG_EMIT_IDEMPOTENT_IMPL_DEF,
-    &declaration_1099::EVENT_LOG_EMIT_IDEMPOTENT_CHAINED_IMPL_DEF,
-    &declaration_1100::HYPOTHESIS_EVENT_AUTHORITY_MINT_IMPL_DEF,
-    &declaration_1101::HYPOTHESIS_EVENT_APPEND_IMPL_DEF,
-    &declaration_1102::EVENT_LOG_LATEST_IMPL_DEF,
-    &declaration_1103::EVENT_LOG_VERIFY_IMPL_DEF,
-    &declaration_1104::EVENT_LOG_READ_IMPL_DEF,
-    &declaration_1105::HYPOTHESIS_EVENT_SNAPSHOT_IMPL_DEF,
-    &declaration_1106::EVENT_LOG_SUBSCRIBE_IMPL_DEF,
-    &declaration_1107::EVENT_LOG_TOPICS_IMPL_DEF,
-    &declaration_1108::EXTERNAL_AGENT_DELEGATE_IMPL_DEF,
-    &declaration_1109::VERIFY_IMPORTS_IMPL_DEF,
-    &declaration_1110::HITL_PENDING_BUILTIN_DEF,
-    &declaration_1111::HTTP_OK_IMPL_DEF,
-    &declaration_1112::HTTP_CREATED_IMPL_DEF,
-    &declaration_1113::HTTP_NO_CONTENT_IMPL_DEF,
-    &declaration_1114::HTTP_ERROR_IMPL_DEF,
-    &declaration_1115::HTTP_REPLY_IMPL_DEF,
-    &declaration_1116::HTTP_REPLY_FROM_IMPL_DEF,
-    &declaration_1117::HTTP_STREAM_IMPL_DEF,
-    &declaration_1118::HTTP_SSE_IMPL_DEF,
-    &declaration_1119::HTTP_ETAG_IMPL_DEF,
-    &declaration_1120::HTTP_CHOOSE_IMPL_DEF,
-    &declaration_1121::HTTP_NOT_MODIFIED_IMPL_DEF,
-    &declaration_1122::HTTP_PUSH_HINTS_IMPL_DEF,
-    &declaration_1123::HTTP_UPGRADE_WS_IMPL_DEF,
-    &declaration_1124::LIFECYCLE_RECEIPT_RECORD_SUSPENSION_IMPL_DEF,
-    &declaration_1125::LIFECYCLE_RECEIPT_RECORD_RESUMPTION_IMPL_DEF,
-    &declaration_1126::LIFECYCLE_RECEIPT_RECORD_DRAIN_DECISION_IMPL_DEF,
-    &declaration_1127::LIFECYCLE_RECEIPTS_SNAPSHOT_IMPL_DEF,
-    &declaration_1128::VERIFY_LIFECYCLE_RECEIPT_SIGNATURE_IMPL_DEF,
-    &declaration_1129::LIFECYCLE_RESUME_INPUT_HASH_IMPL_DEF,
-    &declaration_1130::LIFECYCLE_DRAIN_DECISION_PROMPT_HASH_IMPL_DEF,
-    &declaration_1131::LIFECYCLE_REPLAY_RESUME_INPUT_IMPL_DEF,
-    &declaration_1132::LIFECYCLE_REPLAY_DRAIN_DECISION_IMPL_DEF,
-    &declaration_1133::MAKEFILE_FILENAMES_IMPL_DEF,
-    &declaration_1134::MAKEFILE_PARSE_IMPL_DEF,
+    &declaration_1092::DOCUMENT_PDF_CAPABILITIES_IMPL_DEF,
+    &declaration_1093::STEP_RUN_IMPL_DEF,
+    &declaration_1094::STEP_INSPECT_IMPL_DEF,
+    &declaration_1095::HYPOTHESIS_OPERATION_REQUEST_IMPL_DEF,
+    &declaration_1096::HYPOTHESIS_EVENT_AUTHORITY_REQUEST_IMPL_DEF,
+    &declaration_1097::EVENT_LOG_DESCRIBE_IMPL_DEF,
+    &declaration_1098::EVENT_LOG_EMIT_IMPL_DEF,
+    &declaration_1099::EVENT_LOG_EMIT_IDEMPOTENT_IMPL_DEF,
+    &declaration_1100::EVENT_LOG_EMIT_IDEMPOTENT_CHAINED_IMPL_DEF,
+    &declaration_1101::HYPOTHESIS_EVENT_AUTHORITY_MINT_IMPL_DEF,
+    &declaration_1102::HYPOTHESIS_EVENT_APPEND_IMPL_DEF,
+    &declaration_1103::EVENT_LOG_LATEST_IMPL_DEF,
+    &declaration_1104::EVENT_LOG_VERIFY_IMPL_DEF,
+    &declaration_1105::EVENT_LOG_READ_IMPL_DEF,
+    &declaration_1106::HYPOTHESIS_EVENT_SNAPSHOT_IMPL_DEF,
+    &declaration_1107::EVENT_LOG_SUBSCRIBE_IMPL_DEF,
+    &declaration_1108::EVENT_LOG_TOPICS_IMPL_DEF,
+    &declaration_1109::EXTERNAL_AGENT_DELEGATE_IMPL_DEF,
+    &declaration_1110::VERIFY_IMPORTS_IMPL_DEF,
+    &declaration_1111::HITL_PENDING_BUILTIN_DEF,
+    &declaration_1112::HTTP_OK_IMPL_DEF,
+    &declaration_1113::HTTP_CREATED_IMPL_DEF,
+    &declaration_1114::HTTP_NO_CONTENT_IMPL_DEF,
+    &declaration_1115::HTTP_ERROR_IMPL_DEF,
+    &declaration_1116::HTTP_REPLY_IMPL_DEF,
+    &declaration_1117::HTTP_REPLY_FROM_IMPL_DEF,
+    &declaration_1118::HTTP_STREAM_IMPL_DEF,
+    &declaration_1119::HTTP_SSE_IMPL_DEF,
+    &declaration_1120::HTTP_ETAG_IMPL_DEF,
+    &declaration_1121::HTTP_CHOOSE_IMPL_DEF,
+    &declaration_1122::HTTP_NOT_MODIFIED_IMPL_DEF,
+    &declaration_1123::HTTP_PUSH_HINTS_IMPL_DEF,
+    &declaration_1124::HTTP_UPGRADE_WS_IMPL_DEF,
+    &declaration_1125::LIFECYCLE_RECEIPT_RECORD_SUSPENSION_IMPL_DEF,
+    &declaration_1126::LIFECYCLE_RECEIPT_RECORD_RESUMPTION_IMPL_DEF,
+    &declaration_1127::LIFECYCLE_RECEIPT_RECORD_DRAIN_DECISION_IMPL_DEF,
+    &declaration_1128::LIFECYCLE_RECEIPTS_SNAPSHOT_IMPL_DEF,
+    &declaration_1129::VERIFY_LIFECYCLE_RECEIPT_SIGNATURE_IMPL_DEF,
+    &declaration_1130::LIFECYCLE_RESUME_INPUT_HASH_IMPL_DEF,
+    &declaration_1131::LIFECYCLE_DRAIN_DECISION_PROMPT_HASH_IMPL_DEF,
+    &declaration_1132::LIFECYCLE_REPLAY_RESUME_INPUT_IMPL_DEF,
+    &declaration_1133::LIFECYCLE_REPLAY_DRAIN_DECISION_IMPL_DEF,
+    &declaration_1134::MAKEFILE_FILENAMES_IMPL_DEF,
+    &declaration_1135::MAKEFILE_PARSE_IMPL_DEF,
     #[cfg(feature = "content")]
-    &declaration_1135::MARKDOWN_PARSE_IMPL_DEF,
-    &declaration_1136::MULTIPART_PARSE_BUILTIN_DEF,
-    &declaration_1137::MULTIPART_FIELD_BYTES_BUILTIN_DEF,
-    &declaration_1138::MULTIPART_FIELD_TEXT_BUILTIN_DEF,
-    &declaration_1139::MULTIPART_FORM_DATA_BUILTIN_DEF,
-    &declaration_1140::NET_UNIX_SOCKET_JSON_REQUEST_IMPL_DEF,
-    &declaration_1141::OAUTH_DYNREG_STORE_HANDLE_IMPL_DEF,
-    &declaration_1142::OAUTH_DYNREG_VALIDATE_METADATA_IMPL_DEF,
-    &declaration_1143::OAUTH_DYNREG_BUILD_CLIENT_METADATA_IMPL_DEF,
-    &declaration_1144::OAUTH_DYNREG_BUILD_AUTHORIZATION_SERVER_METADATA_IMPL_DEF,
-    &declaration_1145::OAUTH_DYNREG_REGISTER_IMPL_DEF,
-    &declaration_1146::OAUTH_DYNREG_GET_IMPL_DEF,
-    &declaration_1147::OAUTH_DYNREG_LIST_IMPL_DEF,
-    &declaration_1148::OAUTH_STORAGE_MEMORY_HANDLE_IMPL_DEF,
-    &declaration_1149::OAUTH_STORAGE_FILE_HANDLE_IMPL_DEF,
-    &declaration_1150::OAUTH_STORAGE_CLOUD_HANDLE_IMPL_DEF,
-    &declaration_1151::OAUTH_STORAGE_GET_IMPL_DEF,
-    &declaration_1152::OAUTH_STORAGE_SET_IMPL_DEF,
-    &declaration_1153::OAUTH_STORAGE_DELETE_IMPL_DEF,
-    &declaration_1154::OAUTH_STORAGE_WITH_REFRESH_LOCK_IMPL_DEF,
-    &declaration_1155::PATH_PARTS_IMPL_DEF,
-    &declaration_1156::PATH_PARENT_IMPL_DEF,
-    &declaration_1157::PATH_BASENAME_IMPL_DEF,
-    &declaration_1158::PATH_STEM_IMPL_DEF,
-    &declaration_1159::PATH_EXTENSION_IMPL_DEF,
-    &declaration_1160::PATH_WITH_EXTENSION_IMPL_DEF,
-    &declaration_1161::PATH_WITH_STEM_IMPL_DEF,
-    &declaration_1162::PATH_IS_ABSOLUTE_IMPL_DEF,
-    &declaration_1163::PATH_IS_RELATIVE_IMPL_DEF,
-    &declaration_1164::PATH_NORMALIZE_IMPL_DEF,
-    &declaration_1165::PATH_RELATIVE_TO_IMPL_DEF,
-    &declaration_1166::PATH_TO_POSIX_IMPL_DEF,
-    &declaration_1167::PATH_TO_NATIVE_IMPL_DEF,
-    &declaration_1168::PATH_WORKSPACE_INFO_IMPL_DEF,
-    &declaration_1169::PATH_WORKSPACE_NORMALIZE_IMPL_DEF,
-    &declaration_1170::PATH_WORKSPACE_CANONICALIZE_EXISTING_IMPL_DEF,
-    &declaration_1171::PATH_SEGMENTS_IMPL_DEF,
-    &declaration_1172::REGISTER_PATH_SCOPE_GUARD_DEF,
-    &declaration_1173::CLEAR_PATH_SCOPE_GUARD_DEF,
-    &declaration_1174::PORTABLE_COMPILE_IMPL_DEF,
-    &declaration_1175::PORTABLE_START_IMPL_DEF,
-    &declaration_1176::PORTABLE_RESUME_IMPL_DEF,
+    &declaration_1136::MARKDOWN_PARSE_IMPL_DEF,
+    &declaration_1137::MULTIPART_PARSE_BUILTIN_DEF,
+    &declaration_1138::MULTIPART_FIELD_BYTES_BUILTIN_DEF,
+    &declaration_1139::MULTIPART_FIELD_TEXT_BUILTIN_DEF,
+    &declaration_1140::MULTIPART_FORM_DATA_BUILTIN_DEF,
+    &declaration_1141::NET_UNIX_SOCKET_JSON_REQUEST_IMPL_DEF,
+    &declaration_1142::OAUTH_DYNREG_STORE_HANDLE_IMPL_DEF,
+    &declaration_1143::OAUTH_DYNREG_VALIDATE_METADATA_IMPL_DEF,
+    &declaration_1144::OAUTH_DYNREG_BUILD_CLIENT_METADATA_IMPL_DEF,
+    &declaration_1145::OAUTH_DYNREG_BUILD_AUTHORIZATION_SERVER_METADATA_IMPL_DEF,
+    &declaration_1146::OAUTH_DYNREG_REGISTER_IMPL_DEF,
+    &declaration_1147::OAUTH_DYNREG_GET_IMPL_DEF,
+    &declaration_1148::OAUTH_DYNREG_LIST_IMPL_DEF,
+    &declaration_1149::OAUTH_STORAGE_MEMORY_HANDLE_IMPL_DEF,
+    &declaration_1150::OAUTH_STORAGE_FILE_HANDLE_IMPL_DEF,
+    &declaration_1151::OAUTH_STORAGE_CLOUD_HANDLE_IMPL_DEF,
+    &declaration_1152::OAUTH_STORAGE_GET_IMPL_DEF,
+    &declaration_1153::OAUTH_STORAGE_SET_IMPL_DEF,
+    &declaration_1154::OAUTH_STORAGE_DELETE_IMPL_DEF,
+    &declaration_1155::OAUTH_STORAGE_WITH_REFRESH_LOCK_IMPL_DEF,
+    &declaration_1156::PATH_PARTS_IMPL_DEF,
+    &declaration_1157::PATH_PARENT_IMPL_DEF,
+    &declaration_1158::PATH_BASENAME_IMPL_DEF,
+    &declaration_1159::PATH_STEM_IMPL_DEF,
+    &declaration_1160::PATH_EXTENSION_IMPL_DEF,
+    &declaration_1161::PATH_WITH_EXTENSION_IMPL_DEF,
+    &declaration_1162::PATH_WITH_STEM_IMPL_DEF,
+    &declaration_1163::PATH_IS_ABSOLUTE_IMPL_DEF,
+    &declaration_1164::PATH_IS_RELATIVE_IMPL_DEF,
+    &declaration_1165::PATH_NORMALIZE_IMPL_DEF,
+    &declaration_1166::PATH_RELATIVE_TO_IMPL_DEF,
+    &declaration_1167::PATH_TO_POSIX_IMPL_DEF,
+    &declaration_1168::PATH_TO_NATIVE_IMPL_DEF,
+    &declaration_1169::PATH_WORKSPACE_INFO_IMPL_DEF,
+    &declaration_1170::PATH_WORKSPACE_NORMALIZE_IMPL_DEF,
+    &declaration_1171::PATH_WORKSPACE_CANONICALIZE_EXISTING_IMPL_DEF,
+    &declaration_1172::PATH_SEGMENTS_IMPL_DEF,
+    &declaration_1173::REGISTER_PATH_SCOPE_GUARD_DEF,
+    &declaration_1174::CLEAR_PATH_SCOPE_GUARD_DEF,
+    &declaration_1175::PORTABLE_COMPILE_IMPL_DEF,
+    &declaration_1176::PORTABLE_START_IMPL_DEF,
+    &declaration_1177::PORTABLE_RESUME_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1177::PG_ADVISORY_XACT_LOCK_IMPL_DEF,
+    &declaration_1178::PG_ADVISORY_XACT_LOCK_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1178::PG_TRY_ADVISORY_XACT_LOCK_IMPL_DEF,
+    &declaration_1179::PG_TRY_ADVISORY_XACT_LOCK_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1179::PG_WITH_ADVISORY_LOCK_IMPL_DEF,
+    &declaration_1180::PG_WITH_ADVISORY_LOCK_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1180::PG_INTROSPECT_TABLES_IMPL_DEF,
+    &declaration_1181::PG_INTROSPECT_TABLES_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1181::PG_INTROSPECT_COLUMNS_IMPL_DEF,
+    &declaration_1182::PG_INTROSPECT_COLUMNS_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1182::PG_INTROSPECT_INDEXES_IMPL_DEF,
+    &declaration_1183::PG_INTROSPECT_INDEXES_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1183::PG_POOL_STATS_IMPL_DEF,
+    &declaration_1184::PG_POOL_STATS_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1184::PG_PARTITION_ATTACH_IMPL_DEF,
+    &declaration_1185::PG_PARTITION_ATTACH_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1185::PG_PARTITION_DETACH_IMPL_DEF,
+    &declaration_1186::PG_PARTITION_DETACH_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1186::PG_PARTITION_PRUNE_IMPL_DEF,
+    &declaration_1187::PG_PARTITION_PRUNE_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1187::PG_PARTITION_RETAIN_IMPL_DEF,
+    &declaration_1188::PG_PARTITION_RETAIN_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1188::PG_PARTITION_CREATE_FOR_WINDOW_IMPL_DEF,
+    &declaration_1189::PG_PARTITION_CREATE_FOR_WINDOW_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1189::PG_JSONB_PATH_IMPL_DEF,
+    &declaration_1190::PG_JSONB_PATH_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1190::PG_JSONB_MERGE_IMPL_DEF,
+    &declaration_1191::PG_JSONB_MERGE_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1191::PG_JSONB_CONTAINS_IMPL_DEF,
+    &declaration_1192::PG_JSONB_CONTAINS_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1192::PG_LISTEN_IMPL_DEF,
+    &declaration_1193::PG_LISTEN_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1193::PG_LISTENER_RECV_IMPL_DEF,
+    &declaration_1194::PG_LISTENER_RECV_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1194::PG_LISTENER_CLOSE_IMPL_DEF,
+    &declaration_1195::PG_LISTENER_CLOSE_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1195::PG_NOTIFY_IMPL_DEF,
+    &declaration_1196::PG_NOTIFY_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1196::PG_POOL_IMPL_DEF,
+    &declaration_1197::PG_POOL_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1197::PG_CONNECT_IMPL_DEF,
+    &declaration_1198::PG_CONNECT_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1198::PG_CLOSE_IMPL_DEF,
+    &declaration_1199::PG_CLOSE_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1199::PG_STMT_CACHE_CLEAR_IMPL_DEF,
+    &declaration_1200::PG_STMT_CACHE_CLEAR_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1200::PG_QUERY_IMPL_DEF,
+    &declaration_1201::PG_QUERY_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1201::PG_QUERY_ONE_IMPL_DEF,
+    &declaration_1202::PG_QUERY_ONE_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1202::PG_EXECUTE_IMPL_DEF,
+    &declaration_1203::PG_EXECUTE_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1203::PG_TRANSACTION_IMPL_DEF,
+    &declaration_1204::PG_TRANSACTION_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1204::PG_SAVEPOINT_IMPL_DEF,
+    &declaration_1205::PG_SAVEPOINT_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1205::PG_RELEASE_SAVEPOINT_IMPL_DEF,
+    &declaration_1206::PG_RELEASE_SAVEPOINT_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1206::PG_ROLLBACK_TO_SAVEPOINT_IMPL_DEF,
+    &declaration_1207::PG_ROLLBACK_TO_SAVEPOINT_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1207::PG_MIGRATE_IMPL_DEF,
+    &declaration_1208::PG_MIGRATE_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1208::PG_MOCK_POOL_IMPL_DEF,
+    &declaration_1209::PG_MOCK_POOL_IMPL_DEF,
     #[cfg(feature = "postgres")]
-    &declaration_1209::PG_MOCK_CALLS_IMPL_DEF,
-    &declaration_1210::PROJECT_CONTEXT_PROFILE_NATIVE_IMPL_DEF,
-    &declaration_1211::PROJECT_FINGERPRINT_IMPL_DEF,
-    &declaration_1212::PROJECT_SCAN_NATIVE_IMPL_DEF,
-    &declaration_1213::PROJECT_SCAN_TREE_NATIVE_IMPL_DEF,
-    &declaration_1214::PROJECT_WALK_TREE_NATIVE_IMPL_DEF,
-    &declaration_1215::PROJECT_CATALOG_NATIVE_IMPL_DEF,
-    &declaration_1216::SECRET_PATTERN_CATALOG_IMPL_DEF,
-    &declaration_1217::SECRET_SCAN_IMPL_DEF,
+    &declaration_1210::PG_MOCK_CALLS_IMPL_DEF,
+    &declaration_1211::PROJECT_CONTEXT_PROFILE_NATIVE_IMPL_DEF,
+    &declaration_1212::PROJECT_FINGERPRINT_IMPL_DEF,
+    &declaration_1213::PROJECT_SCAN_NATIVE_IMPL_DEF,
+    &declaration_1214::PROJECT_SCAN_TREE_NATIVE_IMPL_DEF,
+    &declaration_1215::PROJECT_WALK_TREE_NATIVE_IMPL_DEF,
+    &declaration_1216::PROJECT_CATALOG_NATIVE_IMPL_DEF,
+    &declaration_1217::SECRET_PATTERN_CATALOG_IMPL_DEF,
+    &declaration_1218::SECRET_SCAN_IMPL_DEF,
     #[cfg(feature = "sqlite")]
-    &declaration_1218::SQLITE_OPEN_IMPL_DEF,
+    &declaration_1219::SQLITE_OPEN_IMPL_DEF,
     #[cfg(feature = "sqlite")]
-    &declaration_1219::SQLITE_CLOSE_IMPL_DEF,
+    &declaration_1220::SQLITE_CLOSE_IMPL_DEF,
     #[cfg(feature = "sqlite")]
-    &declaration_1220::SQLITE_QUERY_IMPL_DEF,
+    &declaration_1221::SQLITE_QUERY_IMPL_DEF,
     #[cfg(feature = "sqlite")]
-    &declaration_1221::SQLITE_QUERY_ONE_IMPL_DEF,
+    &declaration_1222::SQLITE_QUERY_ONE_IMPL_DEF,
     #[cfg(feature = "sqlite")]
-    &declaration_1222::SQLITE_EXECUTE_IMPL_DEF,
+    &declaration_1223::SQLITE_EXECUTE_IMPL_DEF,
     #[cfg(feature = "sqlite")]
-    &declaration_1223::SQLITE_TRANSACTION_IMPL_DEF,
+    &declaration_1224::SQLITE_TRANSACTION_IMPL_DEF,
     #[cfg(feature = "sqlite")]
-    &declaration_1224::SQLITE_SAVEPOINT_IMPL_DEF,
+    &declaration_1225::SQLITE_SAVEPOINT_IMPL_DEF,
     #[cfg(feature = "sqlite")]
-    &declaration_1225::SQLITE_RELEASE_SAVEPOINT_IMPL_DEF,
+    &declaration_1226::SQLITE_RELEASE_SAVEPOINT_IMPL_DEF,
     #[cfg(feature = "sqlite")]
-    &declaration_1226::SQLITE_ROLLBACK_TO_SAVEPOINT_IMPL_DEF,
+    &declaration_1227::SQLITE_ROLLBACK_TO_SAVEPOINT_IMPL_DEF,
     #[cfg(feature = "sqlite")]
-    &declaration_1227::SQLITE_MIGRATE_IMPL_DEF,
+    &declaration_1228::SQLITE_MIGRATE_IMPL_DEF,
     #[cfg(feature = "sqlite")]
-    &declaration_1228::SQLITE_MOCK_DB_IMPL_DEF,
+    &declaration_1229::SQLITE_MOCK_DB_IMPL_DEF,
     #[cfg(feature = "sqlite")]
-    &declaration_1229::SQLITE_MOCK_CALLS_IMPL_DEF,
-    &declaration_1230::TESTBENCH_IS_ACTIVE_IMPL_DEF,
-    &declaration_1231::TESTBENCH_FS_DIFF_IMPL_DEF,
-    &declaration_1232::TESTBENCH_CLOCK_LEAKS_IMPL_DEF,
-    &declaration_1233::TIMING_START_IMPL_DEF,
-    &declaration_1234::TIMING_NOW_MONOTONIC_MS_IMPL_DEF,
-    &declaration_1235::TIMING_EVENT_IMPL_DEF,
-    &declaration_1236::TIMING_END_IMPL_DEF,
-    &declaration_1237::TOOL_RULE_IMPL_DEF,
-    &declaration_1238::CATALOGUE_IMPL_DEF,
-    &declaration_1239::TOOL_HOOKS_REGISTRY_IMPL_DEF,
-    &declaration_1240::TOOL_HOOKS_REGISTER_IMPL_DEF,
-    &declaration_1241::TOOL_HOOKS_UNREGISTER_IMPL_DEF,
-    &declaration_1242::TOOL_HOOKS_FILTER_IMPL_DEF,
-    &declaration_1243::TOOL_HOOKS_LIST_IMPL_DEF,
-    &declaration_1244::TOOL_HOOKS_MATCH_IMPL_DEF,
-    &declaration_1245::TOOL_HOOKS_EMIT_AUDIT_IMPL_DEF,
-    &declaration_1246::TOOL_HOOKS_INJECT_REMINDER_IMPL_DEF,
-    &declaration_1247::TOOL_HOOKS_CLASSIFIER_CACHE_GET_IMPL_DEF,
-    &declaration_1248::TOOL_HOOKS_CLASSIFIER_CACHE_PUT_IMPL_DEF,
-    &declaration_1249::TOOL_HOOKS_CLASSIFIER_CACHE_CLEAR_IMPL_DEF,
-    &declaration_1250::__TUI_PAGE_DEF,
-    &declaration_1251::__TUI_CLEAR_DEF,
-    &declaration_1252::__TUI_TERMINAL_WIDTH_DEF,
-    &declaration_1253::URL_PARSE_IMPL_DEF,
-    &declaration_1254::URL_BUILD_IMPL_DEF,
-    &declaration_1255::QUERY_PARSE_IMPL_DEF,
-    &declaration_1256::QUERY_STRINGIFY_IMPL_DEF,
+    &declaration_1230::SQLITE_MOCK_CALLS_IMPL_DEF,
+    &declaration_1231::TESTBENCH_IS_ACTIVE_IMPL_DEF,
+    &declaration_1232::TESTBENCH_FS_DIFF_IMPL_DEF,
+    &declaration_1233::TESTBENCH_CLOCK_LEAKS_IMPL_DEF,
+    &declaration_1234::TIMING_START_IMPL_DEF,
+    &declaration_1235::TIMING_NOW_MONOTONIC_MS_IMPL_DEF,
+    &declaration_1236::TIMING_EVENT_IMPL_DEF,
+    &declaration_1237::TIMING_END_IMPL_DEF,
+    &declaration_1238::TOOL_RULE_IMPL_DEF,
+    &declaration_1239::CATALOGUE_IMPL_DEF,
+    &declaration_1240::TOOL_HOOKS_REGISTRY_IMPL_DEF,
+    &declaration_1241::TOOL_HOOKS_REGISTER_IMPL_DEF,
+    &declaration_1242::TOOL_HOOKS_UNREGISTER_IMPL_DEF,
+    &declaration_1243::TOOL_HOOKS_FILTER_IMPL_DEF,
+    &declaration_1244::TOOL_HOOKS_LIST_IMPL_DEF,
+    &declaration_1245::TOOL_HOOKS_MATCH_IMPL_DEF,
+    &declaration_1246::TOOL_HOOKS_EMIT_AUDIT_IMPL_DEF,
+    &declaration_1247::TOOL_HOOKS_INJECT_REMINDER_IMPL_DEF,
+    &declaration_1248::TOOL_HOOKS_CLASSIFIER_CACHE_GET_IMPL_DEF,
+    &declaration_1249::TOOL_HOOKS_CLASSIFIER_CACHE_PUT_IMPL_DEF,
+    &declaration_1250::TOOL_HOOKS_CLASSIFIER_CACHE_CLEAR_IMPL_DEF,
+    &declaration_1251::__TUI_PAGE_DEF,
+    &declaration_1252::__TUI_CLEAR_DEF,
+    &declaration_1253::__TUI_TERMINAL_WIDTH_DEF,
+    &declaration_1254::URL_PARSE_IMPL_DEF,
+    &declaration_1255::URL_BUILD_IMPL_DEF,
+    &declaration_1256::QUERY_PARSE_IMPL_DEF,
+    &declaration_1257::QUERY_STRINGIFY_IMPL_DEF,
     #[cfg(feature = "content")]
-    &declaration_1257::WEB_EXTRACT_HTML_IMPL_DEF,
+    &declaration_1258::WEB_EXTRACT_HTML_IMPL_DEF,
     #[cfg(feature = "content")]
-    &declaration_1258::WEB_RESOLVE_URL_IMPL_DEF,
+    &declaration_1259::WEB_RESOLVE_URL_IMPL_DEF,
     #[cfg(feature = "content")]
-    &declaration_1259::WEB_ORIGIN_URL_IMPL_DEF,
-    &declaration_1260::WORKFLOW_SIGNAL_BUILTIN_DEF,
-    &declaration_1261::WORKFLOW_QUERY_BUILTIN_DEF,
-    &declaration_1262::WORKFLOW_UPDATE_BUILTIN_DEF,
-    &declaration_1263::WORKFLOW_PUBLISH_QUERY_BUILTIN_DEF,
-    &declaration_1264::WORKFLOW_RECEIVE_BUILTIN_DEF,
-    &declaration_1265::WORKFLOW_RESPOND_UPDATE_BUILTIN_DEF,
-    &declaration_1266::WORKFLOW_PAUSE_BUILTIN_DEF,
-    &declaration_1267::WORKFLOW_RESUME_BUILTIN_DEF,
-    &declaration_1268::WORKFLOW_STATUS_BUILTIN_DEF,
-    &declaration_1269::WORKFLOW_CONTINUE_AS_NEW_BUILTIN_DEF,
-    &declaration_1270::CONTINUE_AS_NEW_BUILTIN_DEF,
-    &declaration_1271::FLOW_INVARIANT_ALLOW_IMPL_DEF,
-    &declaration_1272::FLOW_INVARIANT_WARN_IMPL_DEF,
-    &declaration_1273::FLOW_INVARIANT_BLOCK_IMPL_DEF,
-    &declaration_1274::FLOW_INVARIANT_REQUIRE_APPROVAL_IMPL_DEF,
-    &declaration_1275::FLOW_EVIDENCE_ATOM_IMPL_DEF,
-    &declaration_1276::FLOW_EVIDENCE_METADATA_IMPL_DEF,
-    &declaration_1277::FLOW_EVIDENCE_TRANSCRIPT_IMPL_DEF,
-    &declaration_1278::FLOW_EVIDENCE_CITATION_IMPL_DEF,
-    &declaration_1279::FLOW_REMEDIATION_IMPL_DEF,
-    &declaration_1280::FLOW_WITH_EVIDENCE_IMPL_DEF,
-    &declaration_1281::FLOW_WITH_REMEDIATION_IMPL_DEF,
-    &declaration_1282::FLOW_WITH_CONFIDENCE_IMPL_DEF,
-    &declaration_1283::FLOW_INVARIANT_KIND_IMPL_DEF,
-    &declaration_1284::FLOW_INVARIANT_IS_BLOCKING_IMPL_DEF,
-    &declaration_1285::FLOW_INVARIANT_CONFIDENCE_IMPL_DEF,
-    &declaration_1286::FLOW_INVARIANT_FEEDBACK_IMPL_DEF,
+    &declaration_1260::WEB_ORIGIN_URL_IMPL_DEF,
+    &declaration_1261::WORKFLOW_SIGNAL_BUILTIN_DEF,
+    &declaration_1262::WORKFLOW_QUERY_BUILTIN_DEF,
+    &declaration_1263::WORKFLOW_UPDATE_BUILTIN_DEF,
+    &declaration_1264::WORKFLOW_PUBLISH_QUERY_BUILTIN_DEF,
+    &declaration_1265::WORKFLOW_RECEIVE_BUILTIN_DEF,
+    &declaration_1266::WORKFLOW_RESPOND_UPDATE_BUILTIN_DEF,
+    &declaration_1267::WORKFLOW_PAUSE_BUILTIN_DEF,
+    &declaration_1268::WORKFLOW_RESUME_BUILTIN_DEF,
+    &declaration_1269::WORKFLOW_STATUS_BUILTIN_DEF,
+    &declaration_1270::WORKFLOW_CONTINUE_AS_NEW_BUILTIN_DEF,
+    &declaration_1271::CONTINUE_AS_NEW_BUILTIN_DEF,
+    &declaration_1272::FLOW_INVARIANT_ALLOW_IMPL_DEF,
+    &declaration_1273::FLOW_INVARIANT_WARN_IMPL_DEF,
+    &declaration_1274::FLOW_INVARIANT_BLOCK_IMPL_DEF,
+    &declaration_1275::FLOW_INVARIANT_REQUIRE_APPROVAL_IMPL_DEF,
+    &declaration_1276::FLOW_EVIDENCE_ATOM_IMPL_DEF,
+    &declaration_1277::FLOW_EVIDENCE_METADATA_IMPL_DEF,
+    &declaration_1278::FLOW_EVIDENCE_TRANSCRIPT_IMPL_DEF,
+    &declaration_1279::FLOW_EVIDENCE_CITATION_IMPL_DEF,
+    &declaration_1280::FLOW_REMEDIATION_IMPL_DEF,
+    &declaration_1281::FLOW_WITH_EVIDENCE_IMPL_DEF,
+    &declaration_1282::FLOW_WITH_REMEDIATION_IMPL_DEF,
+    &declaration_1283::FLOW_WITH_CONFIDENCE_IMPL_DEF,
+    &declaration_1284::FLOW_INVARIANT_KIND_IMPL_DEF,
+    &declaration_1285::FLOW_INVARIANT_IS_BLOCKING_IMPL_DEF,
+    &declaration_1286::FLOW_INVARIANT_CONFIDENCE_IMPL_DEF,
+    &declaration_1287::FLOW_INVARIANT_FEEDBACK_IMPL_DEF,
 ];
 pub(super) fn definitions() -> &'static [&'static harn_vm_core::builtin_support::VmBuiltinDef] {
     DEFINITIONS

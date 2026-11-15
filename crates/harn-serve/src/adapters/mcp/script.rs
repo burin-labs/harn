@@ -1,11 +1,12 @@
 //! The script-published MCP registry as a source for [`McpServer`].
 //!
-//! A script's handlers close over one VM, and a VM is `!Send`, so the
-//! registry and its VM live on a local task; the server talks to them
+//! A script's handlers share captured state, and a VM is `!Send`, so the
+//! registry and its per-call child VMs live on a local task; the server talks to them
 //! through [`McpScriptRuntime`], which is `Send` and answers discovery from a
 //! snapshot without waiting behind a running handler.
 use std::future::Future;
 use std::pin::Pin;
+use std::rc::Rc;
 use std::sync::RwLock;
 
 use harn_vm::mcp_progress::ProgressContext;
@@ -40,6 +41,29 @@ struct ScriptState<A> {
     registry: McpScriptRegistry,
     vm: Vm,
     _anchor: A,
+}
+
+/// Keep the initialization VM and adapter anchor alive through each child call.
+/// The child VM must drop before the retained state releases its anchor.
+struct ScriptInvocation<A> {
+    vm: Vm,
+    state: Rc<ScriptState<A>>,
+}
+
+impl<A> ScriptInvocation<A> {
+    async fn run(mut self, job: ScriptJob) {
+        job(&self.state.registry, &mut self.vm).await;
+    }
+}
+
+struct CancelAbandonedCall(Option<Arc<AtomicBool>>);
+
+impl Drop for CancelAbandonedCall {
+    fn drop(&mut self) {
+        if let Some(cancel) = &self.0 {
+            cancel.store(true, Ordering::SeqCst);
+        }
+    }
 }
 
 impl McpScriptRuntime {
@@ -77,17 +101,22 @@ impl McpScriptRuntime {
             list_changes,
         };
         tokio::task::spawn_local(async move {
-            let mut state = ScriptState {
+            let mut state = Rc::new(ScriptState {
                 registry,
                 vm,
                 _anchor: anchor,
-            };
+            });
+            let mut in_flight = tokio::task::JoinSet::new();
             let mut reloads_open = true;
             loop {
                 tokio::select! {
                     job = jobs_rx.recv() => {
                         let Some(job) = job else { break };
-                        job(&state.registry, &mut state.vm).await;
+                        let invocation = ScriptInvocation {
+                            vm: state.vm.child_vm_for_host(),
+                            state: Rc::clone(&state),
+                        };
+                        in_flight.spawn_local(invocation.run(job));
                     }
                     replacement = replacements_rx.recv(), if reloads_open => {
                         let Some(replacement) = replacement else {
@@ -96,11 +125,14 @@ impl McpScriptRuntime {
                         };
                         *surface.write().expect("script surface poisoned") =
                             Arc::new(replacement.registry.surface());
-                        drop(std::mem::replace(&mut state, replacement));
+                        state = Rc::new(replacement);
                         let _ = changes.send(());
                     }
+                    _ = in_flight.join_next(), if !in_flight.is_empty() => {}
                 }
             }
+            in_flight.abort_all();
+            while in_flight.join_next().await.is_some() {}
         });
         (runtime, McpScriptReloader { replacements })
     }
@@ -121,7 +153,7 @@ impl McpScriptRuntime {
         self.changes.subscribe()
     }
 
-    /// Run `job` against the registry and its VM, in arrival order.
+    /// Run `job` in a child VM against the registry current at admission.
     async fn run(
         &self,
         id: &JsonValue,
@@ -132,20 +164,46 @@ impl McpScriptRuntime {
             + Send
             + 'static,
     ) -> JsonValue {
+        self.run_with_cancel(id, Arc::new(AtomicBool::new(false)), job)
+            .await
+    }
+
+    async fn run_with_cancel(
+        &self,
+        id: &JsonValue,
+        cancel: Arc<AtomicBool>,
+        job: impl for<'a> FnOnce(
+                &'a McpScriptRegistry,
+                &'a mut Vm,
+            ) -> Pin<Box<dyn Future<Output = JsonValue> + 'a>>
+            + Send
+            + 'static,
+    ) -> JsonValue {
+        let mut abandoned = CancelAbandonedCall(Some(cancel.clone()));
         let (response_tx, response_rx) = tokio::sync::oneshot::channel();
         let queued: ScriptJob = Box::new(move |registry, vm| {
+            vm.install_cancel_token(cancel.clone());
             Box::pin(async move {
-                let _ = response_tx.send(job(registry, vm).await);
+                if response_tx.is_closed() {
+                    return;
+                }
+                let mut abandoned = CancelAbandonedCall(Some(cancel));
+                let response = job(registry, vm).await;
+                abandoned.0 = None;
+                let _ = response_tx.send(response);
             })
         });
         if self.jobs.send(queued).is_err() {
+            abandoned.0 = None;
             return harn_vm::jsonrpc::error_response(
                 id.clone(),
                 -32603,
                 "script MCP runtime is not running",
             );
         }
-        response_rx.await.unwrap_or_else(|_| {
+        let response = response_rx.await;
+        abandoned.0 = None;
+        response.unwrap_or_else(|_| {
             harn_vm::jsonrpc::error_response(
                 id.clone(),
                 -32603,
@@ -160,9 +218,10 @@ impl McpScriptRuntime {
         params: JsonValue,
         progress: Option<ProgressContext>,
         as_task: bool,
+        cancel: Arc<AtomicBool>,
     ) -> JsonValue {
         let request_id = id.clone();
-        self.run(&request_id, move |registry, vm| {
+        self.run_with_cancel(&request_id, cancel, move |registry, vm| {
             Box::pin(async move {
                 registry
                     .call_tool(&id, &params, vm, progress, as_task)

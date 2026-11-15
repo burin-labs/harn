@@ -62,6 +62,8 @@ arguments: { [key in string]: ToolCliArgumentSpec }, };
 
 export type ToolGovernance = { audiences: Array<ToolAudience>, };
 
+export type WireSourceRef = { "kind": "text_span", document: string, start: number, end: number, } | { "kind": "document_pointer", document: string, pointer: string, } | { "kind": "synthetic", owner: string, };
+
 export type ToolSource = {
 /**
  * Stable source vocabulary such as `openapi` or `harn`.
@@ -71,6 +73,10 @@ kind: string,
  * Source-local operation identity.
  */
 id?: string | null,
+/**
+ * Portable declaration coordinates; never a host filesystem authority.
+ */
+location?: WireSourceRef | null,
 /**
  * Protocol-specific coordinates. This and `_meta` are the only open
  * metadata records in the contract.

@@ -1,5 +1,6 @@
 use super::stream_fold::{StreamFold, StreamPart};
 use super::*;
+use crate::llm::api::dialect::StreamUsagePolicy;
 use crate::llm::inference_speed::{observe_output, OutputKind};
 use crate::llm::usage::ProviderUsageReceipt;
 
@@ -507,11 +508,18 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
     let mut metered_tool_arguments: Vec<usize> = Vec::new();
     let mut forwarded_text = false;
     let managed_transport = crate::llm::managed_supply::is_managed_transport(provider);
-    let awaits_stream_usage = dialect.awaits_stream_usage(provider);
+    let stream_usage_policy = dialect.stream_usage_policy(provider);
+    let mut content_terminal_seen = false;
 
     loop {
         let frame = match liveness.next_item(frames.next()).await? {
             Some(frame) => frame,
+            None if content_terminal_seen
+                && !managed_transport
+                && stream_usage_policy == StreamUsagePolicy::ObserveReceipt =>
+            {
+                break;
+            }
             None => return Err(liveness.premature_eof("a provider terminal event")),
         };
         let data = frame.data.as_str();
@@ -586,19 +594,27 @@ pub(super) async fn consume_sse_lines_with_policy<R: tokio::io::AsyncBufRead + U
                 })
             })
         };
-        let terminal_usage_receipt = awaits_stream_usage
-            && choices_are_empty(&json)
-            && json
-                .get("usage")
-                .and_then(ProviderUsageReceipt::from_openai_usage_tokens)
-                .as_ref()
-                .is_some_and(ProviderUsageReceipt::has_any_reported_token_count);
-        // A finish_reason ends content, not necessarily accounting. Providers
-        // with a declared stream-usage contract and managed gateways append
-        // their authoritative receipt in later empty-choices frames.
+        let has_reported_usage = json
+            .get("usage")
+            .and_then(ProviderUsageReceipt::from_openai_usage_tokens)
+            .as_ref()
+            .is_some_and(ProviderUsageReceipt::has_any_reported_token_count);
+        content_terminal_seen |= terminal_frame;
+        let terminal_usage_receipt = has_reported_usage
+            && match stream_usage_policy {
+                StreamUsagePolicy::TrailingReceipt => choices_are_empty(&json),
+                StreamUsagePolicy::ObserveReceipt => {
+                    !managed_transport && (choices_are_empty(&json) || terminal_frame)
+                }
+                StreamUsagePolicy::ContentTerminal => false,
+            };
+        // Unknown routes may report usage inline or after content. Their
+        // absent counters remain unknown; managed gateways retain their own receipt.
         if managed_receipt_frame
             || terminal_usage_receipt
-            || (terminal_frame && !managed_transport && !awaits_stream_usage)
+            || (terminal_frame
+                && !managed_transport
+                && stream_usage_policy == StreamUsagePolicy::ContentTerminal)
         {
             break;
         }

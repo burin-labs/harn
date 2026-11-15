@@ -44,16 +44,51 @@
           "inputModes": ["application/json", "text/plain", "application/octet-stream"],
           "outputModes": ["application/json", "text/plain", "application/octet-stream"],
           "inputSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$defs": {
+              "sha256:41a6fd8e5c6345b66bc95de777b445cb9e8c89f098fdeb5539dd060ea339d93c": {
+                "type": "object",
+                "properties": {
+                  "task": {
+                    "$ref": "#/$defs/sha256:ec89a504e3a44601890714b158e78bc688575aa821471a8d62846cc1ca58fe6c",
+                    "x-harn-field": {
+                      "documentation": null,
+                      "id": "sha256:41a6fd8e5c6345b66bc95de777b445cb9e8c89f098fdeb5539dd060ea339d93c:field:task",
+                      "name": "task",
+                      "source": {"document": "harn:source/server.harn", "kind": "text_span", "start": 15, "end": 27}
+                    }
+                  }
+                },
+                "required": ["task"],
+                "additionalProperties": false,
+                "x-harn-source": {"document": "harn:source/server.harn", "kind": "text_span", "start": 0, "end": 57},
+                "x-harn-wire-id": "sha256:41a6fd8e5c6345b66bc95de777b445cb9e8c89f098fdeb5539dd060ea339d93c"
+              },
+              "sha256:ec89a504e3a44601890714b158e78bc688575aa821471a8d62846cc1ca58fe6c": {
+                "title": "string",
+                "type": "string",
+                "x-harn-source": {"document": "harn:source/server.harn", "kind": "text_span", "start": 15, "end": 27},
+                "x-harn-wire-id": "sha256:ec89a504e3a44601890714b158e78bc688575aa821471a8d62846cc1ca58fe6c"
+              }
+            },
             "type": "object",
             "properties": {
               "task": {
-                "type": "string"
+                "$ref": "#/$defs/sha256:ec89a504e3a44601890714b158e78bc688575aa821471a8d62846cc1ca58fe6c",
+                "x-harn-field": {
+                  "documentation": null,
+                  "id": "sha256:41a6fd8e5c6345b66bc95de777b445cb9e8c89f098fdeb5539dd060ea339d93c:field:task",
+                  "name": "task",
+                  "source": {"document": "harn:source/server.harn", "kind": "text_span", "start": 15, "end": 27}
+                }
               }
             },
             "required": [
               "task"
             ],
-            "additionalProperties": false
+            "additionalProperties": false,
+            "x-harn-source": {"document": "harn:source/server.harn", "kind": "text_span", "start": 0, "end": 57},
+            "x-harn-wire-id": "sha256:41a6fd8e5c6345b66bc95de777b445cb9e8c89f098fdeb5539dd060ea339d93c"
           }
         }
       ]

@@ -11,16 +11,24 @@ use serde_json::Value as JsonValue;
 use crate::tool_annotations::{SideEffectLevel, ToolKind};
 use crate::value::{VmDictExt, VmError, VmValue};
 
+mod binding;
 mod cli_projection;
+pub use binding::bind_catalog_handlers;
 mod contract;
 mod executable;
 pub use executable::{
-    executable_tools, executable_tools_for_audience, ExecutableTool, ToolInvocationRequirement,
+    call_tool_handler, executable_tools, executable_tools_for_audience, ExecutableTool,
+    ToolInvocationRequirement,
 };
 pub(crate) mod handler_result;
 pub use handler_result::tool_handler_output_schema;
 mod invocation;
 pub(crate) mod preparation_scope;
+pub(crate) use contract::append_tool_catalog_typescript;
+pub(crate) use contract::compile_runtime_schema;
+pub(crate) use contract::finish_typescript_projection;
+pub(crate) use contract::transform_codegen_schema;
+pub(crate) use contract::visit_schema_with_context;
 pub use contract::*;
 pub(crate) use invocation::tool_registry_catalog_for_tool;
 pub use invocation::{
@@ -421,7 +429,7 @@ fn source_spec(value: Option<&VmValue>, name: &str) -> Result<Option<ToolSource>
             )))
         }
     };
-    let allowed = BTreeSet::from(["kind", "id", "binding"]);
+    let allowed = BTreeSet::from(["kind", "id", "location", "binding"]);
     for key in fields.keys() {
         if !allowed.contains(key.as_str()) {
             return Err(VmError::Runtime(format!(
@@ -431,11 +439,24 @@ fn source_spec(value: Option<&VmValue>, name: &str) -> Result<Option<ToolSource>
     }
     let kind = required_string(fields, "kind", &format!("tool {name:?} field 'source'"))?;
     let id = optional_string(fields, "id", &format!("tool {name:?} field 'source'"))?;
+    let location = match fields.get("location") {
+        None | Some(VmValue::Nil) => None,
+        Some(value) => Some(
+            serde_json::from_value(crate::llm::vm_value_to_json(value)).map_err(|_| {
+                VmError::Runtime(format!("tool {name:?} field 'source.location' is invalid"))
+            })?,
+        ),
+    };
     let binding = open_record(
         fields.get("binding"),
         &format!("tool {name:?} field 'source.binding'"),
     )?;
-    Ok(Some(ToolSource { kind, id, binding }))
+    Ok(Some(ToolSource {
+        kind,
+        id,
+        location,
+        binding,
+    }))
 }
 
 fn presentation_annotations(

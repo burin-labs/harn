@@ -7,6 +7,42 @@
  */
 pub type ToolRegistryInfo = {name: string, version?: string, description?: string}
 
+/** Explicit host launch authority for a contained native MCP worker. */
+pub type NativeMcpProcessSpec = {
+  program: string,
+  args?: list<string>,
+  cwd: string,
+  environment?: dict<string, string>,
+}
+
+/** Closed capability reply containing the independently validated native value. */
+pub type NativeMcpCallReply = {value: unknown}
+
+/**
+ * Bind a native worker to an independently compiled Harn contract. Discovery
+ * and all identities are verified before publishing executable handlers.
+ * The returned registry owns the connection through its handler closures.
+ *
+ * @effects: [host, mcp]
+ * @errors: [native_binding_refused]
+ */
+pub fn native_tool_registry(
+  tools: HarnessTools,
+  spec: NativeMcpProcessSpec,
+  ir: dict,
+  max_concurrency: int,
+) -> ToolRegistry {
+  const client = tools.mcp_native_connect(spec, ir, max_concurrency)
+  const catalog = tools.mcp_native_catalog(client)
+  let handlers = {}
+  for entry in catalog.tools {
+    const name = entry.name
+    handlers = handlers
+      + {[name]: fn(input: unknown) { return tools.mcp_native_call(client, name, input).value }}
+  }
+  return tool_registry_bind(catalog, handlers)
+}
+
 /** Draft 2020-12 schema document, including the standard boolean form. */
 pub type JsonSchema202012 = bool | dict<string, unknown>
 
@@ -81,7 +117,12 @@ pub type ToolAudience = "cli" | "mcp" | "catalog" | "dashboard" | "agent"
 pub type ToolGovernance = {audiences: list<ToolAudience>}
 
 /** Origin coordinates retained across generated adapters. */
-pub type ToolSource = {kind: string, id?: string, binding?: dict}
+pub type ToolSourceLocation = {kind: "text_span", document: string, start: int, end: int} \
+  | {kind: "document_pointer", document: string, pointer: string} \
+  | {kind: "synthetic", owner: string}
+
+/** Source identity and protocol-specific coordinates from the contract owner. */
+pub type ToolSource = {kind: string, id?: string, location?: ToolSourceLocation?, binding?: dict}
 
 /** Harn-owned execution classification used by approval and scheduling policy. */
 pub type ToolPolicy = {

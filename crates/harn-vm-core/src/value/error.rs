@@ -143,6 +143,10 @@ pub enum VmError {
     ImmutableAssignment(String),
     TypeError(String),
     Runtime(String),
+    /// The effect may already have run. Automatic retries must preserve this
+    /// failure instead of replaying the operation. Explicit new calls remain
+    /// possible; display, caught values, and control classification are unchanged.
+    NonReplayable(Box<VmError>),
     DivisionByZero,
     /// Host deadline; unlike a Harn `deadline`, user code cannot catch it.
     ExecutionDeadlineExceeded,
@@ -217,11 +221,34 @@ pub enum VmError {
 }
 
 impl VmError {
+    /// Whether the existing dispatch retry owner may replay this failure.
+    pub fn permits_automatic_replay(&self) -> bool {
+        !matches!(self, Self::NonReplayable(_))
+    }
+
+    /// Inspect the original failure without losing its retry disposition.
+    pub fn unwrapped(&self) -> &Self {
+        let mut error = self;
+        while let Self::NonReplayable(inner) = error {
+            error = inner;
+        }
+        error
+    }
+
+    /// Recover the original failure when projecting its business-data contract.
+    pub fn into_unwrapped(self) -> Self {
+        let mut error = self;
+        while let Self::NonReplayable(inner) = error {
+            error = *inner;
+        }
+        error
+    }
+
     /// Whether this error is VM control flow that user `catch` blocks and
     /// error-as-data combinators must propagate unchanged.
     pub fn is_uncatchable_control_flow(&self) -> bool {
         matches!(
-            self,
+            self.unwrapped(),
             Self::ExecutionDeadlineExceeded
                 | Self::TestSkipped(_)
                 | Self::ProcessExit(_)
@@ -233,7 +260,7 @@ impl VmError {
     /// The requested host-process exit status, when this is an explicit Harn
     /// `exit(code)` control signal.
     pub fn process_exit_code(&self) -> Option<i32> {
-        match self {
+        match self.unwrapped() {
             Self::ProcessExit(code) => Some(*code),
             _ => None,
         }
@@ -261,6 +288,7 @@ impl VmError {
     /// sensibly (the dict renders both fields).
     pub fn thrown_value(&self) -> VmValue {
         match self {
+            Self::NonReplayable(inner) => inner.thrown_value(),
             VmError::Thrown(v) | VmError::DeclaredThrown(v) => v.clone(),
             VmError::CategorizedError { message, category } => {
                 let mut dict = std::collections::BTreeMap::new();
@@ -276,14 +304,14 @@ impl VmError {
     }
 
     pub fn provider_stream_failure(&self) -> Option<&ProviderStreamFailure> {
-        match self {
+        match self.unwrapped() {
             Self::ProviderStreamFailure(failure) => Some(failure),
             _ => None,
         }
     }
 
     pub fn schema_stream_abort(&self) -> Option<&SchemaStreamAbort> {
-        match self {
+        match self.unwrapped() {
             Self::SchemaStreamAbort(abort) => Some(abort),
             _ => None,
         }
@@ -292,7 +320,7 @@ impl VmError {
     /// The typed sandbox-mechanism refusal, when a spawn was refused because
     /// the platform mechanism could not be attached.
     pub fn sandbox_mechanism_unavailable(&self) -> Option<&super::SandboxMechanismUnavailable> {
-        match self {
+        match self.unwrapped() {
             Self::SandboxMechanismUnavailable(refusal) => Some(refusal),
             _ => None,
         }
@@ -673,7 +701,7 @@ pub fn categorized_error(message: impl Into<String>, category: ErrorCategory) ->
 /// 4. Deadline exceeded (VM-internal)
 /// 5. Fallback to Generic
 pub fn error_to_category(err: &VmError) -> ErrorCategory {
-    match err {
+    match err.unwrapped() {
         VmError::ExecutionDeadlineExceeded => ErrorCategory::Timeout,
         // Process exit is control flow, not a retryable agent-facing failure.
         VmError::ProcessExit(_) => ErrorCategory::Generic,
@@ -834,6 +862,7 @@ fn extract_http_status_codes(msg: &str) -> Vec<u16> {
 impl std::fmt::Display for VmError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            VmError::NonReplayable(inner) => inner.fmt(f),
             VmError::StackUnderflow => write!(f, "Stack underflow"),
             VmError::StackOverflow => write!(f, "Stack overflow: too many nested calls"),
             VmError::UndefinedVariable(n) => write!(f, "Undefined variable: {n}"),
@@ -941,11 +970,50 @@ fn fmt_span_suffix(span: &Option<Span>) -> String {
     }
 }
 
-impl std::error::Error for VmError {}
+impl std::error::Error for VmError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::NonReplayable(inner) => Some(inner.as_ref()),
+            _ => None,
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn non_replayable_failures_preserve_original_values_categories_and_control_flow() {
+        for error in [
+            VmError::Runtime("native transport stopped".into()),
+            VmError::CategorizedError {
+                message: "cancel fixture".into(),
+                category: ErrorCategory::Cancelled,
+            },
+            VmError::DeclaredThrown(VmValue::string("declared fixture")),
+            VmError::ProcessExit(17),
+            VmError::ExecutionDeadlineExceeded,
+            VmError::ToolCallStopped,
+        ] {
+            let wrapped =
+                VmError::NonReplayable(Box::new(VmError::NonReplayable(Box::new(error.clone()))));
+            assert!(error.permits_automatic_replay());
+            assert!(!wrapped.permits_automatic_replay());
+            assert_eq!(wrapped.to_string(), error.to_string());
+            assert_eq!(
+                wrapped.thrown_value().display(),
+                error.thrown_value().display()
+            );
+            assert_eq!(error_to_category(&wrapped), error_to_category(&error));
+            assert_eq!(
+                wrapped.is_uncatchable_control_flow(),
+                error.is_uncatchable_control_flow()
+            );
+            assert_eq!(wrapped.process_exit_code(), error.process_exit_code());
+            assert_eq!(wrapped.into_unwrapped().to_string(), error.to_string());
+        }
+    }
 
     #[test]
     fn declared_provenance_preserves_existing_error_categories() {

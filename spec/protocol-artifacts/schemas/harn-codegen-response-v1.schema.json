@@ -1,0 +1,198 @@
+{
+  "$defs": {
+    "CodegenFeature": {
+      "enum": [
+        "exact_json_integer",
+        "base64_bytes",
+        "canonical_decimal",
+        "sets",
+        "tuples",
+        "string_maps",
+        "optional_fields",
+        "nominal_types",
+        "recursive_types",
+        "disjoint_unions",
+        "declared_application_errors",
+        "mcp_tasks",
+        "request_cancellation"
+      ],
+      "type": "string"
+    },
+    "CodegenIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "binding_digest": {
+          "type": "string"
+        },
+        "catalog_digest": {
+          "type": "string"
+        },
+        "ir_digest": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "catalog_digest",
+        "binding_digest",
+        "ir_digest"
+      ],
+      "type": "object"
+    },
+    "CodegenResponseVersion": {
+      "enum": [
+        "harn-codegen-response/1.0"
+      ],
+      "type": "string"
+    },
+    "GeneratedArtifact": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "source_mappings": {
+          "items": {
+            "$ref": "#/$defs/GeneratedRange"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "content",
+        "source_mappings"
+      ],
+      "type": "object"
+    },
+    "GeneratedRange": {
+      "additionalProperties": false,
+      "properties": {
+        "end": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source": {
+          "$ref": "#/$defs/WireSourceRef"
+        },
+        "start": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "source"
+      ],
+      "type": "object"
+    },
+    "WireSourceRef": {
+      "description": "A declaration location, never a rejected invocation value.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "document": {
+              "type": "string"
+            },
+            "end": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "const": "text_span",
+              "type": "string"
+            },
+            "start": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "document",
+            "start",
+            "end"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "document": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "document_pointer",
+              "type": "string"
+            },
+            "pointer": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "document",
+            "pointer"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "synthetic",
+              "type": "string"
+            },
+            "owner": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "owner"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$id": "https://harnlang.com/schemas/harn-codegen-response-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifacts": {
+      "items": {
+        "$ref": "#/$defs/GeneratedArtifact"
+      },
+      "type": "array"
+    },
+    "identity": {
+      "$ref": "#/$defs/CodegenIdentity"
+    },
+    "schema_version": {
+      "$ref": "#/$defs/CodegenResponseVersion"
+    },
+    "supported_features": {
+      "items": {
+        "$ref": "#/$defs/CodegenFeature"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "identity",
+    "supported_features",
+    "artifacts"
+  ],
+  "title": "Harn Codegen Response",
+  "type": "object"
+}

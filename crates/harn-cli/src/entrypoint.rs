@@ -283,6 +283,7 @@ async fn dispatch(subcommand: Command, explain: bool) {
             }
         }
         Command::Check(args) => commands::check::run_check_command(args),
+        Command::Codegen(args) => runtime::exit_on_error(commands::codegen::run(args).await),
         Command::Parse(args) => {
             if let Err(error) = commands::parse_tokens::run_parse(&args) {
                 command_error(&error);
