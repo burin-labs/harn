@@ -7,6 +7,18 @@ use crate::package_snapshot::{
 use std::fs;
 use std::sync::Arc;
 
+#[test]
+fn document_segments_preserve_unreserved_bytes_and_encode_other_utf8_bytes() {
+    assert_eq!(
+        encode_path(Path::new("A-z_0.~ space/%δ#?.harn")).unwrap(),
+        "A-z_0.~%20space/%25%CE%B4%23%3F.harn"
+    );
+    assert_eq!(
+        encode_path(Path::new("../entry.harn")).unwrap(),
+        "%2E%2E/entry.harn"
+    );
+}
+
 fn write(root: &Path, relative: &str, source: &str) -> PathBuf {
     let path = root.join(relative);
     fs::create_dir_all(path.parent().unwrap()).unwrap();

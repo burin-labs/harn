@@ -59,6 +59,10 @@ fn assert_current_agent_card_shape(card: &JsonValue, public_url: &str) {
 async fn adapter_agent_card_protocol_fixture_matches_checked_in_matrix() {
     let (_dir, server) = echo_server();
     let actual = vec![server.agent_card("http://localhost:8080")];
+    let schema = jsonschema::validator_for(&actual[0]["skills"][0]["inputSchema"]).unwrap();
+    assert!(schema.is_valid(&json!({"task":"known request"})));
+    assert!(!schema.is_valid(&json!({"task":17})));
+    assert!(!schema.is_valid(&json!({})));
     crate::protocol_fixture_tests::assert_fixture_documents_match(
         "conformance/protocols/fixtures/a2a/agent_card_adapter.valid.json",
         actual,

@@ -37,6 +37,12 @@ pub(super) fn resolver_for_module(
         crate::DispatchError::Validation("export source identity is unavailable".into())
     })?;
     let module_graph = harn_modules::build(std::slice::from_ref(&path));
+    if let Some(failure) = module_graph.import_compile_failures(&path).first() {
+        return Err(crate::DispatchError::Validation(format!(
+            "export import could not be parsed: {}",
+            failure.module_path.display()
+        )));
+    }
     let documents = module_graph.source_documents(&path).map_err(|_| {
         crate::DispatchError::Validation("export source identity is unavailable".into())
     })?;
@@ -215,14 +221,16 @@ pub fn inspect(harness: Harness, request: Request) -> Request { return request }
 
         let catalog = ExportCatalog::from_path(&server).expect("catalog");
         let inspect = catalog.function("inspect").expect("inspect export");
-        assert_eq!(
-            inspect.input_schema["properties"]["request"]["properties"]["hypothesis_id"]["type"],
-            "string"
+        let input = jsonschema::validator_for(&inspect.input_schema).unwrap();
+        let value = serde_json::json!({"kind":"inspect", "hypothesis_id":"known"});
+        assert!(input.is_valid(&serde_json::json!({"request":value})));
+        assert!(
+            !input.is_valid(&serde_json::json!({"request":{"kind":"inspect", "hypothesis_id":17}}))
         );
-        assert_eq!(
-            inspect.output_schema.as_ref().expect("output")["properties"]["kind"]["const"],
-            "inspect"
-        );
+        let output =
+            jsonschema::validator_for(inspect.output_schema.as_ref().expect("output")).unwrap();
+        assert!(output.is_valid(&value));
+        assert!(!output.is_valid(&serde_json::json!({"kind":"other", "hypothesis_id":"known"})));
     }
 
     #[test]
@@ -262,16 +270,23 @@ pub fn inspect() -> Result { return nil }
             .output_schema
             .as_ref()
             .expect("output schema");
-        let outcome = &schema["anyOf"][0];
-        let success = &outcome["oneOf"][0];
-        let envelope = &success["properties"]["fields"]["prefixItems"][0];
-        assert_eq!(success["properties"]["variant"]["const"], "Success");
-        assert_eq!(envelope["properties"]["value"]["type"], "string");
-        assert_eq!(envelope["properties"]["labels"]["items"]["type"], "string");
-        assert_eq!(
-            envelope["properties"]["scores"]["anyOf"][0]["additionalProperties"]["type"],
-            "integer"
-        );
-        assert_eq!(schema["anyOf"][1]["type"], "null");
+        let validator = jsonschema::validator_for(schema).unwrap();
+        let success = serde_json::json!({"enum":"Outcome", "variant":"Success", "fields":[{
+            "value":"known", "labels":["one"], "scores":{"score":3}
+        }]});
+        assert!(validator.is_valid(&success));
+        assert!(validator.is_valid(&serde_json::Value::Null));
+        for (field, wrong) in [
+            ("value", serde_json::json!(17)),
+            ("labels", serde_json::json!([17])),
+            ("scores", serde_json::json!({"score":"wrong"})),
+        ] {
+            let mut invalid = success.clone();
+            invalid["fields"][0][field] = wrong;
+            assert!(!validator.is_valid(&invalid), "{field}");
+        }
+        let mut invalid = success;
+        invalid["variant"] = serde_json::json!("Unknown");
+        assert!(!validator.is_valid(&invalid));
     }
 }

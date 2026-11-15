@@ -119,7 +119,7 @@ pub async fn connect_guarded_mcp_stdio(
     let stdin = child.take_stdin();
     let stderr = child.take_stderr();
     let waiter_cancel = cancel.clone();
-    std::thread::spawn(move || {
+    harn_parser::runtime_stack::spawn(move || {
         let outcome = child
             .wait_with_timeout(None, &|| waiter_cancel.load(Ordering::Acquire))
             .and_then(|outcome| match outcome {
@@ -146,21 +146,21 @@ pub async fn connect_guarded_mcp_stdio(
     let runtime = tokio::runtime::Handle::current();
     let stdout_cancel = owner.cancel.clone();
     let stdout_runtime = runtime.clone();
-    std::thread::spawn(move || {
+    harn_parser::runtime_stack::spawn(move || {
         let mut sink = SyncIoBridge::new_with_handle(stdout_sink, stdout_runtime);
         if io::copy(&mut stdout, &mut sink).is_err() {
             stdout_cancel.store(true, Ordering::Release);
         }
     });
     let stdin_cancel = owner.cancel.clone();
-    std::thread::spawn(move || {
+    harn_parser::runtime_stack::spawn(move || {
         let mut source = SyncIoBridge::new_with_handle(stdin_source, runtime);
         if io::copy(&mut source, &mut stdin).is_err() {
             stdin_cancel.store(true, Ordering::Release);
         }
     });
     let stderr_cancel = owner.cancel.clone();
-    std::thread::spawn(move || {
+    harn_parser::runtime_stack::spawn(move || {
         // Do not retain or publish worker diagnostics that may contain input.
         drain_worker_stderr(stderr, &stderr_cancel);
     });

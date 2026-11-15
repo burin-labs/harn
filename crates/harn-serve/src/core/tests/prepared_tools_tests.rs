@@ -170,10 +170,11 @@ pub fn collect(prefix: string, ...values: int) -> dict {
         exports["collect"].func.has_rest_param,
         "compiled export preserves the variadic marker"
     );
-    assert_eq!(
-        core.tool_catalog().tools[0].input_schema["properties"]["values"],
-        serde_json::json!({"type": "array", "items": {"type": "integer"}})
-    );
+    let schema = jsonschema::validator_for(&core.tool_catalog().tools[0].input_schema).unwrap();
+    assert!(schema.is_valid(&serde_json::json!({"prefix":"optional"})));
+    assert!(schema.is_valid(&serde_json::json!({"prefix":"typed", "values":[1, 2]})));
+    assert!(!schema.is_valid(&serde_json::json!({"prefix":"typed", "values":["wrong"]})));
+    assert!(!schema.is_valid(&serde_json::json!({"prefix":"typed", "values":1})));
 
     let mut named = replay_test_request(None);
     named.function = "collect".to_string();

@@ -307,6 +307,12 @@ fn relative_document_path(base: &Path, path: &Path) -> Result<String, SourceDocu
     encode_path(&relative)
 }
 
+const SOURCE_SEGMENT: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'_')
+    .remove(b'.')
+    .remove(b'~');
+
 fn encode_path(path: &Path) -> Result<String, SourceDocumentError> {
     let mut names = Vec::new();
     for component in path.components() {
@@ -318,16 +324,7 @@ fn encode_path(path: &Path) -> Result<String, SourceDocumentError> {
                 let name = name
                     .to_str()
                     .ok_or_else(|| SourceDocumentError::InvalidPath(path.to_path_buf()))?;
-                let mut encoded = String::new();
-                for byte in name.bytes() {
-                    if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-                        encoded.push(char::from(byte));
-                    } else {
-                        use std::fmt::Write;
-                        write!(encoded, "%{byte:02X}").expect("write to string");
-                    }
-                }
-                names.push(encoded);
+                names.push(percent_encoding::utf8_percent_encode(name, SOURCE_SEGMENT).to_string());
             }
             Component::CurDir => {}
             Component::RootDir | Component::Prefix(_) => {

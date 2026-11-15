@@ -5,6 +5,52 @@ use crate::value::{ErrorCategory, VmError, VmValue};
 /// The versioned result discriminator consumed by the runtime and linter.
 pub const AGENT_TOOL_HANDLER_RESULT_SCHEMA: &str = "harn.agent_tool_handler_result.v2";
 
+pub(crate) fn wire_handler_output_schema(
+    wire: &crate::wire::PreparedWireType,
+) -> serde_json::Value {
+    use crate::wire::{WireLiteral, WireShape};
+
+    let projected = (|| {
+        let graph = wire.graph();
+        let WireShape::Record { fields, .. } = &graph.unaliased(wire.root()).ok()?.shape else {
+            return None;
+        };
+        let field = |name| {
+            fields
+                .iter()
+                .find(|field| field.name == name && !field.optional)
+        };
+        if !matches!(
+            &graph.unaliased(&field("schema")?.type_id).ok()?.shape,
+            WireShape::Literal { value: WireLiteral::String { value } }
+                if value == AGENT_TOOL_HANDLER_RESULT_SCHEMA
+        ) || !matches!(
+            graph.unaliased(&field("text")?.type_id).ok()?.shape,
+            WireShape::String
+        ) {
+            return None;
+        }
+        let WireShape::Union { members } = &graph.unaliased(&field("outcome")?.type_id).ok()?.shape
+        else {
+            return None;
+        };
+        let alternatives = members
+            .iter()
+            .map(|member| match &graph.unaliased(member).ok()?.shape {
+                WireShape::Literal {
+                    value: WireLiteral::String { value },
+                } => Some(value.as_str()),
+                _ => None,
+            })
+            .collect::<Option<std::collections::BTreeSet<_>>>()?;
+        if alternatives != std::collections::BTreeSet::from(["ok", "error", "rejected"]) {
+            return None;
+        }
+        graph.json_schema(&field("data")?.type_id).ok()
+    })();
+    projected.unwrap_or_else(|| wire.json_schema())
+}
+
 /// Project resolved return types that declare the complete explicit envelope.
 /// Imported aliases and local structural types share this discriminator.
 pub fn tool_handler_output_schema(schema: serde_json::Value) -> serde_json::Value {
@@ -132,6 +178,59 @@ pub(crate) fn agent_tool_handler_result_text(value: &serde_json::Value) -> Optio
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn prepared_export_envelope_projects_only_its_referenced_payload() {
+        let source = r#"
+type HandlerEnvelope<T> = {schema: "harn.agent_tool_handler_result.v2", outcome: "ok" | "error" | "rejected", text: string, data: T}
+type Payload = {label: string}
+"#;
+        let program = harn_parser::parse_source(source).unwrap();
+        let resolver = crate::TypeSchemaResolver::from_program(&program);
+        let result = harn_parser::TypeExpr::Applied {
+            name: "HandlerEnvelope".into(),
+            args: vec![harn_parser::TypeExpr::Named("Payload".into())],
+        };
+        let schema = resolver
+            .json_schema_for_tool_output_type_expr(&result)
+            .unwrap();
+        let validator = jsonschema::validator_for(&schema).unwrap();
+        assert!(validator.is_valid(&json!({"label":"known payload"})));
+        assert!(!validator.is_valid(&json!({"label":17})));
+        assert!(
+            !validator.is_valid(&json!({"schema":AGENT_TOOL_HANDLER_RESULT_SCHEMA,
+            "outcome":"ok", "text":"feedback", "data":{"label":"wrapped"}}))
+        );
+        for (from, to) in [
+            ("schema:", "schema?:"),
+            ("outcome:", "outcome?:"),
+            ("text:", "text?:"),
+            ("data:", "data?:"),
+            ("schema:", "other_schema:"),
+            ("outcome:", "other_outcome:"),
+            ("text:", "other_text:"),
+            ("data:", "other_data:"),
+            (AGENT_TOOL_HANDLER_RESULT_SCHEMA, "ordinary.domain.v2"),
+            ("\"rejected\"", "\"rejected\" | \"unknown\""),
+            ("\"ok\" | \"error\" | \"rejected\"", "string"),
+        ] {
+            let program = harn_parser::parse_source(&source.replace(from, to)).unwrap();
+            let resolver = crate::TypeSchemaResolver::from_program(&program);
+            let wire = resolver
+                .prepare_wire_type(
+                    &result,
+                    crate::wire::WireSourceRef::Synthetic {
+                        owner: "negative control".into(),
+                    },
+                )
+                .expect("near-miss has a prepared wire type");
+            assert_eq!(
+                wire_handler_output_schema(&wire),
+                wire.json_schema(),
+                "{from} -> {to}"
+            );
+        }
+    }
 
     #[test]
     fn export_schema_projection_requires_the_complete_versioned_contract() {

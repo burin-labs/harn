@@ -580,11 +580,15 @@ pub(crate) async fn exported_mcp_resolves_typed_payload_schema_and_preserves_fee
         .iter()
         .find(|tool| tool["name"] == "exported_payload")
         .expect("typed export");
-    assert_eq!(payload["outputSchema"]["required"], json!(["label"]));
-    assert_eq!(
-        payload["_meta"]["com.harnlang/toolContract"]["errorSchema"]["required"],
-        json!(["label"])
-    );
+    for schema in [
+        &payload["outputSchema"],
+        &payload["_meta"]["com.harnlang/toolContract"]["errorSchema"],
+    ] {
+        let validator = jsonschema::validator_for(schema).unwrap();
+        assert!(validator.is_valid(&json!({"label":"known payload"})));
+        assert!(!validator.is_valid(&json!({})));
+        assert!(!validator.is_valid(&json!({"label":17})));
+    }
     assert!(payload["outputSchema"]["properties"]
         .get("schema")
         .is_none());

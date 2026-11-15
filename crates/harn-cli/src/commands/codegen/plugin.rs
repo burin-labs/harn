@@ -48,7 +48,7 @@ fn collect(
     limit: u64,
     exceeded: Arc<AtomicBool>,
 ) -> std::thread::JoinHandle<std::io::Result<Vec<u8>>> {
-    std::thread::spawn(move || {
+    harn_parser::runtime_stack::spawn(move || {
         let mut bytes = Vec::new();
         reader.by_ref().take(limit + 1).read_to_end(&mut bytes)?;
         if bytes.len() as u64 > limit {
@@ -152,7 +152,7 @@ pub(super) fn invoke(
         &serde_json::to_value(request).map_err(|_| fail(Code::InvalidIr))?,
     );
     input.push(b'\n');
-    let writer = std::thread::spawn(move || stdin.write_all(&input));
+    let writer = harn_parser::runtime_stack::spawn(move || stdin.write_all(&input));
     let outcome =
         child.wait_with_timeout(Some(PLUGIN_TIMEOUT), &|| exceeded.load(Ordering::Acquire));
     let input_result = writer.join();
