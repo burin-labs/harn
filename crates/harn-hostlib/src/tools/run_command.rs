@@ -757,6 +757,29 @@ print('================ 1 passed in 0.01s ================')
             result["stage_output"]["argv"],
             serde_json::json!([verifier])
         );
+        let read = |path: &serde_json::Value| {
+            let request = harn_vm::json_to_vm_value(&serde_json::json!({
+                "path": path.as_str().expect("retained artifact path"),
+                "offset": 0,
+                "length": 1024 * 1024
+            }));
+            let response = crate::tools::read_command_output::handle(&[request])
+                .expect("the native artifact must be admitted by its owning reader");
+            crate::json::vm_value_to_json(&response)
+        };
+        assert!(read(&result["output_path"])["content"]
+            .as_str()
+            .unwrap()
+            .contains("1 passed"));
+        for (key, expected) in [
+            ("stdout_path", "ready\n"),
+            ("stderr_path", ""),
+            ("output_path", "ready\n"),
+        ] {
+            let response = read(&result["stage_output"][key]);
+            assert_eq!(response["content"], expected);
+            assert_eq!(response["eof"], true);
+        }
     }
 
     #[test]

@@ -872,7 +872,6 @@ fn waiter_thread(
         } else {
             stage
                 .finish(
-                    &context.command_id,
                     proc::stage_output::StageOutputBytes {
                         #[cfg(unix)]
                         relay_complete: handle.stage_output_complete(),

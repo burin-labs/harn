@@ -97,7 +97,6 @@ print('stage')
     };
     let observed = capture
         .finish(
-            "forged-stage-receipt",
             StageOutputBytes {
                 relay_complete: process.stage_output_complete(),
                 stdout: &aggregate,
@@ -117,7 +116,6 @@ print('stage')
     entered.write_all_at(b"1", 0).unwrap();
     let observed = capture
         .finish(
-            "failed-stage-valid-entry",
             StageOutputBytes {
                 relay_complete: process.stage_output_complete(),
                 stdout: &aggregate,

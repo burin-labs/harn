@@ -498,7 +498,6 @@ pub(crate) fn run_with_filter(
                 });
             }
             stage.finish(
-                &command_id,
                 stage_output::StageOutputBytes {
                     #[cfg(unix)]
                     relay_complete: handle.stage_output_complete(),

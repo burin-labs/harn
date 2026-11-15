@@ -147,7 +147,6 @@ impl StageCapture {
 
     pub(crate) fn finish(
         &self,
-        command_id: &str,
         bytes: StageOutputBytes<'_>,
         completed: bool,
         capture: super::CaptureConfig,
@@ -180,8 +179,7 @@ impl StageCapture {
             .into_iter()
             .map(|word| String::from_utf8_lossy(&filter.redact_bytes(word.as_bytes())).into_owned())
             .collect();
-        let artifacts =
-            super::persist_artifacts(&format!("{command_id}-final-stage"), stdout, stderr, None)?;
+        let artifacts = super::persist_artifacts(&super::next_command_id(), stdout, stderr, None)?;
         let inline = super::inline_output(stdout, stderr, capture);
         Ok(StageOutput::Captured {
             argv,
