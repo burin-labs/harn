@@ -1,26 +1,79 @@
-use crate::value::{DictMap, VmError, VmValue};
+use crate::value::{DictMap, VmDictExt, VmError, VmValue};
 
 /// Normalize the model-visible tool surface before any prompt, progressive
 /// disclosure, provider schema, or call-option consumer can read it. Raw
 /// `harness.llm.call(...)` and the agent loop therefore share the same typed
 /// exposure boundary.
-pub fn project_agent_tools(options: &mut Option<DictMap>) -> Result<(), VmError> {
+pub fn project_agent_tools(
+    options: &mut Option<DictMap>,
+) -> Result<Option<crate::llm::api::ToolSearchConfig>, VmError> {
+    let search = super::tool_search::parse_tool_search_option(options.as_ref())?;
     let Some(options) = options.as_mut() else {
-        return Ok(());
+        return Ok(search);
     };
     let Some(tools) = options
         .get("tools")
         .filter(|value| !matches!(value, VmValue::Nil))
         .cloned()
     else {
-        return Ok(());
+        return Ok(search);
     };
     let projected = crate::tool_registry::project_tools_for_audience(
         &tools,
         crate::tool_registry::ToolAudience::Agent,
     )?;
+    let projected = if search.is_some() {
+        guidance_with_disclosed_schema(projected)
+    } else {
+        projected
+    };
     options.insert(crate::value::intern_key("tools"), projected);
-    Ok(())
+    Ok(search)
+}
+
+/// A deferred capability's instructions travel with its schema, never in the
+/// global system prompt. Native search keeps this descriptor stable; client
+/// search exposes the same descriptor when it promotes the tool. Consuming
+/// `guidance` makes this projection idempotent and prevents double injection.
+fn guidance_with_disclosed_schema(tools: VmValue) -> VmValue {
+    let Some(entries) = super::system_prompt::tool_entry_list(Some(&tools)) else {
+        return tools;
+    };
+    let entries = entries
+        .into_iter()
+        .map(|entry| {
+            let Some(dict) = entry.as_dict() else {
+                return entry;
+            };
+            if !matches!(dict.get("defer_loading"), Some(VmValue::Bool(true))) {
+                return entry;
+            }
+            let Some(guidance) = dict.get("guidance").map(VmValue::display) else {
+                return entry;
+            };
+            let mut tool = (**dict).clone();
+            tool.remove("guidance");
+            if !guidance.trim().is_empty() {
+                let description = dict
+                    .get("description")
+                    .map(VmValue::display)
+                    .unwrap_or_default();
+                tool.put_str(
+                    "description",
+                    format!("{}\n\n{}", description.trim_end(), guidance.trim()),
+                );
+            }
+            VmValue::dict(tool)
+        })
+        .collect::<Vec<_>>();
+    match tools {
+        VmValue::Dict(wrapper) => {
+            let mut registry = (*wrapper).clone();
+            registry.put("tools", VmValue::list(entries));
+            VmValue::dict(registry)
+        }
+        _ => VmValue::list(entries),
+    }
 }
 
 #[cfg(test)]

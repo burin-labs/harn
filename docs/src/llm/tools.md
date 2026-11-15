@@ -519,10 +519,16 @@ registry = tool_define(registry, "deploy", "Deploy to production", {
 })
 ```
 
-Deferred tools never appear in the model's context unless a
-tool-search call surfaces them. They *are* sent to the provider (so
-prompt caching stays warm on Anthropic — the schemas live in the
-API prefix but not the model's context).
+With tool search active, deferred definitions are sent to the provider but
+enter the model's context only when discovery surfaces them. Their `guidance`
+travels with the discovered description instead of the global system prompt.
+Client discovery also expands selected compact tools into complete schemas.
+Without tool search, guidance retains its eager system-prompt placement.
+
+Anthropic excludes deferred definitions from the cached prefix. Discovery uses
+inline tool references, so Harn keeps its system prompt and tool definitions
+stable across native-search turns. Client discovery changes the visible tool
+set when it promotes a match and does not promise the same cache behavior.
 
 ### Call-level option: `tool_search`
 

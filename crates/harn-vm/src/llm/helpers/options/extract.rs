@@ -80,7 +80,7 @@ pub fn extract_llm_options(args: &[VmValue]) -> Result<crate::llm::api::LlmCallO
     let (llm_transcript_dir, llm_transcript_raw) = transcript_options(options.as_ref())?;
     apply_model_role_defaults(&mut options);
     apply_active_step_defaults(&mut options);
-    project_agent_tools(&mut options)?;
+    let mut tool_search = project_agent_tools(&mut options)?;
 
     // A `models:`/`ladder:` ladder owns provider/model selection, so reject a
     // standalone `model:`/`provider:` pin up front — before provider inference
@@ -626,7 +626,6 @@ pub fn extract_llm_options(args: &[VmValue]) -> Result<crate::llm::api::LlmCallO
     //   - bool: true (defaults to bm25/auto), false (no tool_search)
     //   - dict: { variant, mode, strategy, always_loaded, name }
     // Unset / false / nil all leave tool_search absent — tools ship eagerly.
-    let mut tool_search = parse_tool_search_option(options.as_ref())?;
     // A native search meta-tool with nothing deferred has nothing to find, and
     // on a tool-free turn (a terminal wrap-up) it would hand the model a tool
     // the loop deliberately removed (harn#9317). Such a request ships eagerly.

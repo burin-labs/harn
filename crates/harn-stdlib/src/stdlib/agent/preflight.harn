@@ -296,7 +296,7 @@ fn __agent_json_tool_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts: dict)
     {
       done_sentinel: __agent_done_sentinel(opts),
       body_hint: agent_tool_call_paradigm(llm, opts).body_hint,
-      expanded_schemas: __agent_tool_listing_prompt(opts.tools),
+      expanded_schemas: __agent_tool_listing_prompt(opts.tools, opts?._tool_search_client != nil),
     },
     opts,
   )
@@ -321,7 +321,7 @@ fn __agent_schema_text(value: any) {
  * compact list under its own heading, which is where the model is told it can
  * call `tool_schema` for the rest.
  */
-fn __agent_tool_listing_prompts(registry: dict) -> dict {
+fn __agent_tool_listing_prompts(registry: dict, client_disclosure: bool = false) -> dict {
   const tools = registry?.tools ?? []
   if len(tools) == 0 {
     return {expanded: "No tools are available.", compact: ""}
@@ -333,8 +333,13 @@ fn __agent_tool_listing_prompts(registry: dict) -> dict {
     if name == "" {
       continue
     }
+    const disclosed = client_disclosure && entry?.defer_loading == true
+    const guidance = disclosed ? trim(entry?.guidance ?? "") : ""
     const description = trim(entry?.description ?? "")
-    if entry?.compact == true {
+      + (guidance == "" ? "" : "\n\n" + guidance)
+    // Discovery promises the selected schema, including a tool originally
+    // registered as compact. Unselected tools are absent from this registry.
+    if entry?.compact == true && !disclosed {
       // Name plus the leading sentences, and deliberately no parameter schema:
       // the schema is most of what a full entry costs, and the heading this
       // list renders under is what tells the model to call `tool_schema` for
@@ -383,8 +388,8 @@ fn __agent_tool_listing_prompts(registry: dict) -> dict {
  * from the catalog it is dispatchable from — the model is told any unlisted
  * name is rejected, so an omitted tool reads as a tool that does not exist.
  */
-fn __agent_tool_listing_prompt(registry: dict) {
-  const listing = __agent_tool_listing_prompts(registry)
+fn __agent_tool_listing_prompt(registry: dict, client_disclosure: bool = false) {
+  const listing = __agent_tool_listing_prompts(registry, client_disclosure)
   if listing.compact == "" {
     return listing.expanded
   }
@@ -400,7 +405,7 @@ fn __agent_text_tool_contract_prompt(fs: HarnessFs, llm: HarnessLlm, opts: dict)
   }
   const turn_policy = opts?.turn_policy ?? {}
   const done_sentinel = __agent_done_sentinel(opts)
-  const listing = __agent_tool_listing_prompts(opts.tools)
+  const listing = __agent_tool_listing_prompts(opts.tools, opts?._tool_search_client != nil)
   return render_agent_prompt_id(
     fs,
     "agent.tool_contract_text",
