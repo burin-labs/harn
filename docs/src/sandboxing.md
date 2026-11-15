@@ -586,8 +586,15 @@ pointing at their narrowly scoped toolchain/config preset roots so installed
 toolchains and private-registry configuration remain usable. `PNPM_HOME`
 contains installed pnpm versions, so moving it would make an offline
 `pnpm run` try to download the project's already-installed pinned version.
-Preserving it grants no additional filesystem or network access. On macOS, a
-loopback grant also appends `-Djava.net.preferIPv6Addresses=true` to
+Preserving it grants no additional filesystem or network access.
+
+Corepack's `COREPACK_HOME` likewise retains the installed package-manager root
+before Harn relocates `XDG_CACHE_HOME`. An explicit value wins; otherwise Harn
+uses the launcher's original XDG cache directory, `LOCALAPPDATA`, or Corepack's
+platform default under the home directory. Existing filesystem rules still
+apply, and this does not permit downloading an absent package manager.
+
+On macOS, a loopback grant also appends `-Djava.net.preferIPv6Addresses=true` to
 `JAVA_TOOL_OPTIONS`: a dual-stack JVM binds `127.0.0.1` as the IPv4-mapped
 IPv6 address `::ffff:127.0.0.1`, which the seatbelt's loopback filter does not
 recognise, so Gradle and other JVM tools would otherwise fail their loopback
