@@ -56,29 +56,29 @@ pub(super) fn project_goal_context(
     if needed.is_empty() {
         return rendered_bytes;
     }
-    let records = crate::agent_sessions::goal_envelope_reminders(session_id, &needed, pending);
-    if !records.values().any(|reminder| reminder.goal_pin.is_some()) {
-        return rendered_bytes;
-    }
-    let covered_objectives = {
+    let mut records = crate::agent_sessions::goal_envelope_reminders(session_id, &needed, pending);
+    {
         let texts = messages
             .iter()
             .filter_map(person_text)
             .collect::<HashSet<_>>();
-        records
-            .values()
-            .filter_map(|reminder| reminder.goal_pin.as_ref())
-            .filter(|pin| texts.contains(pin.spec.objective.as_str()))
-            .map(|pin| pin.spec.objective.clone())
-            .collect::<HashSet<_>>()
-    };
-    if covered_objectives.is_empty() {
+        records.retain(|_, reminder| {
+            reminder.goal_pin.as_ref().is_some_and(|pin| {
+                texts.contains(pin.spec.objective.as_str())
+                    && reminder.body != pin.objective_covered_body
+            })
+        });
+    }
+    if records.is_empty() {
         return rendered_bytes;
     }
     for message in messages {
         let Some(ids) = directive_ids(message) else {
             continue;
         };
+        if !ids.iter().any(|id| records.contains_key(*id)) {
+            continue;
+        }
         // Validate the whole immutable stored envelope before changing any
         // block. Current TTL state of unrelated siblings is irrelevant.
         if !crate::agent_sessions::canonical_directive_envelope_matches(session_id, message) {
@@ -95,11 +95,6 @@ pub(super) fn project_goal_context(
             let Some(pin) = &reminder.goal_pin else {
                 continue;
             };
-            if !covered_objectives.contains(&pin.spec.objective)
-                || reminder.body == pin.objective_covered_body
-            {
-                continue;
-            }
             let full = reminder_directive_text(reminder);
             // Match a complete machine-rendered directive, not arbitrary goal
             // substrings. CDATA escaping prevents a quoted sibling body from
