@@ -587,7 +587,8 @@ fn a_prompt_ending_in_a_granted_values_first_byte_reaches_an_output_wait() {
     let completion = harn_hostlib::tools::long_running::register_completion_notifier(&handle_id)
         .expect("a live handle");
 
-    let prompt = format!("continue? {}", &PROBE[..1]);
+    let (first, rest) = PROBE.split_at(1);
+    let prompt = format!("continue? {first}");
     let waited = wait_for_output(&handle_id, &prompt, false, 2_000);
     assert!(
         require_bool(&waited, "matched"),
@@ -600,10 +601,7 @@ fn a_prompt_ending_in_a_granted_values_first_byte_reaches_an_output_wait() {
         stdout.ends_with(&format!("{prompt}[redacted]\n")),
         "the rest of the value was not redacted: {stdout}"
     );
-    assert!(
-        !stdout.contains(&PROBE[1..]),
-        "a granted value leaked: {stdout}"
-    );
+    assert!(!stdout.contains(rest), "a granted value leaked: {stdout}");
 }
 
 #[test]
