@@ -250,3 +250,85 @@ fn declared() {
         "{checked:?}"
     );
 }
+
+#[test]
+fn untyped_optional_chain_keeps_open_map_values_typed() {
+    let source = r"
+type Job = {name?: string, ...dict}
+type Workflow = {jobs?: dict<string, Job>, ...dict}
+fn read(workflow: Workflow?) -> string? { return workflow?.jobs?.build?.name }
+fn nullable(jobs: dict<string, Job?>) -> string? { return jobs?.build?.name }
+";
+    assert!(errors(source).is_empty());
+    assert_eq!(rule_count(source, "untyped-optional-chain"), 0);
+    let wrong = errors(&source.replace("-> string?", "-> int"));
+    assert_eq!(wrong.len(), 2, "{wrong:?}");
+    assert!(
+        wrong
+            .iter()
+            .all(|error| error.contains("expected int, found string?")),
+        "{wrong:?}"
+    );
+}
+
+#[test]
+fn untyped_optional_chain_reports_the_first_late_untyped_frontier_once() {
+    for (job, tail, frontier) in [
+        (
+            "{name?: string, payload?: any, ...dict}",
+            "extension?.child?.grandchild",
+            "workflow?.jobs?.build?.extension",
+        ),
+        (
+            "{name?: string, payload?: any, ...dict}",
+            "payload?.child?.grandchild",
+            "workflow?.jobs?.build?.payload?.child",
+        ),
+        (
+            "{name?: string, payload?: any}",
+            "payload?.child?.grandchild",
+            "workflow?.jobs?.build?.payload?.child",
+        ),
+        (
+            "{name?: string, payload?: unknown}",
+            "payload?.child?.grandchild",
+            "workflow?.jobs?.build?.payload?.child",
+        ),
+        (
+            "{name?: string, payload?: any}",
+            "payload.child?.grandchild",
+            "workflow?.jobs?.build?.payload.child?.grandchild",
+        ),
+    ] {
+        let source = format!(
+            "type Job = {job}\n\
+             type Workflow = {{jobs?: dict<string, Job>}}\n\
+             fn read(workflow: Workflow?) -> any {{ return workflow?.jobs?.build?.{tail} }}"
+        );
+        let diagnostics: Vec<_> = check_source_with_source(&source)
+            .into_iter()
+            .filter(|diagnostic| diagnostic.code == Code::LintUntypedOptionalChain)
+            .collect();
+        assert_eq!(diagnostics.len(), 1, "{source}\n{diagnostics:?}");
+        let span = diagnostics[0].span.expect("the frontier has a source span");
+        assert_eq!(source.get(span.start..span.end), Some(frontier), "{source}");
+    }
+}
+
+#[test]
+fn untyped_optional_chain_distinguishes_nil_alias_maps_from_any_alias_maps() {
+    let known = r"
+type First = nil
+type Value = First?
+fn read(rows: dict<string, Value>) -> nil { return rows?.entry?.name }
+";
+    assert!(errors(known).is_empty());
+    assert_eq!(rule_count(known, "untyped-optional-chain"), 0);
+    let wrong = errors(&known.replace("-> nil", "-> int"));
+    assert_eq!(wrong.len(), 1, "{wrong:?}");
+    assert!(wrong[0].contains("expected int, found nil"), "{wrong:?}");
+    let untyped = known
+        .replace("First = nil", "First = any")
+        .replace("-> nil", "-> any");
+    assert_eq!(rule_count(&untyped, "untyped-optional-chain"), 1);
+}

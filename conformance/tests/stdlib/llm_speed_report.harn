@@ -1,4 +1,4 @@
-import { LlmSpeedUsage, format_speed_line, format_speed_report } from "std/llm/speed"
+import { LlmSpeedUsage, decode_rate, format_speed_line, format_speed_report } from "std/llm/speed"
 
 /**
  * Speed reporting against a realistic llama.cpp `usage` dict: the provider
@@ -54,4 +54,21 @@ pipeline default(harness: Harness) {
   for line in format_speed_report(unreported, nil, 850) {
     harness.stdio.println(line)
   }
+  assert_eq(
+    decode_rate({output_tokens: 10, provider_telemetry: {server_generation_ms: 1000}}, 2000),
+    "10.0 tok/s",
+  )
+  assert_eq(decode_rate({provider_telemetry: {server_generation_ms: 1000}}, 2000), nil)
+  assert_eq(
+    decode_rate({output_tokens: 0, provider_telemetry: {server_generation_ms: 1000}}, 2000),
+    nil,
+  )
+  const duration_only = format_speed_report(
+    {provider_telemetry: {server_prompt_eval_ms: 1000}},
+    nil,
+    2000,
+  )
+  assert(!duration_only.any({ line -> line.contains("prompt eval rate:") }))
+  const zero_count = format_speed_report({output_tokens: 0}, nil, 1000)
+  assert(zero_count.any({ line -> line.contains("eval count:") && line.contains("0 token(s)") }))
 }

@@ -3,7 +3,7 @@ type Opts = {label?: string, tags?: list<string>}?
 fn describe(options: Opts = nil) -> string {
   const opts = options ?? {}
   let out = "base"
-  if opts?.label != nil {
+  if opts.label != nil {
     out = opts.label
   }
   return out

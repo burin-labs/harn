@@ -1000,6 +1000,9 @@ Columns can be inferred from the first row or supplied with
 normalized, ANSI-aware for visible width, and optionally capped with
 `max_cell_width`.
 
+For `render_kv_table`, set `key_header` and `value_header` to customize the
+column labels.
+
 ```harn
 import { render_table } from "std/table"
 
