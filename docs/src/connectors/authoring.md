@@ -822,6 +822,10 @@ a provider error body may contain secrets or personal data. Successful
 responses are unchanged. Header handling uses Harn's
 [shared redaction policy](../redaction.md), including host overrides.
 
+With `response_type: "bytes"`, failure envelopes also expose valid UTF-8 error
+text under the same limit. Non-UTF-8 bodies have no text field. Original
+`body_bytes` remain available unless `redact_error_body` removes both forms.
+
 The retry policy uses total-attempt semantics:
 `retry: {max_attempts, base_ms, cap_ms}`. Safe/idempotent methods (`GET`,
 `HEAD`, `PUT`, `DELETE`, `OPTIONS`) may retry retryable statuses. `POST` and
