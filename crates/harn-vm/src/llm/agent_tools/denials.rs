@@ -15,11 +15,14 @@ pub(super) fn denied_tool_result(tool_name: &str, reason: impl Into<String>) -> 
     // will be blocked again. Recoverable rejections (bad/missing arguments, an
     // empty tool name) must NOT use this body: see `recoverable_tool_result`,
     // which coaches a retry *with the correction* instead.
-    // Name the tools that ARE callable so the model can self-correct in one
+    // Name permission-approved alternatives so the model can self-correct in one
     // turn instead of re-issuing the denied call or guessing another unlisted
     // name (live fw-gpt-oss-120b transcripts: cheap models emit Codex/container
     // vocab they were never shown, read a bare denial, and thrash). The active
-    // policy's allowlist is the source of truth; omit the clause when the
+    // policy's allowlist is the source of truth for permission, not schema
+    // disclosure. Deferred tools may be named here before their arguments have
+    // been loaded. Label this inventory accordingly rather than inviting the
+    // model to guess those arguments. Omit the clause when the
     // surface is unbounded (allow-all) so we never assert a misleading list.
     //
     // The registry allowlist is only ONE of the gates that can produce this
@@ -32,16 +35,21 @@ pub(super) fn denied_tool_result(tool_name: &str, reason: impl Into<String>) -> 
         .into_iter()
         .filter(|name| name != tool_name)
         .collect();
-    let available_clause = if allowed.is_empty() {
+    let permission_hints = if allowed.is_empty() {
         String::new()
     } else {
-        format!(" Available tools: {}.", allowed.join(", "))
+        format!(
+            " Allowed tool names (permission hints): {}. These names do not disclose schemas. \
+             Use the advertised tool-search capability before calling a name whose schema has not \
+             been supplied; without tool search, choose a tool with a supplied schema.",
+            allowed.join(", ")
+        )
     };
     let next_step = format!(
         "The `{tool_name}` tool is not permitted right now. Do not retry the same call. \
          Make progress with the tools you are allowed to use, or if this capability is \
          essential, briefly tell the user what you need permission for and why.\
-         {available_clause}"
+         {permission_hints}"
     );
     serde_json::json!({
         "error": "permission_denied",
@@ -82,7 +90,7 @@ mod tests {
     use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
 
     #[test]
-    fn a_denied_tool_is_excluded_from_its_own_available_list() {
+    fn a_denied_tool_is_excluded_from_its_permission_hints() {
         push_execution_policy(CapabilityPolicy {
             tools: vec!["denied".into(), "usable".into()],
             ..Default::default()
@@ -93,7 +101,7 @@ mod tests {
         let available = result["next_step"]
             .as_str()
             .unwrap()
-            .split_once("Available tools:")
+            .split_once("Allowed tool names (permission hints):")
             .unwrap()
             .1;
         assert!(!available.contains("denied"));
