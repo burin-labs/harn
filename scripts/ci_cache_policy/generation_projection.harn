@@ -1,4 +1,5 @@
 import { CiAction, matching_steps, step_by_name, step_uses } from "./policy_core.harn"
+import { action_post_condition } from "./workflow_model.harn"
 
 pub type CiCachePin = {
   schema?: string,
@@ -50,7 +51,7 @@ pub fn rust_cache_generation_projection_errors(
   }
   if companion?.runs?.using != "node24" || companion?.runs?.main != "main.cjs"
     || companion?.runs?.post != "post.cjs"
-    || companion?.runs?.["post-if"] != "success()" {
+    || action_post_condition(companion) != "success()" {
     errors = errors
       + ["Rust cache generation must qualify only after a successful producer lifecycle"]
   }

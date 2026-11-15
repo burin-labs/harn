@@ -2,7 +2,9 @@ import {
   CiWorkflow,
   RUST_CACHE_ACTION,
   ci_text,
+  job_timeout,
   step_by_name,
+  step_continue_on_error,
   step_index_by_name,
 } from "./policy_core.harn"
 
@@ -32,7 +34,7 @@ pub fn package_audit_overlap_errors(workflow: CiWorkflow?) -> list<string> {
   const expected_verify = "./scripts/ci/rust_artifact.sh restore-cli"
     + " \"$RUNNER_TEMP/harn-cli.tar.zst\" \"$RUNNER_TEMP/harn-cli\" \"$GITHUB_SHA\" \"$GITHUB_ENV\""
   if (job?.needs ?? []) != ["changes"] || trim(job?.if ?? "") != expected_if
-    || to_string(job?.["timeout-minutes"] ?? "") != "80"
+    || to_string(job_timeout(job) ?? "") != "80"
     || len(caches) != 1
     || cache_index < 0
     || cache_index >= wait_index
@@ -50,7 +52,7 @@ pub fn package_audit_overlap_errors(workflow: CiWorkflow?) -> list<string> {
     ]
   }
   for step in [wait, download, verify, check] {
-    if step?.if != nil || step?.["continue-on-error"] != nil {
+    if step?.if != nil || step_continue_on_error(step) != nil {
       return [
         "ci.yml:package-audit artifact handoff and package checks must remain unconditional and fail closed",
       ]

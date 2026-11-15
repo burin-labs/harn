@@ -1,3 +1,4 @@
+import { assert_error_contains } from "std/testing"
 import {
   ci_cache_policy_errors,
   ci_cache_policy_parse,
@@ -196,16 +197,14 @@ pub pipeline test_ci_cache_policy_rejects_uncoupled_workspace_retention(
       steps: valid_action.runs.steps.map(
         { step ->
           return if step == cache {
-            {
-              ...cache,
-              with: {
-                ...cache?.with ?? {},
-                "shared-key": gha_expression(
-                  "inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key",
-                ),
-                "cache-workspace-crates": nil,
-              },
+            let inputs = {
+              ...cache?.with ?? {},
+              "shared-key": gha_expression(
+                "inputs.source-key != '' && format('{0}-{1}', inputs.shared-key, inputs.source-key) || inputs.shared-key",
+              ),
             }
+            inputs.remove("cache-workspace-crates")
+            {...cache, with: inputs}
           } else {
             step
           }
@@ -436,6 +435,18 @@ pub pipeline test_ci_cache_policy_rejects_advisory_budget_reporter(
           },
         },
       },
+    }
+    if type_of(flag) == "int" || type_of(flag) == "dict" {
+      assert_error_contains(
+        fn() { return ci_cache_policy_errors(
+          policy(harness.fs),
+          action(harness.fs),
+          node_action(harness.fs),
+          invalid,
+        ) },
+        "at root: value did not match any union branch",
+      )
+      continue
     }
     const errors = ci_cache_policy_errors(
       policy(harness.fs),
