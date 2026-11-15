@@ -380,7 +380,7 @@ fn build_agent_options(
           {
             kind: "learned_dispatch",
             phase: "fallback",
-            reason: "execution_verification_failed",
+            reason: result?.denial?.machine_reason ?? "execution_verification_failed",
             call_id: identity.call_id,
           },
         )

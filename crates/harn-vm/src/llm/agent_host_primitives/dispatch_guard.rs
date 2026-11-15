@@ -1,5 +1,14 @@
 use crate::value::{VmError, VmValue};
 
+pub(super) fn refusal() -> crate::agent_events::ToolDenial {
+    crate::agent_events::ToolDenial::terminal(
+        crate::agent_events::DenialGate::DeterministicPrecheck,
+        None,
+        "Execution contract changed while this tool call waited; execution refused.",
+    )
+    .with_audiences(Some("execution_contract_changed".into()), None)
+}
+
 /// A caller-owned guard is checked after approval and interception, immediately
 /// before handing the invocation to its executor. Only explicit true permits it.
 pub(super) async fn permits(
@@ -56,6 +65,10 @@ mod tests {
                 assert_eq!(result["rendered_result"], "executed");
             } else {
                 assert_eq!(result["error_category"], "permission_denied");
+                assert_eq!(
+                    result["denial"]["machine_reason"],
+                    "execution_contract_changed"
+                );
                 assert_ne!(result["rendered_result"], "executed");
             }
         }

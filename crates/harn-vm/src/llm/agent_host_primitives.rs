@@ -1074,6 +1074,13 @@ async fn dispatch_tool_call_live(
             emit_runtime_denied_activity(&session_id, &tool_id, &tool_name, &decision);
             Some((decision.terminal_denial(), Some(decision.receipt)))
         });
+    let final_denial = if final_denial.is_none()
+        && !dispatch_guard::permits(&ctx, call.get("execution_guard")).await?
+    {
+        Some((dispatch_guard::refusal(), None))
+    } else {
+        final_denial
+    };
     if let Some((denial, receipt)) = final_denial {
         let denied = Box::pin(deny_tool_call(
             Some(&ctx),
@@ -1092,17 +1099,6 @@ async fn dispatch_tool_call_live(
         )));
     }
 
-    if !dispatch_guard::permits(&ctx, call.get("execution_guard")).await? {
-        return Ok(json_to_vm_value(&agent_primitive_denied_tool(
-            &tool_name,
-            &tool_id,
-            &tool_args,
-            "Execution contract changed while this tool call waited; execution refused.",
-            crate::agent_events::ToolCallErrorCategory::PermissionDenied,
-            None,
-            None,
-        )));
-    }
     let started = std::time::Instant::now();
     // Session-scoped MCP clients (from opts.mcp_servers) bypass the bridge.
     let session_mcp = {
