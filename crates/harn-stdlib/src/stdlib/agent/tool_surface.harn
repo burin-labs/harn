@@ -368,12 +368,7 @@ pub fn agent_narrow_tool_surface_at_user_boundary(
 ) -> dict {
   const config = opts?.tool_surface_narrowing ?? {}
   const snapshot = agent.snapshot(session.session_id)
-  let user_boundary = ""
-  for event in snapshot?.events ?? [] {
-    if event?.kind == "message" && event?.role == "user" && event?.visibility == "public" {
-      user_boundary = event.id
-    }
-  }
+  const user_boundary = agent_tool_surface_user_boundary(snapshot)
   if user_boundary == "" || user_boundary == opts?._tool_surface_user_boundary {
     return opts
   }
@@ -588,4 +583,19 @@ pub fn __agent_reopen_tool_surface(agent: HarnessAgent, session: dict, opts: dic
   } else {
     __tool_surface_record_boundary(agent, session, reset)
   }
+}
+
+/**
+ * Read the canonical public user frontier, including the current compacted view.
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_tool_surface_user_boundary(snapshot: dict) -> string {
+  let boundary = ""
+  for event in snapshot?.events ?? [] {
+    if event?.kind == "message" && event?.role == "user" && event?.visibility == "public" {
+      boundary = event.id
+    }
+  }
+  return boundary
 }

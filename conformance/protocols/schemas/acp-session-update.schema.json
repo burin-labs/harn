@@ -209,6 +209,7 @@
                 "subagent_join",
                 "subagent_stop",
                 "tool_batch_disposition",
+                "tool_batch_proposal_resolution",
                 "tool_call_audit",
                 "tool_format_override",
                 "turn_phase_changed",

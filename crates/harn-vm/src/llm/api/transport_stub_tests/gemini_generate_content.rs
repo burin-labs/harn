@@ -1,4 +1,7 @@
-use super::{base_opts, spawn_llm_stub, vm_call_llm_full_streaming_offthread};
+use super::{
+    base_opts, read_http_request, spawn_llm_stub, spawn_llm_stub_many,
+    vm_call_llm_full_streaming_offthread,
+};
 use crate::llm::api::test_support::allow_stubbed_llm_transport;
 use crate::llm::env_guard;
 
@@ -75,4 +78,157 @@ fn gemini_generate_content_stream_uses_sse_and_preserves_terminal_usage() {
         assert_eq!(result.output_tokens, 2);
         assert_eq!(result.stop_reason.as_deref(), Some("STOP"));
     });
+}
+
+/// A real agent loop and Gemini HTTP transport must answer the name the model
+/// invoked, while durable execution evidence keeps the semantic handler name.
+#[test]
+fn retained_resolution_keeps_gemini_response_names_and_semantic_audit() {
+    use serde_json::{json, Value};
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+
+    let _guard = env_guard();
+    let _transport = allow_stubbed_llm_transport();
+    crate::reset_thread_local_state();
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    let capture = requests.clone();
+    let server = spawn_llm_stub_many("retained Gemini identity", 3, move |turn, stream| {
+        let (headers, request) = read_http_request(stream);
+        assert!(headers.starts_with("POST /v1beta/models/gemini-2.5-flash-lite:generateContent"));
+        let parts = match turn {
+            0 => json!([
+                {"functionCall":{"id":"original-edit","name":"edit_value","args":{}}},
+                {"functionCall":{"id":"observe","name":"read_evidence","args":{}}}
+            ]),
+            1 => {
+                // The scripted provider reads the actual feedback the model
+                // received, rather than inventing a pending handle independently.
+                let proposal = request["contents"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .flat_map(|message| message["parts"].as_array().unwrap())
+                    .filter_map(|part| part["functionResponse"]["response"]["result"].as_str())
+                    .find_map(|text| text.split_once("proposal_id="))
+                    .and_then(|(_, tail)| {
+                        tail.split(|ch: char| ch.is_whitespace() || ch == '.')
+                            .next()
+                    })
+                    .filter(|id| !id.is_empty())
+                    .expect("second request must contain the real retained proposal");
+                json!([{"functionCall":{
+                    "id":"confirm","name":"__harn_resolve_tool_call",
+                    "args":{"proposal_id":proposal,"action":"resume"}
+                }}])
+            }
+            2 => json!([{"text":"Finished. ##DONE##"}]),
+            _ => unreachable!(),
+        };
+        capture.lock().unwrap().push(request);
+        let body = json!({
+            "candidates":[{"content":{"role":"model","parts":parts},"finishReason":"STOP"}],
+            "usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}
+        })
+        .to_string();
+        write!(stream, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).unwrap();
+    });
+    let mut providers = crate::llm_config::ProvidersConfig::default();
+    providers.providers.insert(
+        "gemini".to_string(),
+        crate::llm_config::ProviderDef {
+            base_url: format!("http://{}", server.addr()),
+            auth_style: "none".to_string(),
+            auth_env: crate::llm_config::AuthEnv::None,
+            ..Default::default()
+        },
+    );
+    crate::llm_config::set_user_overrides(Some(providers));
+
+    let source = include_str!("../../testdata/gemini_retained_resolution.harn");
+    let path = std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/llm/testdata/gemini_retained_resolution.harn"
+    ));
+    let chunk = crate::compile_source_at_path(source, path, None).expect("fixture compiles");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let output = runtime.block_on(tokio::task::LocalSet::new().run_until(async {
+        let mut vm = crate::new_vm();
+        crate::register_vm_stdlib(&mut vm);
+        vm.execute(&chunk)
+            .await
+            .expect("actual Gemini agent loop finishes");
+        vm.output().to_string()
+    }));
+    crate::llm_config::clear_user_overrides();
+    drop(server);
+    let requests = requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        3,
+        "all actor requests must reach real HTTP transport"
+    );
+    assert!(
+        requests[0]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|tool| tool["functionDeclarations"].as_array())
+            .flatten()
+            .any(|tool| tool["name"] == "__harn_resolve_tool_call"),
+        "the initial real Gemini request must disclose the stable resolver"
+    );
+    let responses = |body: &Value| {
+        body["contents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|message| message["parts"].as_array().unwrap())
+            .filter_map(|part| part.get("functionResponse"))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let second = responses(&requests[1]);
+    assert!(second
+        .iter()
+        .any(|result| result["name"] == "read_evidence"));
+    assert!(second.iter().any(|result| result["name"] == "edit_value"));
+    let followup = responses(&requests[2]);
+    let confirmation = followup
+        .iter()
+        .find(|result| result["id"] == "confirm")
+        .expect("the actual confirmation result must reach Gemini");
+    let invoked = requests[2]["contents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|message| message["parts"].as_array().unwrap())
+        .filter_map(|part| part.get("functionCall"))
+        .find(|call| call["id"] == "confirm")
+        .expect("actual preceding Gemini invocation");
+    assert_eq!(invoked["name"], "__harn_resolve_tool_call");
+    assert!(
+        followup
+            .iter()
+            .any(|result| result["name"] == "read_evidence"),
+        "ordinary neighbor name must remain intact"
+    );
+    let report: Value = output
+        .lines()
+        .filter_map(|line| line.strip_prefix("[harn] "))
+        .find_map(|line| serde_json::from_str(line).ok())
+        .expect("actual loop report");
+    assert_eq!(report["mutations"], 1);
+    assert_eq!(
+        report["semantic_name"], "edit_value",
+        "durable execution facts must not be renamed"
+    );
+    assert_eq!(report["status"], "done");
+    assert_eq!(
+        confirmation["name"], invoked["name"],
+        "Gemini response must answer the actual invoked name: {confirmation}"
+    );
 }

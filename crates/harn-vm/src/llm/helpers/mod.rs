@@ -5,6 +5,7 @@ mod messages;
 mod opt_get;
 mod options;
 mod provider;
+mod reminder_compaction;
 mod transcript;
 pub(crate) use crate::stdlib::template::render_stdlib_prompt_asset;
 pub use crate::value::json::vm_value_dict_to_json;
@@ -28,6 +29,7 @@ pub use messages::{
 pub use opt_get::{opt_bool, opt_float, opt_int, opt_str};
 pub use options::admit_reasoning_literals;
 pub use options::extract_llm_options;
+pub(crate) use options::DIRECTIVE_IDS_KEY;
 pub use options::{
     assemble_system_prompt, compose_system_prompt, directive_envelope_message,
     directive_nonce_for_session, expects_structured_output, extract_json,
@@ -41,6 +43,11 @@ pub use options::{
 pub(crate) use options::{strip_internal_message_metadata, tracked_directive_envelope_message};
 pub use provider::{
     vm_resolve_model, vm_resolve_model_selector, vm_resolve_provider, ResolvedProvider,
+};
+pub(crate) use reminder_compaction::emit_reminder_lifecycle_records;
+pub use reminder_compaction::{
+    compact_reminder_events, transcript_compactable_events, ReminderCompactReport,
+    ReminderDedupeRecord,
 };
 #[cfg(test)]
 pub(crate) use transcript::transcript_to_vm_with_events;

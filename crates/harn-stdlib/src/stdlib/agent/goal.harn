@@ -1,4 +1,9 @@
-pub import { GoalCriterion, GoalSpec, goal_under_obligations } from "std/agent/goal_contract"
+pub import {
+  GoalCriterion,
+  GoalPinProjection,
+  GoalSpec,
+  goal_under_obligations,
+} from "std/agent/goal_contract"
 import { __goal_judge_system, __goal_pin_spec, __render_goal_text } from "std/agent/goal_contract"
 import { JudgeConfig } from "std/agent/options_types"
 // Goal object: a typed, long-running objective the agent converges on. A goal

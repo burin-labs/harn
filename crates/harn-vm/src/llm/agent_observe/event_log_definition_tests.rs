@@ -36,6 +36,7 @@ fn event_log_defines_each_served_message_once() {
         }));
         messages.push(serde_json::json!({
             "role": "tool_result",
+            "name": "read",
             "tool_call_id": format!("read-{turn}"),
             "content": format!("file {turn}"),
         }));

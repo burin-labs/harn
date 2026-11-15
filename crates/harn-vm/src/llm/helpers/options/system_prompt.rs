@@ -282,7 +282,19 @@ pub(super) fn system_prompt_fingerprint(system: &str) -> String {
     format!("sha256:{}", hex::encode(digest))
 }
 
+#[cfg(test)]
+thread_local! {
+    static SYSTEM_PROMPT_METADATA_PROJECTIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(super) fn system_prompt_metadata_projections() -> usize {
+    SYSTEM_PROMPT_METADATA_PROJECTIONS.with(std::cell::Cell::get)
+}
+
 pub fn system_prompt_metadata(system: &str) -> serde_json::Value {
+    #[cfg(test)]
+    SYSTEM_PROMPT_METADATA_PROJECTIONS.with(|count| count.set(count.get() + 1));
     let fingerprint = system_prompt_fingerprint(system);
     serde_json::json!({
         "content": system,

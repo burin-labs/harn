@@ -1,6 +1,109 @@
 use super::*;
 use crate::value::VmDictExt;
 
+fn selected_reminder<'a>(
+    event: &'a VmValue,
+    requested: &HashSet<&str>,
+) -> Option<&'a crate::value::DictMap> {
+    event.as_dict().and_then(|fields|fields.get("reminder"))
+        .and_then(VmValue::as_dict).filter(|reminder| {
+            matches!(reminder.get("id"), Some(VmValue::String(id)) if requested.contains(id.as_str()))
+        })
+}
+
+/// Borrow canonical reminder payloads directly. Unrelated history, system
+/// prompt metadata and budget projections never need to be materialized for
+/// final goal rendering. IDs select records; the actual stored envelope and
+/// complete rendered goal block authorize any change to served content.
+pub(crate) fn goal_envelope_reminders(
+    id: &str,
+    requested: &HashSet<&str>,
+    pending: &[crate::llm::helpers::SystemReminder],
+) -> std::collections::HashMap<String, crate::llm::helpers::SystemReminder> {
+    let pending_goal = pending
+        .iter()
+        .any(|reminder| requested.contains(reminder.id.as_str()) && reminder.goal_pin.is_some());
+    if !pending_goal {
+        return Default::default();
+    }
+    SESSIONS.with(|sessions| {
+        let sessions = sessions.borrow();
+        let Some(state) = sessions.get(id) else {
+            return Default::default();
+        };
+        let events = match state
+            .transcript
+            .as_dict()
+            .and_then(|fields| fields.get("events"))
+        {
+            Some(VmValue::List(events)) => events.as_slice(),
+            _ => &[],
+        };
+        let mut records = pending
+            .iter()
+            .filter(|reminder| {
+                requested.contains(reminder.id.as_str()) && reminder.goal_pin.is_some()
+            })
+            .map(|reminder| (reminder.id.clone(), reminder.clone()))
+            .collect::<std::collections::HashMap<_, _>>();
+        for event in events {
+            let Some(fields) = selected_reminder(event, requested) else {
+                continue;
+            };
+            let Some(VmValue::String(id)) = fields.get("id") else {
+                continue;
+            };
+            if !fields
+                .get("goal_pin")
+                .is_some_and(|value| !matches!(value, VmValue::Nil))
+            {
+                continue;
+            }
+            if records.contains_key(id.as_str()) {
+                continue;
+            }
+            if let Some(reminder) = crate::llm::helpers::reminder_from_event(event) {
+                records.insert(reminder.id.clone(), reminder);
+            }
+        }
+        records
+    })
+}
+
+/// Authenticate an envelope from the immutable stored message, before any
+/// conditional block projection. Caller IDs are only a lookup hint.
+pub(crate) fn canonical_directive_envelope_matches(id: &str, selected: &serde_json::Value) -> bool {
+    let Some(role) = selected.get("role").and_then(serde_json::Value::as_str) else {
+        return false;
+    };
+    let Some(content) = selected.get("content").and_then(serde_json::Value::as_str) else {
+        return false;
+    };
+    let key = crate::llm::helpers::DIRECTIVE_IDS_KEY;
+    let Some(ids) = selected.get(key).and_then(serde_json::Value::as_array) else {
+        return false;
+    };
+    if ids.is_empty() {
+        return false;
+    }
+    SESSIONS.with(|sessions| {
+        let sessions = sessions.borrow();
+        let Some(state) = sessions.get(id) else { return false };
+        let Some(VmValue::List(messages)) = state.transcript.as_dict().and_then(|fields| fields.get("messages")) else { return false };
+        messages.iter().any(|message| {
+            let Some(fields) = message.as_dict() else { return false };
+            if !matches!(fields.get("role"), Some(VmValue::String(value)) if value.as_str() == role)
+                || !matches!(fields.get("content"), Some(VmValue::String(value)) if value.as_str() == content) {
+                return false;
+            }
+            let Some(VmValue::List(stored_ids)) = fields.get(key) else { return false };
+            ids.len() == stored_ids.len() && stored_ids.iter().zip(ids).all(|(stored, selected)| {
+                matches!(stored, VmValue::String(value) if Some(value.as_str()) == selected.as_str())
+            })
+        })
+    })
+}
+
 /// Snapshot a replay target only when the canonical writer can mutate it.
 pub(crate) fn replay_transcript_snapshot(id: &str) -> Result<VmValue, String> {
     SESSIONS.with(|sessions| {

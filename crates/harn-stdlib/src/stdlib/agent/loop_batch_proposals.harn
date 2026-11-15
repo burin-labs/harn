@@ -1,0 +1,452 @@
+import { AgentToolBatchPhase } from "std/agent/events"
+import { tool_batch_registry_can_retain } from "std/agent/loop_batch_classification"
+import { agent_emit_event, agent_session_control_events } from "std/agent/state"
+import { agent_tool_surface_user_boundary } from "std/agent/tool_surface"
+import { __tool_registry_name } from "std/llm/call_shape"
+import { ToolRegistry } from "std/tools"
+
+pub const TOOL_BATCH_RESOLUTION_TOOL = "__harn_resolve_tool_call"
+
+pub type RetainedToolProposal = {
+  proposal_id: string,
+  batch_id: string,
+  call_index: int,
+  tool_call_id: string,
+  tool_name: string,
+  arguments: unknown,
+  signature: string,
+  definition_hash: string,
+}
+
+pub type ToolBatchContinuationState = {
+  schema: "harn.agent_tool_batch_state.v2",
+  batch_id: string,
+  selected_phase: AgentToolBatchPhase,
+  scope: string,
+  user_boundary: string,
+  context_revision: string,
+  pending: list<RetainedToolProposal>,
+  blocking_result: dict?,
+}
+
+pub type ToolProposalResolution = {proposal_id: string, action: "resume" | "discard"}
+
+pub type ToolBatchLookup = fn(string) -> dict?
+
+pub type ToolBatchPreparation = {
+  run_id: string,
+  _tool_batch_dependency_state: ToolBatchContinuationState,
+}
+
+pub type ToolBatchToolProjection = {tools: ToolRegistry}
+
+fn stored_state(options: dict) -> ToolBatchContinuationState? {
+  const raw = options?._tool_batch_dependency_state
+  return raw == nil ? nil : unwrap(schema_parse(raw, schema_of(ToolBatchContinuationState)))
+}
+
+fn empty_state(
+  scope: string,
+  user_boundary: string = "",
+  context_revision: string = "",
+) -> ToolBatchContinuationState {
+  return {
+    schema: "harn.agent_tool_batch_state.v2",
+    batch_id: "",
+    selected_phase: "observation",
+    scope: scope,
+    user_boundary: user_boundary,
+    context_revision: context_revision,
+    pending: [],
+    blocking_result: nil,
+  }
+}
+
+type ToolBatchScope = {scope: string, user_boundary: string, context_revision: string}
+
+fn current_scope(agent: HarnessAgent, session_id: string, options: dict) -> ToolBatchScope {
+  const snapshot = agent.snapshot(session_id)
+  let revision = ""
+  for event in transcript_events_by_kind(snapshot, "compaction") {
+    revision = to_string(event.id)
+  }
+  const user_boundary = agent_tool_surface_user_boundary(snapshot)
+  const scope = sha256(
+    json_stringify(
+      {
+        session_id: session_id,
+        run_id: options.run_id,
+        user_boundary: user_boundary,
+        controls: agent_session_control_events(agent, session_id),
+        context_revision: revision,
+      },
+    ),
+  )
+  return {scope: scope, user_boundary: user_boundary, context_revision: revision}
+}
+
+/**
+ * Recheck the original run, accepted controls and retained context before continuation.
+ * @effects: [host]
+ * @errors: []
+ */
+pub fn tool_batch_scope_is_current(
+  agent: HarnessAgent,
+  session_id: string,
+  options: dict,
+  scope: string,
+) -> bool {
+  return current_scope(agent, session_id, options).scope == scope
+}
+
+fn emit_resolution(
+  agent: HarnessAgent,
+  session_id: string,
+  proposal: RetainedToolProposal,
+  resolution: string,
+  reason: string,
+  confirmation_call_id: string?,
+  pending_count: int,
+) -> nil {
+  agent_emit_event(
+    agent,
+    session_id,
+    "tool_batch_proposal_resolution",
+    {
+      resolution: {
+        proposal_id: proposal.proposal_id,
+        source_batch_id: proposal.batch_id,
+        source_tool_call_id: proposal.tool_call_id,
+        tool_name: proposal.tool_name,
+        resolution: resolution,
+        reason: reason,
+        confirmation_call_id: confirmation_call_id,
+        pending_count: pending_count,
+      },
+    },
+  )
+  return nil
+}
+
+/**
+ * Retained calls belong to one run and accepted user/control revision.
+ * @effects: [host]
+ * @errors: [invalid retained state]
+ */
+pub fn tool_batch_prepare(
+  agent: HarnessAgent,
+  session: dict,
+  options: dict,
+) -> ToolBatchPreparation {
+  const scoped = options + {run_id: session.run_id}
+  const current = current_scope(agent, session.session_id, scoped)
+  const previous = stored_state(scoped)
+  if previous == nil {
+    return {
+      run_id: session.run_id,
+      _tool_batch_dependency_state: empty_state(
+        current.scope,
+        current.user_boundary,
+        current.context_revision,
+      ),
+    }
+  }
+  if previous.scope == current.scope {
+    return {run_id: session.run_id, _tool_batch_dependency_state: previous}
+  }
+  for proposal in previous.pending {
+    emit_resolution(
+      agent,
+      session.session_id,
+      proposal,
+      "invalidated",
+      previous.context_revision != current.context_revision ? "context_compacted" : "run_or_control_changed",
+      nil,
+      0,
+    )
+  }
+  return {
+    run_id: session.run_id,
+    _tool_batch_dependency_state: empty_state(
+      current.scope,
+      current.user_boundary,
+      current.context_revision,
+    ),
+  }
+}
+
+/**
+ * Keep a stable confirmation schema across pending-state transitions.
+ * @effects: []
+ * @errors: [invalid retained state]
+ */
+pub fn tool_batch_inject_resolution_tool(options: dict) -> ToolBatchToolProjection {
+  const registry: ToolRegistry = options?.tools ?? tool_registry()
+  const state = stored_state(options)
+  if len(state?.pending ?? []) == 0 && state?.blocking_result == nil
+    && !tool_batch_registry_can_retain(
+      registry,
+      options?.policy,
+      options?.stop_after_successful_tools ?? [],
+    ) {
+    return {tools: registry}
+  }
+  const tools = tool_define(
+    registry,
+    TOOL_BATCH_RESOLUTION_TOOL,
+    "Resume or discard one retained proposal by proposal_id. Resume executes stored arguments under current policy. Inspect evidence needed to decide before resuming. To change arguments, discard and issue a new tool call.",
+    {
+      parameters: {
+        proposal_id: {type: "string"},
+        action: {type: "string", enum: ["resume", "discard"]},
+      },
+      annotations: {kind: "think", side_effect_level: "none", readOnlyHint: true},
+      handler: { _args ->
+        throw "Tool proposal resolutions must pass through the agent dispatcher."
+      },
+    },
+  )
+  return {tools: tools}
+}
+
+/**
+ * Count retained bodies at the single continuation owner.
+ * @effects: []
+ * @errors: [invalid retained state]
+ */
+pub fn tool_batch_pending_count(options: dict) -> int {
+  return len(stored_state(options)?.pending ?? [])
+}
+
+/**
+ * Retire run-local authority after the terminal decision has been made.
+ * @effects: [host]
+ * @errors: [invalid retained state]
+ */
+pub fn tool_batch_retire(agent: HarnessAgent, session_id: string, options: dict) -> nil {
+  const state = stored_state(options)
+  for proposal in state?.pending ?? [] {
+    emit_resolution(agent, session_id, proposal, "invalidated", "run_terminated", nil, 0)
+  }
+  return nil
+}
+
+/**
+ * Project signatures from retained bodies for exact-call supersession.
+ * @effects: []
+ * @errors: [invalid retained state]
+ */
+pub fn tool_batch_pending_signatures(state: dict?) -> list<string> {
+  if state == nil {
+    return []
+  }
+  const decoded = unwrap(schema_parse(state, schema_of(ToolBatchContinuationState)))
+  return decoded.pending.map({ proposal -> proposal.signature }).to_list()
+}
+
+/**
+ * Bind a proposal to the resolved tool's schema and execution annotations.
+ * @effects: []
+ * @errors: []
+ */
+pub fn tool_batch_definition_hash(entry: dict?) -> string {
+  const nested: dict = entry?.function ?? {}
+  return sha256(
+    json_stringify(
+      {
+        parameters: entry?.parameters ?? nested?.parameters,
+        annotations: entry?.annotations ?? nested?.annotations,
+        executor: entry?.executor ?? nested?.executor,
+      },
+    ),
+  )
+}
+
+fn resolution_call(call: dict, reason: string, accepted: bool, proposal_id: string) -> dict {
+  return call
+    + {_tool_batch_resolution: {accepted: accepted, reason: reason, proposal_id: proposal_id}}
+}
+
+pub type ToolBatchResolvedCalls = {calls: list<dict>, state: ToolBatchContinuationState}
+
+/**
+ * Normalize confirmations once, before the ordinary policy/middleware path.
+ * @effects: [host]
+ * @errors: [invalid retained state]
+ */
+pub fn tool_batch_resolve_calls(
+  agent: HarnessAgent,
+  session_id: string,
+  calls: list,
+  options: dict,
+  lookup: ToolBatchLookup,
+) -> ToolBatchResolvedCalls {
+  const current = current_scope(agent, session_id, options)
+  let state = stored_state(options)
+    ?? empty_state(current.scope, current.user_boundary, current.context_revision)
+  let normalized = []
+  if state.scope != current.scope {
+    for proposal in state.pending {
+      emit_resolution(
+        agent,
+        session_id,
+        proposal,
+        "invalidated",
+        state.context_revision != current.context_revision ? "context_compacted" : "control_changed",
+        nil,
+        0,
+      )
+    }
+    state = empty_state(current.scope, current.user_boundary, current.context_revision)
+  }
+  for raw in calls {
+    // These two fields are dispatcher facts, never model-controlled input.
+    const call = raw + {_retained_tool_proposal: nil, _tool_batch_resolution: nil}
+    if __tool_registry_name(call) != TOOL_BATCH_RESOLUTION_TOOL {
+      normalized.push(call)
+      continue
+    }
+    const args = call?.arguments ?? {}
+    const decoded = schema_parse(args, schema_of(ToolProposalResolution))
+    if type_of(args) != "dict" || len(args.keys()) != 2 || is_err(decoded) {
+      normalized.push(resolution_call(call, "invalid_resolution_arguments", false, ""))
+      continue
+    }
+    const request = unwrap(decoded)
+    const proposal = state.pending.find({ pending -> pending.proposal_id == request.proposal_id })
+    if proposal == nil {
+      normalized.push(
+        resolution_call(call, "unknown_or_consumed_proposal", false, request.proposal_id),
+      )
+      continue
+    }
+    state = state
+      + {
+        pending: state.pending.filter({ pending -> pending.proposal_id != proposal.proposal_id })
+          .to_list(),
+      }
+    const call_id = to_string(call?.id ?? call?.tool_call_id ?? "")
+    if request.action == "discard" {
+      emit_resolution(
+        agent,
+        session_id,
+        proposal,
+        "discarded",
+        "model_reconsidered",
+        call_id,
+        len(state.pending),
+      )
+      normalized.push(resolution_call(call, "discarded_by_model", true, proposal.proposal_id))
+      continue
+    }
+    const entry = lookup(proposal.tool_name)
+    if entry == nil || tool_batch_definition_hash(entry) != proposal.definition_hash {
+      emit_resolution(
+        agent,
+        session_id,
+        proposal,
+        "invalidated",
+        "tool_definition_changed",
+        call_id,
+        len(state.pending),
+      )
+      normalized.push(resolution_call(call, "tool_definition_changed", false, proposal.proposal_id))
+      continue
+    }
+    emit_resolution(
+      agent,
+      session_id,
+      proposal,
+      "confirmed",
+      "model_confirmed_after_observation",
+      call_id,
+      len(state.pending),
+    )
+    normalized.push(
+      {
+        id: call_id,
+        name: proposal.tool_name,
+        arguments: proposal.arguments,
+        _retained_tool_proposal: proposal,
+      },
+    )
+  }
+  return {calls: normalized, state: state}
+}
+
+/**
+ * Derive pending work from retained bodies, never a parallel signature ledger.
+ * @effects: [host]
+ * @errors: [invalid retained state]
+ */
+pub fn tool_batch_retain(
+  agent: HarnessAgent,
+  options: dict,
+  plan: dict,
+  deferred: list,
+  executed: list,
+  blocking_result: dict?,
+  terminal: bool,
+) -> ToolBatchContinuationState {
+  const previous = stored_state(options) ?? empty_state(plan.scope)
+  const executed_signatures = (executed + deferred).map({ entry -> entry.signature }).to_list()
+  let pending = previous.pending.filter(
+    { proposal -> !executed_signatures.contains(proposal.signature) },
+  )
+    .to_list()
+  for proposal in previous.pending {
+    if executed_signatures.contains(proposal.signature) {
+      emit_resolution(
+        agent,
+        to_string(options.session_id),
+        proposal,
+        "superseded",
+        "call_re_proposed",
+        nil,
+        len(pending),
+      )
+    }
+  }
+  for entry in deferred {
+    const name = __tool_registry_name(entry.call)
+    pending.push(
+      {
+        proposal_id: "${plan.batch_id}:${entry.index}",
+        batch_id: plan.batch_id,
+        call_index: entry.index,
+        tool_call_id: to_string(entry.call?.id ?? entry.call?.tool_call_id ?? ""),
+        tool_name: name,
+        arguments: entry.call?.arguments ?? {},
+        signature: entry.signature,
+        definition_hash: entry.definition_hash,
+      },
+    )
+  }
+  const current = current_scope(agent, to_string(options.session_id), options)
+  const controls_changed = current.scope != plan.scope
+  if terminal || controls_changed {
+    for proposal in pending {
+      emit_resolution(
+        agent,
+        to_string(options.session_id),
+        proposal,
+        "invalidated",
+        terminal ? "terminal_tool_succeeded" : current.context_revision
+          != previous.context_revision ? "context_compacted" : "control_changed",
+        nil,
+        0,
+      )
+    }
+    pending = []
+  }
+  return {
+    schema: "harn.agent_tool_batch_state.v2",
+    batch_id: plan.batch_id,
+    selected_phase: plan.selected_phase,
+    scope: plan.scope,
+    user_boundary: previous.user_boundary,
+    context_revision: previous.context_revision,
+    pending: pending,
+    blocking_result: controls_changed ? nil : blocking_result,
+  }
+}

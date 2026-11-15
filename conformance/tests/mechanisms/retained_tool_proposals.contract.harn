@@ -1,0 +1,50 @@
+// Trigger: one response proposes an edit beside a failed prerequisite observation.
+// Effect: explicit confirmation executes the original body through ordinary dispatch.
+// Negative: discard or a failed observation cannot execute the proposal.
+import { retained_proposal_trial } from "../../../tests/agent/fixtures/retained_tool_proposals"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+pipeline default(harness: Harness) {
+  const confirmed = retained_proposal_trial(harness, "resume")
+  contract_effect(
+    harness.stdio,
+    "trigger_failed_observation_retains_edit",
+    confirmed.observations == 1 && confirmed.deferred == 1,
+  )
+  contract_effect(
+    harness.stdio,
+    "effect_explicit_confirmation_executes_original_body_once",
+    confirmed.confirmed == 1 && confirmed.mutations == 1 && confirmed.requests == 3
+      && confirmed.body_copies == 1
+      && confirmed.attempted == 2
+      && confirmed.succeeded == 1,
+  )
+  contract_effect(
+    harness.stdio,
+    "effect_confirmation_preserves_served_tool_prefix",
+    confirmed.stable_tools,
+  )
+  const discarded = retained_proposal_trial(harness, "discard")
+  contract_negative(
+    harness.stdio,
+    "negative_discard_never_executes_retained_edit",
+    discarded.mutations != 0 || discarded.discarded != 1 || discarded.attempted != 1,
+  )
+  const reread = retained_proposal_trial(harness, "reread")
+  contract_effect(
+    harness.stdio,
+    "effect_current_confirmation_survives_successful_coissued_observation",
+    reread.mutations == 1 && reread.observations == 2 && reread.deferred == 1
+      && reread.confirmed == 1
+      && reread.requests == 3
+      && reread.body_copies == 1,
+  )
+  const failed_read = retained_proposal_trial(harness, "reread_failed")
+  contract_negative(
+    harness.stdio,
+    "negative_failed_observation_prevents_confirmed_mutation",
+    failed_read.mutations != 0 || failed_read.observations != 2 || failed_read.deferred != 2
+      || failed_read.confirmed != 1
+      || failed_read.discarded != 1,
+  )
+}

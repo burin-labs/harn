@@ -282,13 +282,14 @@ fn unknown_tool_ceiling_denial_drops_permission_framing() {
     assert_eq!(result["error"], serde_json::json!("unknown_tool"));
     let next = result["next_step"].as_str().expect("next_step");
     assert!(
-        !next.to_lowercase().contains("permission") && !next.contains("not permitted"),
-        "name-resolution denial must not use permission framing: {next}"
+        next.contains("does not itself require new permission") && !next.contains("not permitted"),
+        "name-resolution denial must not demand new permission: {next}"
     );
     assert!(
         next.contains("not one of the available tools"),
         "next_step should name the failure class: {next}"
     );
+    assert!(next.contains("supplied schema") && next.contains("tool search"));
     // Still terminal: re-sending the identical call can never succeed.
     assert_eq!(envelope["denial"]["gate"], "tool_ceiling");
     assert_eq!(envelope["denial"]["retryable"], false);
@@ -543,7 +544,7 @@ fn permission_denied_keeps_do_not_retry_body() {
     assert_eq!(result["error"], serde_json::json!("permission_denied"));
     let next = result["next_step"].as_str().expect("next_step");
     assert!(
-        next.contains("Do not retry the same call"),
+        next.contains("Do not retry this invocation unchanged"),
         "true denial must still steer off a retry loop: {next}"
     );
 }

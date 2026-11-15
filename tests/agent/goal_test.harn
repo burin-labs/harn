@@ -127,6 +127,19 @@ pipeline test_goal_pin_carries_serializable_criteria_and_limits(harness: Harness
   assert_eq(stored[0].reminder.goal_pin.spec.success_criteria[0]?.check, nil)
   assert_eq(stored[0].reminder.goal_pin.spec.constraints, ["keep the constraint"])
   assert_eq(stored[0].reminder.goal_pin.spec.budget.tokens, 42)
+  assert_eq(stored[0].reminder.goal_pin.lifecycle, "managed")
+  const covered = stored[0].reminder.goal_pin.objective_covered_body
+  assert(!covered.contains("Objective: reply ALPHA"))
+  assert(covered.contains("keep the constraint"))
+  assert(covered.contains("42"))
+  const custom = goal_pin(harness.random, g)
+  const custom_body = "Preserve this custom wrapper.\n" + custom.content
+  const wrapped = pin_reminder(harness.agent, custom + {content: custom_body})
+  assert_eq(
+    wrapped.goal_pin.objective_covered_body,
+    custom_body,
+    "noncanonical custom goal text must not lose its caller-authored wrapper",
+  )
   const bounded = pin_reminder(harness.agent, goal_pin(harness.random, g), {max_body: 24})
   assert_eq(bounded.goal_pin.max_body, 24)
   assert(contains(bounded.body, "[pin reminder truncated]"))

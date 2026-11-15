@@ -1,0 +1,153 @@
+import { AgentToolBatchPhase } from "std/agent/events"
+import { agent_tool_annotations } from "std/agent/tool_annotations"
+import { __tool_registry_name } from "std/llm/call_shape"
+import { ToolRegistry } from "std/tools"
+
+const OBSERVATIONS = ["read", "search", "think", "fetch", "inspect", "list"]
+
+const MUTATIONS = ["edit", "write", "scaffold", "delete", "move", "mutation", "mutate"]
+
+const PROCESSES = [
+  "execute",
+  "process",
+  "verify",
+  "verification",
+  "verify_completion",
+  "test",
+  "check",
+  "command",
+]
+
+const TERMINALS = ["terminal", "done", "complete", "completion"]
+
+const MUTATING_EFFECTS = ["workspace", "workspace_write", "network", "desktop_control"]
+
+pub type ToolBatchCallClassification = {
+  phase: AgentToolBatchPhase,
+  declared_mutation: bool,
+  declared_verification: bool,
+}
+
+fn classification(
+  phase: AgentToolBatchPhase,
+  mutation: bool = false,
+  verification: bool = false,
+) -> ToolBatchCallClassification {
+  return {phase: phase, declared_mutation: mutation, declared_verification: verification}
+}
+
+fn annotation_text(value: unknown) -> string {
+  return lowercase(trim(to_string(value ?? "")))
+}
+
+fn process_is_read_effect(args: dict) -> bool {
+  const command = args?.command ?? args?.cmd ?? args?.script
+  const argv = args?.argv
+  const has_command = command != nil && to_string(command) != ""
+  const has_argv = type_of(argv) == "list" && len(argv) > 0
+  if !has_command && !has_argv {
+    return false
+  }
+  const request = has_argv ? {mode: "argv", argv: argv, command: to_string(command ?? "")} : {
+    mode: "shell",
+    command: to_string(command),
+  }
+  const classified = try {
+    command_workspace_effect({request: request})
+  }
+  return is_ok(classified) && unwrap(classified)?.effect == "read_effect"
+}
+
+/**
+ * Classify resolved registry facts once; sibling order does not imply dependency.
+ * @effects: []
+ * @errors: []
+ */
+pub fn tool_batch_classify(
+  args: dict,
+  entry: dict?,
+  annotations: dict,
+  explicit_terminal: bool,
+) -> ToolBatchCallClassification {
+  const nested: dict = entry?.function ?? {}
+  const executor = annotation_text(entry?.executor ?? nested?.executor)
+  const kind = annotation_text(annotations?.kind ?? annotations?.tool_kind ?? annotations?.toolKind)
+  const side_effect = annotation_text(
+    annotations?.side_effect_level ?? annotations?.sideEffectLevel
+      ?? annotations?.side_effect
+      ?? annotations?.sideEffect,
+  )
+  const mutation = annotation_text(
+    annotations?.mutation_classification ?? annotations?.mutationClassification
+      ?? annotations?.mutation,
+  )
+  const mutation_declared = (annotations?.destructiveHint ?? false)
+    || MUTATIONS.contains(kind)
+    || mutation == "workspace_write"
+  const mutating_effect = MUTATING_EFFECTS.contains(side_effect)
+  if executor == "provider_native" {
+    return classification("provider_native")
+  }
+  if (annotations?.terminal ?? false) || TERMINALS.contains(kind) || explicit_terminal {
+    return classification("terminal")
+  }
+  if annotations?.completion_evidence_role == "verification" && side_effect == "process_exec"
+    && !mutation_declared
+    && !mutating_effect {
+    return classification("process_verification", false, true)
+  }
+  if !mutation_declared
+    && (annotations?.readOnlyHint ?? annotations?.read_only_hint ?? false) {
+    return classification("observation")
+  }
+  if !mutation_declared
+    && (OBSERVATIONS.contains(kind) || side_effect == "none" || side_effect == "read_only")
+    && !mutating_effect {
+    return classification("observation")
+  }
+  if PROCESSES.contains(kind) || side_effect == "process_exec" {
+    return classification(process_is_read_effect(args) ? "observation" : "process_verification")
+  }
+  return classification("mutation", mutation_declared || mutating_effect)
+}
+
+/**
+ * Rank the declared dependency phases, independently of sibling source order.
+ * @effects: []
+ * @errors: []
+ */
+pub fn tool_batch_phase_rank(phase: AgentToolBatchPhase) -> int {
+  match phase {
+    "provider_native" -> { return 0 }
+    "observation" -> { return 1 }
+    "mutation" -> { return 2 }
+    "process_verification" -> { return 3 }
+    "terminal" -> { return 4 }
+  }
+}
+
+/**
+ * A single fixed phase cannot retain a later phase. Process arguments can
+ * select observation or verification, so their registry stays resolution-capable.
+ * @effects: []
+ * @errors: []
+ */
+pub fn tool_batch_registry_can_retain(
+  tools: ToolRegistry,
+  policy: dict?,
+  terminal_tools: list<string>,
+) -> bool {
+  let phases: list<AgentToolBatchPhase> = []
+  for entry in tools.tools {
+    const name = __tool_registry_name(entry)
+    const annotations = agent_tool_annotations(entry, policy, name)
+    const classified = tool_batch_classify({}, entry, annotations, contains(terminal_tools, name))
+    if classified.phase == "process_verification" && !classified.declared_verification {
+      return true
+    }
+    if !phases.contains(classified.phase) {
+      phases.push(classified.phase)
+    }
+  }
+  return len(phases) > 1
+}

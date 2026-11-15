@@ -10,7 +10,12 @@
 // surface. The legacy `[no-compact]` heading marker is supported as a
 // documented ingestion format via `recognize_no_compact`.
 import { compaction_policy } from "std/agent/autocompact"
-import { __goal_pin_spec, __render_goal_text } from "std/agent/goal_contract"
+import {
+  GoalPinProjection,
+  GoalSpec,
+  __goal_pin_spec,
+  __render_goal_text,
+} from "std/agent/goal_contract"
 import { __agent_goal_projection } from "std/agent/goal_projection"
 import { agent_completion_obligations } from "std/agent/obligations"
 import { agent_session_inject_reminder } from "std/agent/state"
@@ -330,11 +335,11 @@ fn __pin_reminder_validate(options: dict) {
   return options
 }
 
-fn __pin_reminder_body(agent: HarnessAgent, content: string?, options: dict) {
+fn __pin_reminder_body(agent: HarnessAgent, content: string?, options: dict) -> string {
   const limit = options?.max_body
   const text = to_string(content ?? "")
   if type_of(limit) != "int" || limit <= 0 || len(text) <= limit {
-    return content
+    return text
   }
   const retained = text.substring(0, limit)
   let _ = agent_report_truncation(
@@ -401,14 +406,40 @@ pub fn pin_reminder(agent: HarnessAgent, pin: dict, opts: any = nil) {
   if pin?.kind == "goal" && pin?.meta?.goal != nil {
     reminder = reminder
       + {
-        goal_pin: {
-          spec: __goal_pin_spec(pin.meta.goal),
-          control_id: pin?.meta?.goal_control_id,
-          max_body: options?.max_body,
-        },
+        goal_pin: __goal_pin_projection(
+          agent,
+          pin.meta.goal,
+          pin?.meta?.goal_control_id,
+          options?.max_body,
+          reminder.body,
+          pin?.meta?.goal_lifecycle ?? "managed",
+        ),
       }
   }
   return reminder
+}
+
+fn __goal_pin_projection(
+  agent: HarnessAgent,
+  goal: GoalSpec,
+  control_id: string?,
+  max_body: int?,
+  body: string,
+  lifecycle: "managed" | "context",
+) -> GoalPinProjection {
+  const options = {max_body: max_body}
+  const canonical_body = __pin_reminder_body(agent, __render_goal_text(goal), options)
+  return {
+    spec: __goal_pin_spec(goal),
+    lifecycle: lifecycle,
+    control_id: control_id,
+    max_body: max_body,
+    objective_covered_body: if body == canonical_body {
+      __pin_reminder_body(agent, __render_goal_text(goal, true), options)
+    } else {
+      body
+    },
+  }
 }
 
 /**
@@ -421,12 +452,14 @@ pub fn pin_reminder(agent: HarnessAgent, pin: dict, opts: any = nil) {
  * @api_stability: stable
  */
 pub fn agent_pin(agent: HarnessAgent, session_id: any, pin: dict) {
-  const obligations = if pin?.kind == "goal" && pin?.meta?.goal != nil {
+  const managed_goal = pin?.kind == "goal" && pin?.meta?.goal != nil
+    && pin?.meta?.goal_lifecycle != "context"
+  const obligations = if managed_goal {
     agent_completion_obligations(agent, session_id, "")
   } else {
     nil
   }
-  const current = if pin?.kind == "goal" && pin?.meta?.goal != nil {
+  const current = if managed_goal {
     const projected = __agent_goal_projection(agent, session_id, pin.meta.goal, obligations)
     pin
       + {
@@ -453,20 +486,21 @@ pub fn __agent_refresh_goal_pins(agent: HarnessAgent, session_id: string) -> nil
   const events = (agent.snapshot(session_id) ?? {})?.events ?? []
   for event in events {
     const reminder = event?.reminder
-    if event?.kind != "system_reminder" || reminder?.goal_pin == nil
+    if event?.kind != "system_reminder" || reminder?.goal_pin?.lifecycle != "managed"
       || reminder.goal_pin?.control_id == obligations.retarget.control_id {
       continue
     }
     const current = __agent_goal_projection(agent, session_id, reminder.goal_pin.spec, obligations)
+    const body = __pin_reminder_body(
+      agent,
+      __render_goal_text(current),
+      {max_body: reminder.goal_pin?.max_body},
+    )
     agent_session_inject_reminder(
       agent,
       session_id,
       {
-        body: __pin_reminder_body(
-          agent,
-          __render_goal_text(current),
-          {max_body: reminder.goal_pin?.max_body},
-        ),
+        body: body,
         dedupe_key: reminder.dedupe_key,
         preserve_on_compact: reminder.preserve_on_compact,
         role_hint: reminder.role_hint,
@@ -474,11 +508,14 @@ pub fn __agent_refresh_goal_pins(agent: HarnessAgent, session_id: string) -> nil
         tags: reminder.tags,
         propagate: reminder.propagate,
         ttl_turns: reminder.ttl_turns,
-        goal_pin: {
-          spec: __goal_pin_spec(current),
-          control_id: obligations.retarget.control_id,
-          max_body: reminder.goal_pin?.max_body,
-        },
+        goal_pin: __goal_pin_projection(
+          agent,
+          current,
+          obligations.retarget.control_id,
+          reminder.goal_pin?.max_body,
+          body,
+          "managed",
+        ),
       },
     )
   }

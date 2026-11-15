@@ -112,7 +112,7 @@ pub fn system_prompt(id: &str) -> Option<String> {
     })
 }
 
-const DIRECTIVE_NONCE_METADATA_KEY: &str = "_harn_directive_nonce";
+pub(crate) const DIRECTIVE_NONCE_METADATA_KEY: &str = "_harn_directive_nonce";
 
 /// Read the durable authority nonce owned by this session's transcript.
 pub fn directive_nonce(id: &str) -> Option<String> {
