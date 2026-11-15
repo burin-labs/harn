@@ -64,9 +64,13 @@ pipeline test_declared_read_only_policy_enforces_the_local_agent_handler(harness
           ],
         )
         const catalog = tool_schema(registry)
-        assert_eq(catalog.tools[0].policy?.source, declared ? "declared" : "legacy_annotations")
+        const entry = catalog.tools[0]
+        if entry == nil {
+          throw "the registry must retain its declared handler"
+        }
+        assert_eq(entry.policy?.source, declared ? "declared" : "legacy_annotations")
         const candidate = capability()
-        const preflight = catalog.tools[0] + {inputSchema: candidate.tool.inputSchema}
+        const preflight = entry + {inputSchema: candidate.tool.inputSchema}
         const configured = try {
           dispatcher(candidate + {preflight_tool: preflight})
         }

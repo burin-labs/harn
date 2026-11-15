@@ -81,6 +81,7 @@ pipeline test_single_route_asks_only_applicability(harness: Harness) {
       }
     },
   )
+    .to_list()
   with_evaluation_fixtures(
     harness,
     fixtures,
@@ -369,7 +370,11 @@ pipeline test_definition_identity_tracks_meanings_and_selection_policy() {
   settings.minimum_margin = 0.8
   const changed = make_router(settings)
   assert_ne(first.definition.digest, changed.definition.digest)
-  assert_eq(first.definition.questions.route.criteria.lookup, first.definition.routes[0]?.meaning)
+  const route = first.definition.questions.route
+  if route == nil {
+    throw "a multi-capability decision must have a routing question"
+  }
+  assert_eq(route.criteria.lookup, first.definition.routes[0]?.meaning)
   const rejected = try {
     make_router(settings + {applicability_accept: 0.4})
   }

@@ -8,6 +8,7 @@ fn runtime_content_fingerprint() -> RuntimeContentFingerprint {
   return {
     schema: "harn.runtime_content_fingerprint.v1",
     content_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    artifact_id: nil,
     harn_version: "0.10.24",
     embedded_stdlib_sha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     compatibility: {
@@ -20,6 +21,7 @@ fn runtime_content_fingerprint() -> RuntimeContentFingerprint {
         full: true,
         llm_bench_internals: false,
         vm_bench_internals: false,
+        vm_test_support: false,
         content: true,
         compression: true,
         http_compression: true,

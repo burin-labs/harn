@@ -74,7 +74,7 @@ const catalog: ToolCatalog = {
         id: "getWidget",
         binding: { method: "GET", path: "/widgets/{widget_id}" },
       },
-      policy: { kind, side_effect_level: sideEffect },
+      policy: { kind, side_effect_level: sideEffect, source: "declared" },
       _meta: { "example.com/catalog-version": 1 },
     },
   ],
