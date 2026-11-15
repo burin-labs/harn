@@ -51,7 +51,7 @@ fn guidance_with_disclosed_schema(tools: VmValue) -> VmValue {
             let Some(guidance) = dict.get("guidance").map(VmValue::display) else {
                 return entry;
             };
-            let mut tool = (**dict).clone();
+            let mut tool = dict.clone();
             tool.remove("guidance");
             if !guidance.trim().is_empty() {
                 let description = dict
