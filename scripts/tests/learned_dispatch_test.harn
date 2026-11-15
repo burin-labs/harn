@@ -65,6 +65,16 @@ pipeline test_declared_read_only_policy_enforces_the_local_agent_handler(harness
         )
         const catalog = tool_schema(registry)
         assert_eq(catalog.tools[0].policy?.source, declared ? "declared" : "legacy_annotations")
+        const candidate = capability()
+        const preflight = catalog.tools[0] + {inputSchema: candidate.tool.inputSchema}
+        const configured = try {
+          dispatcher(candidate + {preflight_tool: preflight})
+        }
+        const accepted = match configured {
+          Ok(_) -> { true }
+          Err(_) -> { false }
+        }
+        assert_eq(accepted, declared, "an advisory classification cannot qualify a preflight")
         const result = agent_dispatch_tool_call(
           harness.tools,
           {name: "write_probe", arguments: {path: path}},

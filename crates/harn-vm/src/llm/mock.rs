@@ -1002,12 +1002,22 @@ fn apply_mock_prompt_cache(result: &mut LlmResult, cache_key: &str) {
 /// Convert a mock's `error` payload into the `VmError` that the
 /// provider path would have raised, so classification, retry, and
 /// `error_category` all behave identically to a real failure.
-fn mock_error_to_vm_error(err: &MockError) -> VmError {
+fn mock_error_to_vm_error(err: &MockError, mock: &LlmMock) -> VmError {
     let message = mock_error_message(err);
+    let mut dict = BTreeMap::new();
+    dict.put_str("category", err.category.as_str());
+    dict.insert(
+        crate::value::intern_key("provider_usage"),
+        super::usage::ProviderUsageReceipt::new(
+            Some(mock.input_tokens.unwrap_or(0)),
+            Some(mock.output_tokens.unwrap_or(0)),
+            ProviderTelemetry::mock_replay(mock.simulated_cost_usd).mock_replay_cost_usd(),
+            false,
+        )
+        .to_vm_value(),
+    );
     if err.has_provider_envelope() {
         let classified = super::api::classify_llm_error(err.category.clone(), &message);
-        let mut dict = BTreeMap::new();
-        dict.put_str("category", err.category.as_str());
         dict.put_str(
             "kind",
             err.kind
@@ -1020,20 +1030,15 @@ fn mock_error_to_vm_error(err: &MockError) -> VmError {
                 .as_deref()
                 .unwrap_or_else(|| classified.reason.as_str()),
         );
-        dict.put_str("message", message);
         if let Some(status) = err.status {
             dict.put_int("status", i64::from(status));
         }
         if let Some(retry_after_ms) = err.retry_after_ms {
             dict.put_int("retry_after_ms", retry_after_ms as i64);
         }
-        return VmError::Thrown(VmValue::dict(dict));
     }
-
-    VmError::CategorizedError {
-        message,
-        category: err.category.clone(),
-    }
+    dict.put_str("message", message);
+    VmError::Thrown(VmValue::dict(dict))
 }
 
 fn mock_error_message(err: &MockError) -> String {
@@ -1073,7 +1078,7 @@ fn build_scoped_match(
         prefix,
     } = selected;
     let outcome = match &mock.error {
-        Some(err) => Err(mock_error_to_vm_error(err)),
+        Some(err) => Err(mock_error_to_vm_error(err, &mock)),
         None => {
             let mut result = build_mock_result(&mock, match_text.len(), next_tool_call_id);
             result.telemetry.llm_mock_prefix = prefix.map(Box::new);
