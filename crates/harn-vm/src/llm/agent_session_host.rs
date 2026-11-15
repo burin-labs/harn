@@ -10,7 +10,7 @@ use crate::llm::pairing_receipts::ToolResultOrigin;
 use crate::value::VmDictExt;
 use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
 
-use crate::agent_events::{emit_provider_usage, AgentEvent};
+use crate::agent_events::{emit_provider_usage, AgentEvent, ToolBatchDisposition};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 use harn_builtin_macros::harn_builtin;
@@ -1068,10 +1068,25 @@ fn host_agent_session_record_tool_results_builtin(
                 },
             },
         };
-        if ok {
-            successful.push(name.clone());
-        } else {
-            rejected.push(name.clone());
+        let records_outcome = match dict_get(result, "dispatch_receipt") {
+            None | Some(VmValue::Nil) => true,
+            Some(receipt) => {
+                let raw = dict_get(receipt, "disposition").ok_or_else(|| {
+                    VmError::Runtime("tool dispatch receipt is missing its disposition".into())
+                })?;
+                let disposition: ToolBatchDisposition = serde_json::from_value(vm_to_json(raw))
+                    .map_err(|error| {
+                        VmError::Runtime(format!("invalid tool disposition: {error}"))
+                    })?;
+                disposition == ToolBatchDisposition::Executed
+            }
+        };
+        if records_outcome {
+            if ok {
+                successful.push(name.clone());
+            } else {
+                rejected.push(name.clone());
+            }
         }
         // Lethal-trifecta ledger (Layer 1): note that untrusted content entered
         // this session's context so the dispatch gate can require confirmation

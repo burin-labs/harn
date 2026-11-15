@@ -7,7 +7,7 @@ pub(super) fn denied_tool_result(tool_name: &str, reason: impl Into<String>) -> 
     // Argument and resource checks can reject a name the policy permits.
     // Describe this invocation without projecting a new tool-availability policy.
     let allowed = crate::orchestration::current_allowed_tool_names();
-    let permission_hints = if allowed.is_empty() {
+    let permission_hints = if allowed.is_empty() || allowed.iter().any(|name| name == tool_name) {
         String::new()
     } else {
         format!(
@@ -63,7 +63,7 @@ mod tests {
     use crate::orchestration::{pop_execution_policy, push_execution_policy, CapabilityPolicy};
 
     #[test]
-    fn an_argument_denial_preserves_the_authoritative_name_permissions() {
+    fn an_argument_denial_keeps_recovery_scoped_to_the_invocation() {
         push_execution_policy(CapabilityPolicy {
             tools: vec!["denied".into(), "usable".into()],
             ..Default::default()
@@ -71,23 +71,13 @@ mod tests {
         let result = denied_tool_result("denied", "path is outside the workspace");
         pop_execution_policy();
 
-        let available = result["next_step"]
-            .as_str()
-            .unwrap()
-            .split_once("Allowed tool names (permission hints):")
-            .unwrap()
-            .1;
-        assert!(available.contains("denied"));
-        assert!(available.contains("usable"));
+        let recovery = result["next_step"].as_str().unwrap();
+        assert!(!recovery.contains("Allowed tool names"));
+        assert!(recovery.contains("This `denied` invocation was denied"));
+        assert!(recovery.contains("Address the specific reason before retrying"));
+        assert!(recovery.contains("only if resolving that reason requires new permission"));
         assert_eq!(result["reason"], "path is outside the workspace");
-        assert!(result["next_step"]
-            .as_str()
-            .unwrap()
-            .contains("invocation was denied"));
-        assert!(!result["next_step"]
-            .as_str()
-            .unwrap()
-            .contains("tool is not permitted"));
+        assert!(!recovery.contains("tool is not permitted"));
     }
 
     #[test]
@@ -106,5 +96,7 @@ mod tests {
             .1;
         assert!(!hints.contains("denied"));
         assert!(hints.contains("usable"));
+        assert!(hints.contains("These names do not disclose schemas"));
+        assert!(hints.contains("advertised tool-search capability"));
     }
 }
