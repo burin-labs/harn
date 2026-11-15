@@ -231,45 +231,6 @@ pub(super) fn scan_command_risk_scan_json(
     scan
 }
 
-/// Project exit proof from the same request resolver that owns execution mode
-/// and shell identity. Display text is never reparsed as an argv request.
-fn process_exit_evidence(ctx: &JsonValue) -> JsonValue {
-    let unmeasured = || serde_json::json!({"scope": "unmeasured", "reason": "syntax"});
-    match request_mode(ctx) {
-        Some("argv") => {
-            let Ok(Some(argv)) = request_argv(ctx) else {
-                return unmeasured();
-            };
-            // Use the canonical wrapper decoder, then keep explicit shells
-            // unmeasured rather than infer their child statuses from argv.
-            let source = argv
-                .iter()
-                .map(|word| shell_words::quote(word))
-                .collect::<Vec<_>>()
-                .join(" ");
-            let shape = super::catastrophic::shell_command_shape(
-                crate::shells::ShellDialect::Posix,
-                &source,
-            );
-            serde_json::json!({"scope": shape.exit_evidence.scope, "reason": shape.exit_evidence.reason})
-        }
-        Some("shell" | "auto") => {
-            let resolution = request_shell_dialect(ctx);
-            let (Some(dialect), Some(shell)) = (resolution.dialect, resolution.shell_id) else {
-                return unmeasured();
-            };
-            let source = ctx
-                .pointer("/request/command")
-                .and_then(JsonValue::as_str)
-                .unwrap_or_default();
-            let shape = super::catastrophic::shell_command_shape(dialect, source)
-                .with_shell(&shell, source);
-            serde_json::json!({"scope": shape.exit_evidence.scope, "reason": shape.exit_evidence.reason})
-        }
-        _ => unmeasured(),
-    }
-}
-
 /// Workspace roots the catastrophic floor uses to judge whether an `rm -rf`
 /// target escapes the workspace. Mirrors the roots the context builder already
 /// populates (`command_context_json`): the policy roots when set, otherwise the

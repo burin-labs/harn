@@ -99,6 +99,7 @@ catalog_entries! {
     "command/output" => "stdlib/command/output.harn",
     "command/results" => "stdlib/command/results.harn",
     "command/shell" => "stdlib/command/shell.harn",
+    "command/syntax" => "stdlib/command/syntax.harn",
     "command/step_ref" => "stdlib/command/step_ref.harn",
     "runner_pool" => "stdlib/stdlib_runner_pool.harn",
     "verification_types" => "stdlib/verification_types.harn",
