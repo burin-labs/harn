@@ -276,13 +276,20 @@ fn catalog_projection(source: string, outputs: dict<string, string>) -> string {
   return source.replace(anchor, "${anchor}${block}")
 }
 
-fn check_output_paths(fs: HarnessFs, root: string) -> nil {
+fn check_output_paths(fs: HarnessFs, root: string, outputs: dict<string, string>) -> nil {
   let path = root
   for segment in OUTPUT_ROOT.split("/") {
     path = path_join(path, segment)
     if visible_exists(fs, path) {
       require !fs.stat(path, {follow_symlinks: false}).is_symlink,
         "CLI localization output must not traverse symlinks: ${path}"
+    }
+  }
+  for relative in outputs.keys().sorted() {
+    const target = path_join(root, relative)
+    if visible_exists(fs, target) {
+      require !fs.stat(target, {follow_symlinks: false}).is_symlink,
+        "CLI localization output must not be a symlink: ${relative}"
     }
   }
 }
@@ -295,7 +302,7 @@ fn publish(
   previous: list<string>,
   check: bool,
 ) -> nil {
-  check_output_paths(harness.fs, root)
+  check_output_paths(harness.fs, root, outputs)
   const temporary = harness.fs.mkdtemp_in_workspace("harn-cli-localization-")
   try {
     for (relative, contents) in outputs.iter() {

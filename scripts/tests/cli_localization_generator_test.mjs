@@ -98,7 +98,7 @@ fn main(harness: Harness) {
   }
 });
 
-test("generator rejects every unexpected output and retires only registered generated files", () => {
+test("generator rejects every unexpected output and retires only registered generated files", (t) => {
   assert.ok(process.env.HARN_BIN, "owning Make target supplies the actual CLI");
   const binary = fs.realpathSync(process.env.HARN_BIN);
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "harn-cli-generator-test-")));
@@ -243,6 +243,34 @@ test("generator rejects every unexpected output and retires only registered gene
     const clean = run();
     assert.equal(clean.status, 0, clean.stderr);
     assert.equal(JSON.parse(clean.stdout).measuredCalls, measured.expectedCalls);
+
+    const leafFindings = [];
+    for (const relative of [`${output}.harn`, catalog]) {
+      const leaf = path.join(root, relative);
+      const original = fs.readFileSync(leaf, "utf8");
+      const target = path.join(root, "preserved-expected-leaf.txt");
+      const targetText = relative === catalog
+        ? original.replace(/    \/\/ BEGIN GENERATED CLI LOCALIZATION MODULES\n[\s\S]*?    \/\/ END GENERATED CLI LOCALIZATION MODULES\n/, "")
+        : foreignText;
+      assert.notEqual(targetText, original, "a followed write must change the preserved target");
+      for (const check of [true, false]) {
+        fs.writeFileSync(target, targetText);
+        fs.unlinkSync(leaf);
+        fs.symlinkSync(target, leaf);
+        const rejected = run(check);
+        leafFindings.push({relative, check, status: rejected.status,
+          ownerRefused: /CLI localization output must not be a symlink/.test(rejected.stderr),
+          targetPreserved: fs.readFileSync(target, "utf8") === targetText});
+        fs.unlinkSync(leaf);
+        fs.writeFileSync(leaf, original);
+      }
+    }
+    t.diagnostic(`Expected output leaf controls: ${JSON.stringify(leafFindings)}`);
+    for (const finding of leafFindings) {
+      assert.notEqual(finding.status, 0, `expected output symlink must refuse: ${finding.relative}`);
+      assert.equal(finding.ownerRefused, true, `the output owner must refuse the link: ${finding.relative}`);
+      assert.equal(finding.targetPreserved, true, `expected output symlink target must be preserved: ${finding.relative}`);
+    }
   } finally {
     fs.rmSync(root, { recursive: true });
   }
