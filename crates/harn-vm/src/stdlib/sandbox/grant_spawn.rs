@@ -189,8 +189,14 @@ pub(crate) fn grant_spawns_root() -> PathBuf {
 }
 
 thread_local! {
-    static OWN_SPAWN_LAUNCHING: std::cell::RefCell<Option<PathBuf>> =
+    static OWN_SPAWN_LAUNCHING: std::cell::RefCell<Option<OwnSpawnAuthority>> =
         const { std::cell::RefCell::new(None) };
+}
+
+struct OwnSpawnAuthority {
+    read_root: PathBuf,
+    #[cfg(target_os = "macos")]
+    write_roots: Vec<PathBuf>,
 }
 
 /// The per-spawn root every confined child is denied. A process with neither a
@@ -219,7 +225,17 @@ fn canonical_spawns_root(home: &Path) -> PathBuf {
 /// profile. Every other spawn's directory stays denied to it.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn own_spawn_read_root() -> Option<PathBuf> {
-    OWN_SPAWN_LAUNCHING.with(|own| own.borrow().clone())
+    OWN_SPAWN_LAUNCHING.with(|own| own.borrow().as_ref().map(|own| own.read_root.clone()))
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn own_spawn_write_roots() -> Vec<PathBuf> {
+    OWN_SPAWN_LAUNCHING.with(|own| {
+        own.borrow()
+            .as_ref()
+            .map(|own| own.write_roots.clone())
+            .unwrap_or_default()
+    })
 }
 
 /// Re-allows one per-spawn directory to the program launched on this thread
@@ -228,7 +244,20 @@ pub struct OwnSpawnLaunch(());
 
 impl OwnSpawnLaunch {
     pub(crate) fn begin(dir: &Path) -> Self {
-        OWN_SPAWN_LAUNCHING.with(|own| *own.borrow_mut() = Some(dir.to_path_buf()));
+        Self::begin_with_writes(dir, &[])
+    }
+
+    pub(crate) fn begin_with_writes(dir: &Path, write_roots: &[PathBuf]) -> Self {
+        assert!(write_roots
+            .iter()
+            .all(|root| root != dir && root.starts_with(dir)));
+        OWN_SPAWN_LAUNCHING.with(|own| {
+            *own.borrow_mut() = Some(OwnSpawnAuthority {
+                read_root: dir.to_path_buf(),
+                #[cfg(target_os = "macos")]
+                write_roots: write_roots.to_vec(),
+            })
+        });
         Self(())
     }
 }

@@ -1,4 +1,4 @@
-//! How a granted `git fetch`, `git push` or `git ls-remote` gets an HTTPS
+//! How a granted `git clone`, `git fetch`, `git push` or `git ls-remote` gets an HTTPS
 //! login without running anything the repository names.
 //!
 //! A `for_command: "git"` grant gives git a github.com login. Git reads the
@@ -35,17 +35,23 @@
 //!   recursion, automatic gc and prompts are off.
 //! - Only macOS grants it: a same-user process's access to the granted git's
 //!   memory is not yet measured on Linux, and Windows has no confinement.
-//! - Only `fetch`, `push` and `ls-remote` with known options are granted. Any
-//!   other subcommand (`pull`, whose merge runs filters, and `clone`, which
-//!   writes a repository config git then reads), an option that names a
-//!   program or writes config, and a remote that is not copied runs without
-//!   the login.
+//! - A clone transfers into a separate private Git directory with an empty
+//!   template. After the child is reaped, only that directory becomes the
+//!   destination's ordinary `.git`; controller config and the login socket
+//!   remain private.
+//! - Only `clone`, `fetch`, `push` and `ls-remote` with known options are granted.
+//!   Other subcommands, options naming programs or writing config, and remotes
+//!   that are not copied run without the login.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use crate::stdlib::process::{ExecProfile, SeedRequest, Seeded};
+
+#[path = "git_network/clone.rs"]
+mod clone;
+pub(crate) use clone::CloneCompletion;
 
 pub(crate) const GIT_PROFILE: ExecProfile = ExecProfile {
     program: "git",
@@ -92,6 +98,7 @@ const COPIED_FILES: &[&str] = &["packed-refs", "shallow"];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Command {
+    Clone,
     Fetch,
     Push,
     LsRemote,
@@ -106,6 +113,7 @@ struct Invocation<'a> {
     all: bool,
     /// A single-repository fetch's refspecs.
     refspecs: Vec<&'a str>,
+    destination: Option<&'a str>,
 }
 
 /// Flags each subcommand may take with the login: none runs a program, names
@@ -190,11 +198,20 @@ const LS_REMOTE_FLAGS: &[&str] = &[
     "--exit-code",
 ];
 const LS_REMOTE_VALUES: &[&str] = &["--sort", "-o", "--server-option"];
+const CLONE_FLAGS: &[&str] = &[
+    "-n",
+    "--no-checkout",
+    "--single-branch",
+    "--no-single-branch",
+    "--no-tags",
+];
+const CLONE_VALUES: &[&str] = &["-b", "--branch", "--depth"];
 
 /// The granted shape of `args`, or `None` when they run without the login.
 fn parse(args: &[String]) -> Option<Invocation<'_>> {
     let (first, rest) = args.split_first()?;
     let (command, flags, values) = match first.as_str() {
+        "clone" => (Command::Clone, CLONE_FLAGS, CLONE_VALUES),
         "fetch" => (Command::Fetch, FETCH_FLAGS, FETCH_VALUES),
         "push" => (Command::Push, PUSH_FLAGS, PUSH_VALUES),
         "ls-remote" => (Command::LsRemote, LS_REMOTE_FLAGS, LS_REMOTE_VALUES),
@@ -247,6 +264,19 @@ fn parse(args: &[String]) -> Option<Invocation<'_>> {
         }
     }
     let mut refspecs = Vec::new();
+    let destination = if command == Command::Clone {
+        if !(1..=2).contains(&positionals.len())
+            || granted_url_path(positionals[0]).is_none()
+            || positionals
+                .get(1)
+                .is_some_and(|destination| destination.is_empty())
+        {
+            return None;
+        }
+        positionals.get(1).copied()
+    } else {
+        None
+    };
     let repositories = match (command, all, multiple) {
         (Command::Fetch, true, _) => {
             if !positionals.is_empty() {
@@ -266,6 +296,7 @@ fn parse(args: &[String]) -> Option<Invocation<'_>> {
         repositories,
         all,
         refspecs,
+        destination,
     })
 }
 
@@ -530,6 +561,7 @@ fn reached(
                 .or_else(|| projected(projection, "remote", None, "pushdefault"))
                 .or_else(|| branch_key("remote")),
             Command::Fetch | Command::LsRemote => branch_key("remote"),
+            Command::Clone => return None,
         };
         vec![default.unwrap_or_else(|| "origin".to_string())]
     } else {
@@ -596,12 +628,15 @@ fn seed_network_spawn(request: &SeedRequest<'_>) -> std::io::Result<Option<Seede
     }
     let dir = request.dir;
     super::grant_spawn::write_private_file(&dir.join(GLOBAL_CONFIG), "")?;
-    let repository = Repository::discover(request.cwd)?;
     // Linux is not granted until a same-user process's access to the granted
     // git's memory is measured; Windows has no confinement for it.
     if !cfg!(target_os = "macos") {
         return Ok(None);
     }
+    if invocation.command == Command::Clone {
+        return clone::seed(request, &invocation);
+    }
+    let repository = Repository::discover(request.cwd)?;
     let (projection, head, remotes, urls) = match &repository {
         Some(repository) => {
             let Some((projection, every_remote_copied)) =
@@ -658,6 +693,7 @@ fn seed_network_spawn(request: &SeedRequest<'_>) -> std::io::Result<Option<Seede
             ),
         ],
         hold: Some(socket),
+        ..Seeded::default()
     }))
 }
 

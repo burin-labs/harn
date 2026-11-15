@@ -490,7 +490,10 @@ pub(super) fn open_dir_absolute(path: &Path) -> io::Result<std::os::fd::OwnedFd>
 }
 
 #[cfg(unix)]
-pub(super) fn open_dir_at(parent_fd: libc::c_int, name: &str) -> io::Result<std::os::fd::OwnedFd> {
+pub(super) fn open_dir_at(
+    parent_fd: libc::c_int,
+    name: impl AsRef<std::ffi::OsStr>,
+) -> io::Result<std::os::fd::OwnedFd> {
     use std::os::fd::{FromRawFd, OwnedFd};
 
     let c_name = c_name(name)?;
@@ -510,7 +513,7 @@ pub(super) fn open_dir_at(parent_fd: libc::c_int, name: &str) -> io::Result<std:
 #[cfg(unix)]
 pub(super) fn openat_file(
     parent_fd: libc::c_int,
-    name: &str,
+    name: impl AsRef<std::ffi::OsStr>,
     flags: libc::c_int,
     mode: libc::mode_t,
 ) -> io::Result<std::fs::File> {
@@ -525,7 +528,10 @@ pub(super) fn openat_file(
 }
 
 #[cfg(unix)]
-pub(super) fn mkdirat_name(parent_fd: libc::c_int, name: &str) -> io::Result<()> {
+pub(super) fn mkdirat_name(
+    parent_fd: libc::c_int,
+    name: impl AsRef<std::ffi::OsStr>,
+) -> io::Result<()> {
     let c_name = c_name(name)?;
     let rc = unsafe { libc::mkdirat(parent_fd, c_name.as_ptr(), 0o777) };
     if rc != 0 {
@@ -577,8 +583,10 @@ pub(super) fn sync_dir_fd(fd: libc::c_int) -> bool {
 }
 
 #[cfg(unix)]
-pub(super) fn c_name(name: &str) -> io::Result<std::ffi::CString> {
-    std::ffi::CString::new(name).map_err(|_| {
+pub(super) fn c_name(name: impl AsRef<std::ffi::OsStr>) -> io::Result<std::ffi::CString> {
+    use std::os::unix::ffi::OsStrExt;
+    let name = name.as_ref();
+    std::ffi::CString::new(name.as_bytes()).map_err(|_| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("path component contains NUL: {name:?}"),

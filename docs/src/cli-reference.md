@@ -464,16 +464,31 @@ the file for as long as the granted `gh` runs.
 
 A `for=git` grant must expose `GH_TOKEN` or `GITHUB_TOKEN`, and reaches git
 only as an HTTPS login for github.com repositories. It is granted on macOS
-only; elsewhere git runs without it. Only `git fetch`, `git push` and
-`git ls-remote` with known options receive it. Every other subcommand
-(including `pull`, `clone` and aliases), a global option before the
+only; elsewhere git runs without it. Only `git clone`, `git fetch`, `git push`
+and `git ls-remote` with known options receive it. Every other subcommand
+(including `pull` and aliases), a global option before the
 subcommand, and an option that names a program or writes configuration
 (`--upload-pack`, `--receive-pack`, `--exec`, `--signed`, `-u`/`--set-upstream`,
 `--recurse-submodules`, `--filter`, fetch `--tags`, and the shallow-history
-options `--depth`, `--deepen`, `--shallow-since`, `--shallow-exclude`,
-`--unshallow` and `--update-shallow`) run without the login.
+fetch options `--depth`, `--deepen`, `--shallow-since`, `--shallow-exclude`,
+`--unshallow` and `--update-shallow`) run without the login. Clone accepts
+`--branch`/`-b`, `--depth`, `--single-branch`, `--no-single-branch`, `--no-tags`
+and `--no-checkout`/`-n`, in addition to the common progress, quiet and address
+family options. Clone options `--upload-pack`/`-u`, `--template`,
+`--config`/`-c`, `--recurse-submodules`, `--filter` and `--separate-git-dir`
+receive no login.
 
-A granted git never opens the repository's git directory as its own.
+A granted clone accepts one plain HTTPS github.com repository URL and an
+optional destination. Git transfers into a private Git directory with an
+empty template. After Git exits successfully, Harn moves that repository into
+the destination's ordinary `.git` directory before reporting success. The
+result contains Git's normal repository config, with no login, credential
+helper or Harn control setting. The credential socket and control config stay
+outside the cloned repository. If the destination's Git marker changes before
+handoff, Harn refuses to replace it.
+
+For fetch, push and ls-remote, a granted Git never opens the repository's Git
+directory as its own.
 `GIT_DIR` is the private per-spawn directory, whose `config` Harn writes;
 `GIT_CONFIG_NOSYSTEM` is set and `GIT_CONFIG_GLOBAL` is an empty file. So no
 repository, global or system setting reaches it: no hooks, credential

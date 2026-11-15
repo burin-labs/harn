@@ -236,19 +236,23 @@ impl Fixture {
                     let dir = spawn
                         .env
                         .iter()
-                        .find(|(key, _)| key == "GIT_DIR")
-                        .map(|(_, dir)| PathBuf::from(dir))
+                        .find(|(key, _)| key == "GIT_CONFIG_GLOBAL")
+                        .map(|(_, file)| PathBuf::from(file).parent().unwrap().to_path_buf())
                         .expect("a granted git runs in its per-spawn directory");
                     plant(&dir);
                     let _launch = spawn.launching();
                     let mut command = std::process::Command::new(&spawn.program);
-                    command.args(&args).current_dir(self.ws());
+                    command.args(&spawn.args).current_dir(self.ws());
                     for key in &spawn.remove {
                         command.env_remove(key);
                     }
                     command.envs(spawn.env.iter().map(|(key, value)| (key, value)));
                     let output = command.output().unwrap();
+                    drop(_launch);
                     assert_no_login_under(&dir);
+                    spawn
+                        .complete(output.status.success())
+                        .expect("complete granted spawn");
                     output
                 });
         for (key, _) in ambient {
@@ -259,6 +263,34 @@ impl Fixture {
 
     fn requests(&self) -> Vec<String> {
         self.seen.try_iter().collect()
+    }
+
+    fn publish_working_file(&self) {
+        let seed = self.root.path().join("seed");
+        std::fs::write(seed.join("checked-out.txt"), b"nonempty clone payload\n").unwrap();
+        ok(&seed, &["add", "checked-out.txt"]);
+        ok(
+            &seed,
+            &[
+                "-c",
+                "user.name=f",
+                "-c",
+                "user.email=f@f",
+                "commit",
+                "-q",
+                "-m",
+                "payload",
+            ],
+        );
+        ok(
+            &seed,
+            &[
+                "push",
+                "-q",
+                self.root.path().join("server/o/r.git").to_str().unwrap(),
+                "main",
+            ],
+        );
     }
 }
 
@@ -596,9 +628,31 @@ fn only_network_subcommands_with_known_options_are_granted() {
             false
         ))
     );
+    assert_eq!(
+        granted(&["clone", "https://github.com/o/r"]),
+        Some((Command::Clone, vec!["https://github.com/o/r".into()], false))
+    );
     for refused in [
         &["pull"][..],
-        &["clone", "https://github.com/o/r"],
+        &["clone", "https://github.com/o/r", "one", "two"],
+        &["clone", "--upload-pack=x", "https://github.com/o/r"],
+        &["clone", "-ux", "https://github.com/o/r"],
+        &["clone", "--template=x", "https://github.com/o/r"],
+        &[
+            "clone",
+            "--config=credential.helper=x",
+            "https://github.com/o/r",
+        ],
+        &[
+            "clone",
+            "-c",
+            "credential.helper=x",
+            "https://github.com/o/r",
+        ],
+        &["clone", "--recurse-submodules", "https://github.com/o/r"],
+        &["clone", "--filter=blob:none", "https://github.com/o/r"],
+        &["clone", "--separate-git-dir=x", "https://github.com/o/r"],
+        &["clone", "ssh://github.com/o/r"],
         &["-c", "credential.helper=!x", "fetch"],
         &["fetch", "--upload-pack=x"],
         &["fetch", "--recurse-submodules"],
@@ -821,13 +875,14 @@ fn a_linked_shallow_or_tracking_ref_is_refused() {
 /// above cannot see a profile that leaves git unable to open its own git
 /// directory or ask its socket.
 #[test]
-fn a_confined_granted_fetch_and_push_land() {
+fn a_confined_granted_fetch_push_and_clone_land() {
     use crate::orchestration::{
         pop_execution_policy, push_execution_policy, CapabilityPolicy, ProcessSandboxPolicy,
         ProcessSandboxPreset, SandboxProfile,
     };
     let _granted = Granted::enter();
     let fixture = Fixture::new();
+    fixture.publish_working_file();
     let ws = fixture.ws();
     push_execution_policy(CapabilityPolicy {
         workspace_roots: vec![std::fs::canonicalize(fixture.root.path())
@@ -865,7 +920,10 @@ fn a_confined_granted_fetch_and_push_land() {
             closed_env: true,
             ..Default::default()
         };
-        crate::stdlib::sandbox::command_output(&spawn.program, &args, &config)
+        let output = crate::stdlib::sandbox::command_output(&spawn.program, &spawn.args, &config);
+        drop(_launch);
+        spawn.complete(output.as_ref().is_ok_and(|output| output.status.success()))?;
+        output
     };
     // A host that cannot confine (a hosted Mac whose SIP allows DTrace) must
     // refuse with its measured reason; there is nothing further to prove.
@@ -880,5 +938,180 @@ fn a_confined_granted_fetch_and_push_land() {
     assert_eq!(
         ok(&server, &["rev-parse", "refs/heads/confined"]),
         ok(&ws, &["rev-parse", "HEAD"])
+    );
+    assert_succeeded(
+        &confined(&["clone", "--branch", "main", &fixture.url, "cloned"]).expect("confined clone"),
+    );
+    let cloned = ws.join("cloned");
+    assert!(std::fs::symlink_metadata(cloned.join(".git"))
+        .unwrap()
+        .is_dir());
+    assert_eq!(
+        std::fs::read(cloned.join("checked-out.txt")).unwrap(),
+        b"nonempty clone payload\n"
+    );
+    assert_eq!(
+        ok(&cloned, &["rev-parse", "HEAD"]),
+        ok(&server, &["rev-parse", "refs/heads/main"])
+    );
+    assert_eq!(
+        ok(&cloned, &["remote", "get-url", "origin"]).trim(),
+        fixture.url
+    );
+    assert_eq!(
+        git(
+            &cloned,
+            &["config", "--local", "--get", "credential.helper"]
+        )
+        .status
+        .code(),
+        Some(1)
+    );
+    assert_eq!(
+        git(&cloned, &["config", "--local", "--get", "core.hooksPath"])
+            .status
+            .code(),
+        Some(1)
+    );
+    let config = std::fs::read_to_string(cloned.join(".git/config")).unwrap();
+    assert!(!config.contains("grant-spawns"));
+    assert_no_login_under(&cloned);
+}
+
+#[test]
+fn granted_clone_ignores_hostile_templates_helpers_proxy_and_tracing() {
+    let _granted = Granted::enter();
+    let fixture = Fixture::new();
+    fixture.publish_working_file();
+    let root = fixture.root.path();
+    let canary = fixture.canary();
+    let template = root.join("hostile-template");
+    std::fs::create_dir_all(template.join("hooks")).unwrap();
+    let hook = template.join("hooks/post-checkout");
+    std::fs::write(
+        &hook,
+        format!("#!/bin/sh\nprintf 'hook\\n' >> '{}'\n", canary.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let config = root.join("hostile-global");
+    let store = root.join("plain-store");
+    let stored = fixture
+        .url
+        .replacen("://", &format!("://{}:{TOKEN}@", super::LOGIN_USER), 1);
+    std::fs::write(&store, format!("{stored}\n")).unwrap();
+    let record = format!(
+        "!f() {{ echo helper >> '{0}'; cat >> '{0}'; }}; f",
+        canary.display()
+    );
+    for value in [format!("store --file={}", store.display()), record] {
+        ok(
+            root,
+            &[
+                "config",
+                "--file",
+                config.to_str().unwrap(),
+                "--add",
+                "credential.helper",
+                &value,
+            ],
+        );
+    }
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let proxy = format!("http://{}", listener.local_addr().unwrap());
+    let dialed = record_connections(listener);
+    ok(
+        root,
+        &[
+            "config",
+            "--file",
+            config.to_str().unwrap(),
+            "http.proxy",
+            &proxy,
+        ],
+    );
+    ok(
+        root,
+        &[
+            "config",
+            "--file",
+            config.to_str().unwrap(),
+            "http.sslVerify",
+            "false",
+        ],
+    );
+    let ambient = [
+        ("GIT_CONFIG_GLOBAL", config.to_str().unwrap()),
+        ("GIT_TEMPLATE_DIR", template.to_str().unwrap()),
+        ("GIT_TRACE", "1"),
+        ("GIT_TRACE_CURL", "1"),
+        ("GIT_TRACE_REDACT", "0"),
+        ("GIT_SSL_NO_VERIFY", "1"),
+        ("http_proxy", proxy.as_str()),
+        ("https_proxy", proxy.as_str()),
+        ("no_proxy", ""),
+    ];
+    assert_succeeded(
+        &fixture
+            .granted(
+                &["clone", "--branch", "main", &fixture.url, "safe"],
+                &ambient,
+            )
+            .expect("clone granted"),
+    );
+    let safe = fixture.ws().join("safe");
+    assert_eq!(
+        std::fs::read(safe.join("checked-out.txt")).unwrap(),
+        b"nonempty clone payload\n"
+    );
+    assert!(!safe.join(".git/hooks/post-checkout").exists());
+    assert!(!canary.exists());
+    assert!(dialed.try_recv().is_err());
+    assert_no_login_under(&safe);
+    assert!(fixture
+        .requests()
+        .iter()
+        .any(|seen| seen == &format!("Basic {}", base64_login())));
+
+    let plain = |destination: &str, with_proxy: bool| {
+        let mut command = std::process::Command::new(git_program());
+        command
+            .args(["clone", "--branch", "main", &fixture.url, destination])
+            .current_dir(fixture.ws());
+        command.envs(ambient.iter().copied());
+        command
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_TERMINAL_PROMPT", "0");
+        if !with_proxy {
+            command.env_remove("http_proxy").env_remove("https_proxy");
+        }
+        command.output().unwrap()
+    };
+    assert!(!plain("plain-proxy", true).status.success());
+    assert!(
+        dialed.recv().is_ok(),
+        "the same ambient proxy is reachable by plain Git"
+    );
+    ok(
+        root,
+        &[
+            "config",
+            "--file",
+            config.to_str().unwrap(),
+            "--unset",
+            "http.proxy",
+        ],
+    );
+    let traced = plain("plain-template", false);
+    assert!(
+        traced.status.success(),
+        "{}",
+        String::from_utf8_lossy(&traced.stderr)
+    );
+    let recorded = std::fs::read_to_string(&canary).unwrap();
+    assert!(recorded.contains("helper") && recorded.contains(TOKEN) && recorded.contains("hook"));
+    assert!(
+        String::from_utf8_lossy(&traced.stderr).contains(&base64_login()),
+        "plain tracing must reveal the synthetic login"
     );
 }

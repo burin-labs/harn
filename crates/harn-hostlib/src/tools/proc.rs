@@ -195,7 +195,9 @@ pub(crate) fn run_with_filter(
         program: granted
             .as_ref()
             .map_or_else(|| req.program.clone(), |granted| granted.program.clone()),
-        args: req.args.clone(),
+        args: granted
+            .as_ref()
+            .map_or_else(|| req.args.clone(), |granted| granted.args.clone()),
         cwd: Some(effective_cwd.clone()),
         env,
         env_remove,
@@ -403,6 +405,14 @@ pub(crate) fn run_with_filter(
     let artifacts = persist_artifacts(&command_id, &stdout_bytes, &stderr_bytes, None)?;
     let inline = inline_output(&stdout_bytes, &stderr_bytes, req.capture);
 
+    if let Some(granted) = granted {
+        granted
+            .complete(command_status == CommandStatus::Completed && exit_code == 0)
+            .map_err(|error| HostlibError::Backend {
+                builtin: req.builtin,
+                message: error.to_string(),
+            })?;
+    }
     Ok(SpawnOutcome {
         verifier_receipt: (!timed_out && !drain_interrupted)
             .then(|| handle.verifier_execution_receipt())
