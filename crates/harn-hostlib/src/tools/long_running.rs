@@ -1152,10 +1152,10 @@ fn cancel_handle_scoped(
             .lock()
             .expect("long-running handle store poisoned");
         if session_id.is_some_and(|session| {
-            !store
+            store
                 .entries
                 .get(handle_id)
-                .is_some_and(|entry| entry.session_id == session)
+                .is_none_or(|entry| entry.session_id != session)
         }) {
             return CancelOutcome {
                 found: false,
