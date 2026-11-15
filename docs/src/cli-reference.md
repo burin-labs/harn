@@ -484,18 +484,18 @@ including an empty directory, is refused before the login is exposed and is
 left unchanged. Git transfers the complete checkout into a private directory
 with an empty template. After Git exits successfully, Harn gives that checkout
 an ordinary `.git` directory and publishes it to a new destination before
-reporting success. On the same filesystem, publication uses an exclusive
-directory rename. The
-result contains Git's normal repository config, with no login, credential
-helper or Harn control setting. The credential socket and control config stay
+reporting success. Publication uses an exclusive directory rename, so the
+destination must share a filesystem with Harn's private transfer directory.
+A different filesystem is refused before a login socket or child is prepared.
+Choose a destination on the same filesystem, or configure `HARN_HOME` in a
+trusted directory on the destination filesystem, outside every workspace and
+process-writable root. The result contains Git's normal repository config,
+with no login, credential helper or Harn control setting. The credential socket and control config stay
 outside the cloned repository. A destination created during the transfer is
 preserved and completion is refused. A Git child that fails or is cancelled
-creates no public destination. Across filesystems, Harn exclusively reserves
-the final directory and copies through its open handle. Tracked symlinks are
-copied as links; Git metadata still requires regular files and directories.
-An incomplete cross-filesystem handoff can leave a partial destination even
-when Git exited with code zero. Harn reports the completion failure and retains
-that directory or its replacement; inspect its contents before retrying.
+creates no public destination. Tracked symlinks remain links; Git metadata
+requires regular files and directories. If the destination filesystem changes
+during transfer, completion is refused without copying into a public directory.
 The same handoff runs for foreground, background and automatically backgrounded
 commands. A failed handoff reports a blocked command even if Git itself exited
 with code zero; it does not publish a successful command receipt.

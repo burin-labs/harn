@@ -24,10 +24,6 @@ pub(crate) struct CloneCompletion;
 thread_local! {
     static BEFORE_PUBLICATION: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
         const { std::cell::RefCell::new(None) };
-    static BEFORE_COPY: std::cell::RefCell<Option<Box<dyn FnOnce(&std::ffi::OsStr)>>> =
-        const { std::cell::RefCell::new(None) };
-    static AFTER_COPY: std::cell::RefCell<Option<Box<dyn FnOnce(&std::ffi::OsStr)>>> =
-        const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(unix)]
@@ -37,6 +33,7 @@ pub(super) fn seed(
 ) -> io::Result<Option<Seeded>> {
     use crate::stdlib::sandbox::{paths::normalize_for_policy, FsAccess};
     use std::os::fd::AsRawFd;
+    use std::os::unix::fs::MetadataExt;
 
     let url = invocation.repositories[0];
     let default_name = super::granted_url_path(url)
@@ -74,6 +71,10 @@ pub(super) fn seed(
             io::ErrorKind::AlreadyExists,
             "a granted clone requires a new destination",
         ));
+    }
+    let destination_device = std::fs::File::from(parent.try_clone()?).metadata()?.dev();
+    if destination_device != std::fs::metadata(request.dir)?.dev() {
+        return Err(cross_filesystem_refusal());
     }
     let repository = request.dir.join("repository");
     let worktree = request.dir.join("worktree");
@@ -146,58 +147,21 @@ impl CloneCompletion {
                 hook();
             }
         });
-        match scoped_fs::renameat_name_noreplace(
+        scoped_fs::renameat_name_noreplace(
             private.as_raw_fd(),
             "worktree",
             parent.as_raw_fd(),
             &name,
-        ) {
-            Ok(()) => {}
-            Err(error) if error.raw_os_error() == Some(libc::EXDEV) => {
-                self.copy_new_checkout(parent.as_raw_fd(), name.as_ref())?;
+        )
+        .map_err(|error| {
+            if error.raw_os_error() == Some(libc::EXDEV) {
+                cross_filesystem_refusal()
+            } else {
+                error
             }
-            Err(error) => return Err(error),
-        }
+        })?;
         scoped_fs::sync_dir_fd(parent.as_raw_fd());
         Ok(())
-    }
-
-    #[cfg(unix)]
-    fn copy_new_checkout(&self, parent_fd: libc::c_int, name: &std::ffi::OsStr) -> io::Result<()> {
-        use std::os::fd::AsRawFd;
-
-        // Reserve the final name once. There is no mutable public source name
-        // to rename, and error cleanup never deletes this name or its contents.
-        scoped_fs::mkdirat_name(parent_fd, name)?;
-        let copy = || -> io::Result<()> {
-            let directory = std::fs::File::from(scoped_fs::open_dir_at(parent_fd, name)?);
-            #[cfg(test)]
-            BEFORE_COPY.with(|hook| {
-                if let Some(hook) = hook.borrow_mut().take() {
-                    hook(name);
-                }
-            });
-            walk_tree(
-                &self.worktree,
-                Some(directory.try_clone()?.into()),
-                TreeContents::Worktree,
-            )?;
-            #[cfg(test)]
-            AFTER_COPY.with(|hook| {
-                if let Some(hook) = hook.borrow_mut().take() {
-                    hook(name);
-                }
-            });
-            if !scoped_fs::entry_matches_open_fd(parent_fd, name, directory.as_raw_fd())? {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "clone destination changed during completion",
-                ));
-            }
-            Ok(())
-        };
-        copy().map_err(|error| io::Error::new(error.kind(),
-            format!("partial clone destination retained; inspect its contents before retrying: {error}")))
     }
 
     #[cfg(unix)]
@@ -228,7 +192,7 @@ impl CloneCompletion {
                 "clone Git directory marker changed",
             ));
         }
-        walk_tree(&self.repository, None, TreeContents::GitMetadata)?;
+        validate_git_directory(&self.repository)?;
         let private =
             scoped_fs::open_dir_absolute(self.repository.parent().expect("private Git directory"))?;
         // This marker and its parent remain inside the grant's protected scope.
@@ -252,111 +216,55 @@ impl CloneCompletion {
 }
 
 #[cfg(unix)]
-#[derive(Clone, Copy)]
-enum TreeContents {
-    GitMetadata,
-    Worktree,
+fn cross_filesystem_refusal() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::Unsupported,
+        "granted clone destination must share a filesystem with Harn's private transfer directory; choose a destination on that filesystem or place HARN_HOME in a trusted directory on the destination filesystem",
+    )
 }
 
-/// One traversal validates metadata or copies a checkout. Worktree symlinks
-/// retain their link text; Git metadata must contain only directories and files.
+/// Git metadata must contain only regular files and directories. Worktree
+/// symlinks remain untouched when the complete private checkout is renamed.
 #[cfg(unix)]
-fn walk_tree(
-    source: &Path,
-    destination: Option<std::os::fd::OwnedFd>,
-    contents: TreeContents,
-) -> io::Result<()> {
+fn validate_git_directory(source: &Path) -> io::Result<()> {
     use std::os::fd::AsRawFd;
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     struct Frame {
         entries: std::fs::ReadDir,
         source: std::os::fd::OwnedFd,
-        destination: Option<std::os::fd::OwnedFd>,
-        mode: u32,
-        metadata: bool,
-        worktree_root: bool,
     }
     impl Frame {
-        fn new(
-            source: &Path,
-            destination: Option<std::os::fd::OwnedFd>,
-            metadata: bool,
-            worktree_root: bool,
-        ) -> io::Result<Self> {
-            let source_fd = scoped_fs::open_dir_absolute(source)?;
-            let source_file = std::fs::File::from(source_fd);
-            let mode = source_file.metadata()?.mode() & 0o777;
+        fn new(source: &Path) -> io::Result<Self> {
             Ok(Self {
                 entries: std::fs::read_dir(source)?,
-                source: source_file.into(),
-                destination,
-                mode,
-                metadata,
-                worktree_root,
+                source: scoped_fs::open_dir_absolute(source)?,
             })
         }
     }
-    let metadata = matches!(contents, TreeContents::GitMetadata);
-    let mut frames = vec![Frame::new(source, destination, metadata, !metadata)?];
+    let mut frames = vec![Frame::new(source)?];
     while !frames.is_empty() {
         let Some(entry) = frames.last_mut().unwrap().entries.next() else {
-            let frame = frames.pop().unwrap();
-            if let Some(destination) = frame.destination {
-                let directory = std::fs::File::from(destination);
-                directory.set_permissions(std::fs::Permissions::from_mode(frame.mode))?;
-                directory.sync_all()?;
-            }
+            frames.pop();
             continue;
         };
         let entry = entry?;
         let name = entry.file_name();
         let kind = entry.file_type()?;
         let frame = frames.last().unwrap();
-        let metadata = frame.metadata || (frame.worktree_root && name == ".git");
         if kind.is_dir() {
-            let child = if let Some(destination) = &frame.destination {
-                scoped_fs::mkdirat_name(destination.as_raw_fd(), &name)?;
-                Some(scoped_fs::open_dir_at(destination.as_raw_fd(), &name)?)
-            } else {
-                None
-            };
-            frames.push(Frame::new(&entry.path(), child, metadata, false)?);
+            frames.push(Frame::new(&entry.path())?);
         } else if kind.is_file() {
-            let mut input = scoped_fs::openat_file(
+            let input = scoped_fs::openat_file(
                 frame.source.as_raw_fd(),
                 &name,
                 libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK,
                 0,
             )?;
-            let file_metadata = input.metadata()?;
-            if !file_metadata.is_file() {
+            if !input.metadata()?.is_file() {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "clone tree entry is no longer a regular file",
                 ));
-            }
-            if let Some(destination) = &frame.destination {
-                let mut output = scoped_fs::openat_file(
-                    destination.as_raw_fd(),
-                    &name,
-                    libc::O_WRONLY
-                        | libc::O_CREAT
-                        | libc::O_EXCL
-                        | libc::O_NOFOLLOW
-                        | libc::O_CLOEXEC,
-                    0o600,
-                )?;
-                io::copy(&mut input, &mut output)?;
-                output.set_permissions(std::fs::Permissions::from_mode(
-                    file_metadata.mode() & 0o777,
-                ))?;
-                output.sync_all()?;
-            }
-        } else if kind.is_symlink() && !metadata {
-            if let Some(destination) = &frame.destination {
-                let target = std::fs::read_link(entry.path())?;
-                scoped_fs::symlinkat_name(target, destination.as_raw_fd(), &name)?;
             }
         } else {
             return Err(io::Error::new(

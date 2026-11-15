@@ -190,7 +190,7 @@ fn fifo_private_marker_is_refused_without_a_blocking_reader() {
 }
 
 #[test]
-fn metadata_symlinks_are_rejected_even_without_a_cross_filesystem_copy() {
+fn metadata_symlinks_are_rejected_before_publication() {
     let fixture = Fixture::new();
     let outside = fixture.root.path().join("outside");
     std::fs::write(&outside, b"outside payload").unwrap();
@@ -201,11 +201,10 @@ fn metadata_symlinks_are_rejected_even_without_a_cross_filesystem_copy() {
 }
 
 #[test]
-fn checkout_copy_preserves_native_names_modes_and_symlink_text() {
+fn checkout_publication_preserves_native_names_modes_and_symlink_text() {
     #[cfg(not(target_os = "macos"))]
     use std::os::unix::ffi::OsStringExt;
     let fixture = Fixture::new();
-    fixture.completion().prepare_private_checkout().unwrap();
     #[cfg(not(target_os = "macos"))]
     let name = std::ffi::OsString::from_vec(b"ref-\xff".to_vec());
     #[cfg(target_os = "macos")]
@@ -217,13 +216,7 @@ fn checkout_copy_preserves_native_names_modes_and_symlink_text() {
     let outside = fixture.root.path().join("outside");
     std::fs::write(&outside, b"do not follow").unwrap();
     symlink(&outside, fixture.worktree.join("outside-link")).unwrap();
-    std::fs::create_dir(&fixture.destination).unwrap();
-    walk_tree(
-        &fixture.worktree,
-        Some(scoped_fs::open_dir_absolute(&fixture.destination).unwrap()),
-        TreeContents::Worktree,
-    )
-    .unwrap();
+    fixture.completion().finish(true).unwrap();
     assert_eq!(
         std::fs::read(fixture.destination.join(&name)).unwrap(),
         b"payload\0bytes"
@@ -246,24 +239,6 @@ fn checkout_copy_preserves_native_names_modes_and_symlink_text() {
         .is_symlink());
     assert_eq!(std::fs::read_link(link).unwrap(), outside);
     assert_eq!(std::fs::read(&outside).unwrap(), b"do not follow");
-}
-
-#[test]
-fn checkout_copy_keeps_git_metadata_strict() {
-    let fixture = Fixture::new();
-    fixture.completion().prepare_private_checkout().unwrap();
-    symlink(
-        "../../tracked.txt",
-        fixture.worktree.join(".git/objects/link"),
-    )
-    .unwrap();
-    std::fs::create_dir(&fixture.destination).unwrap();
-    assert!(walk_tree(
-        &fixture.worktree,
-        Some(scoped_fs::open_dir_absolute(&fixture.destination).unwrap()),
-        TreeContents::Worktree
-    )
-    .is_err());
 }
 
 fn git(program: &Path, cwd: &Path, args: &[&str]) -> Vec<u8> {
@@ -408,7 +383,7 @@ fn native_clone_remains_an_ordinary_worktree_after_private_checkout_publication(
 
 #[cfg(target_os = "linux")]
 #[test]
-fn actual_cross_device_clone_publication_preserves_clean_git_status_and_symlinks() {
+fn actual_cross_device_publication_refuses_without_creating_a_destination() {
     use std::os::fd::AsRawFd;
     let root = tempfile::tempdir().unwrap();
     let private = tempfile::tempdir_in("/dev/shm").expect("Linux EXDEV fixture needs /dev/shm");
@@ -426,88 +401,83 @@ fn actual_cross_device_clone_publication_preserves_clean_git_status_and_symlinks
             .raw_os_error(),
         Some(libc::EXDEV)
     );
-    native_checkout(private.path(), root.path());
+    let fixture = Fixture::at(root, private.path());
+    let error = fixture.completion().finish(true).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+    assert!(error.to_string().contains("share a filesystem"));
+    assert!(!fixture.destination.exists());
+    assert!(fixture.worktree.join("tracked.txt").is_file());
 }
 
 #[cfg(target_os = "linux")]
-fn cross_device_fixture() -> (Fixture, tempfile::TempDir) {
+#[test]
+fn cross_device_seed_refuses_before_login_or_child_preparation() {
+    use std::os::fd::AsRawFd;
     let root = tempfile::tempdir().unwrap();
     let private = tempfile::tempdir_in("/dev/shm").expect("Linux EXDEV fixture needs /dev/shm");
     assert_ne!(
         std::fs::metadata(root.path()).unwrap().dev(),
         std::fs::metadata(private.path()).unwrap().dev()
     );
-    (Fixture::at(root, private.path()), private)
-}
-
-#[cfg(target_os = "linux")]
-#[test]
-fn cross_device_publication_refuses_a_replaced_copy_directory() {
-    let (fixture, _private) = cross_device_fixture();
-    let root = fixture.root.path().to_path_buf();
-    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel::<PathBuf>(1);
-    let (replaced_tx, replaced_rx) = std::sync::mpsc::sync_channel(1);
-    let peer = std::thread::spawn(move || {
-        let copy = harn_clock::test_support::recv_within("cross-device copy complete", &ready_rx);
-        std::fs::rename(&copy, copy.with_file_name("original-copy")).unwrap();
-        std::fs::create_dir(&copy).unwrap();
-        std::fs::write(copy.join("foreign"), b"foreign copy directory\n").unwrap();
-        replaced_tx.send(()).unwrap();
-    });
-    AFTER_COPY.with(|hook| {
-        *hook.borrow_mut() = Some(Box::new(move |name| {
-            ready_tx.send(root.join(name)).unwrap();
-            harn_clock::test_support::recv_within("peer replaced copy directory", &replaced_rx);
-        }));
-    });
-    let result = fixture.completion().finish(true);
-    AFTER_COPY.with(|hook| {
-        hook.borrow_mut().take();
-    });
-    peer.join().unwrap();
+    let source = scoped_fs::open_dir_absolute(private.path()).unwrap();
+    let destination = scoped_fs::open_dir_absolute(root.path()).unwrap();
+    std::fs::create_dir(private.path().join("probe")).unwrap();
+    assert_eq!(
+        scoped_fs::renameat_name_noreplace(
+            source.as_raw_fd(),
+            "probe",
+            destination.as_raw_fd(),
+            "probe"
+        )
+        .unwrap_err()
+        .raw_os_error(),
+        Some(libc::EXDEV)
+    );
+    let args = ["clone", "https://github.com/example/private", "checkout"].map(str::to_string);
+    let invocation = super::super::parse(&args).expect("supported clone arguments");
+    let same_device = tempfile::tempdir().unwrap();
+    let positive = seed(
+        &SeedRequest {
+            dir: same_device.path(),
+            token: "synthetic-unused-login",
+            program: Path::new("/usr/bin/git"),
+            args: &args,
+            cwd: root.path(),
+        },
+        &invocation,
+    )
+    .unwrap()
+    .expect("same-filesystem seed is supported");
+    assert!(positive.args.is_some());
+    assert!(positive.completion.is_some());
     assert!(
-        result.is_err(),
-        "a foreign copied directory cannot establish clone success"
+        same_device
+            .path()
+            .join(super::super::CREDENTIAL_SOCKET)
+            .exists(),
+        "known-positive seed starts its login socket"
     );
-    assert_eq!(
-        std::fs::read(fixture.destination.join("foreign")).unwrap(),
-        b"foreign copy directory\n"
-    );
-}
-
-#[cfg(target_os = "linux")]
-#[test]
-fn cross_device_copy_failure_preserves_peer_data_and_reports_partial_output() {
-    use std::os::unix::ffi::OsStrExt;
-    let (fixture, _private) = cross_device_fixture();
-    let root = fixture.root.path().to_path_buf();
-    let worktree = fixture.worktree.clone();
-    let observed = std::sync::Arc::new(std::sync::Mutex::new(None));
-    let reached = observed.clone();
-    BEFORE_COPY.with(|hook| {
-        *hook.borrow_mut() = Some(Box::new(move |name| {
-            let copy = root.join(name);
-            std::fs::write(copy.join("peer-canary"), b"preserve peer data\n").unwrap();
-            let fifo =
-                std::ffi::CString::new(worktree.join("unreadable-node").as_os_str().as_bytes())
-                    .unwrap();
-            assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
-            *reached.lock().unwrap() = Some(copy);
-        }));
-    });
-    let error = fixture.completion().finish(true).unwrap_err();
-    BEFORE_COPY.with(|hook| {
-        hook.borrow_mut().take();
-    });
-    let observed = observed.lock().unwrap();
-    let copy = observed
-        .as_ref()
-        .expect("actual cross-device copy was reached");
-    assert_eq!(
-        std::fs::read(copy.join("peer-canary")).unwrap(),
-        b"preserve peer data\n"
-    );
-    assert!(error
-        .to_string()
-        .contains("partial clone destination retained"));
+    drop(positive);
+    let error = match seed(
+        &SeedRequest {
+            dir: private.path(),
+            token: "synthetic-unused-login",
+            program: Path::new("/usr/bin/git"),
+            args: &args,
+            cwd: root.path(),
+        },
+        &invocation,
+    ) {
+        Err(error) => error,
+        Ok(_) => panic!("cross-device clone must refuse before preparing a child"),
+    };
+    assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+    assert!(!private
+        .path()
+        .join(super::super::CREDENTIAL_SOCKET)
+        .exists());
+    assert!(!private.path().join(super::super::GLOBAL_CONFIG).exists());
+    assert!(!private.path().join("repository").exists());
+    assert!(!private.path().join("worktree").exists());
+    assert!(!root.path().join("checkout").exists());
 }

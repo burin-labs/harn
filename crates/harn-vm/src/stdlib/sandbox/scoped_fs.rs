@@ -549,23 +549,6 @@ pub(super) fn entry_exists_at(
 }
 
 #[cfg(unix)]
-pub(super) fn entry_matches_open_fd(
-    parent_fd: libc::c_int,
-    name: impl AsRef<std::ffi::OsStr>,
-    opened_fd: libc::c_int,
-) -> io::Result<bool> {
-    let Some(current) = stat_at(parent_fd, name)? else {
-        return Ok(false);
-    };
-    let mut held = std::mem::MaybeUninit::<libc::stat>::uninit();
-    if unsafe { libc::fstat(opened_fd, held.as_mut_ptr()) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let held = unsafe { held.assume_init() };
-    Ok(current.st_dev == held.st_dev && current.st_ino == held.st_ino)
-}
-
-#[cfg(unix)]
 fn stat_at(
     parent_fd: libc::c_int,
     name: impl AsRef<std::ffi::OsStr>,
@@ -588,21 +571,6 @@ fn stat_at(
         Ok(None)
     } else {
         Err(error)
-    }
-}
-
-#[cfg(unix)]
-pub(super) fn symlinkat_name(
-    target: impl AsRef<std::ffi::OsStr>,
-    parent_fd: libc::c_int,
-    name: impl AsRef<std::ffi::OsStr>,
-) -> io::Result<()> {
-    let target = c_name(target)?;
-    let name = c_name(name)?;
-    if unsafe { libc::symlinkat(target.as_ptr(), parent_fd, name.as_ptr()) } == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
     }
 }
 
