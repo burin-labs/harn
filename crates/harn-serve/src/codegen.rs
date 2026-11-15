@@ -49,7 +49,7 @@ pub fn codegen_source_refs_for_documents(
     documents
         .physical_paths()
         .map(|file| {
-            let end = std::fs::metadata(&file)
+            let end = std::fs::metadata(file)
                 .ok()
                 .filter(|metadata| metadata.is_file())
                 .and_then(|metadata| u32::try_from(metadata.len()).ok())

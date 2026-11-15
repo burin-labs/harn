@@ -66,7 +66,7 @@ pub struct ToolContractViolation {
     pub phase: ToolContractPhase,
     pub violations: Vec<ToolContractViolationDetail>,
     /// Typed preparation/codec provenance, without rejected application data.
-    pub wire_failure: Option<crate::wire::WireFailure>,
+    pub wire_failure: Option<Box<crate::wire::WireFailure>>,
 }
 
 /// Owned, value-free JSON Schema failure detail safe for adapter diagnostics.

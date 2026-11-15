@@ -15,7 +15,7 @@ fn contract() -> ValidatedCodegenIr {
     compile_catalog(&PreparedToolCatalog::prepare(catalog).unwrap(), &[]).unwrap()
 }
 
-const WORKER: &str = r#"
+const WORKER: &str = r"
 import json, os, sys
 profile=json.loads(os.environ['NATIVE_PROFILE'])
 tools=json.loads(os.environ['NATIVE_TOOLS'])
@@ -86,7 +86,7 @@ for line in sys.stdin:
             reply(request,{'resultType':'complete','content':[],'isError':True,'_meta':{'com.harnlang/toolContract':{'applicationError':{'tool':'echo','data':{'kind':'rejected','code':5.0}}}}})
         else:
             complete(request,value,{'calls':calls})
-"#;
+";
 
 async fn worker(ir: &ValidatedCodegenIr, alter: impl FnOnce(&mut Value)) -> VmMcpClientHandle {
     let mut profile = serde_json::to_value(NativeMcpBindingProfile::for_ir(
@@ -212,7 +212,7 @@ async fn native_profile_refusal_leaves_the_worker_handler_census_at_zero() {
     let ir = contract();
     for field in ["catalog_digest", "binding_digest", "ir_digest"] {
         let handle = worker(&ir, |profile| {
-            profile["identity"][field] = json!("sha256:wrong")
+            profile["identity"][field] = json!("sha256:wrong");
         })
         .await;
         assert_eq!(

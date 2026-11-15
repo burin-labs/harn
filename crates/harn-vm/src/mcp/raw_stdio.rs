@@ -227,7 +227,7 @@ mod tests {
         use rmcp::transport::{async_rw::AsyncRwTransport, Transport};
 
         let limit = super::super::MCP_MAX_STDIO_LINE_BYTES;
-        assert!(super::super::MCP_STDIO_LINE_LIMIT_INCLUDES_TERMINATOR);
+        const { assert!(super::super::MCP_STDIO_LINE_LIMIT_INCLUDES_TERMINATOR) };
         for (ending, line_length, accepted) in [
             (b"\n".as_slice(), limit, true),
             (b"\n".as_slice(), limit + 1, false),

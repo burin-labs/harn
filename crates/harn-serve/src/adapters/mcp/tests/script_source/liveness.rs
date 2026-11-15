@@ -348,13 +348,13 @@ async fn sequential_child_calls_preserve_captured_local_and_imported_module_stat
         let directory = tempfile::tempdir().expect("module fixture");
         std::fs::write(
             directory.path().join("counter.harn"),
-            r#"
+            r"
 let count = 0
 pub fn bump() -> int {
   count = count + 1
   return count
 }
-"#,
+",
         )
         .expect("module counter");
         let source = r#"

@@ -164,6 +164,6 @@ fn wire_violation(
             keyword: "wireType".into(),
             missing_property: None,
         }],
-        wire_failure: Some(failure),
+        wire_failure: Some(Box::new(failure)),
     }
 }
