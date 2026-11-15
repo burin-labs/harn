@@ -46,7 +46,15 @@
     "persisted_completed": true,
     "physical_calls": 4,
     "provider_cost_usd": 0.000780551,
-    "wall_ms": 16595
+    "wall_ms": 16595,
+    "observed_event_phase_spans_ms": {
+      "run_start_to_preflight": 10745,
+      "preflight_to_mutation_dispatch": 1355,
+      "mutation_dispatch_to_verified": 2403,
+      "verified_to_run_terminal": 7,
+      "outside_observed_run_span": 2085
+    },
+    "timing_scope": "Spans use canonical persisted event timestamps. Setup and judgment are combined before preflight; individual provider latency is unmeasured. The residual is reported separately."
   },
   "matched_ordinary_caller": {
     "same_available_tools": true,
@@ -64,6 +72,25 @@
     "measurement_negative_control": "An earlier steer probe reached an ordinary fallback call after binding declined. The receipt-correlating verifier refused to credit it as learned execution. Its result and cost were retained separately.",
     "argument_interception": "The actual pre-tool hook fired in both deterministic controls. Unchanged arguments reached the handler; rewritten arguments produced execution_contract_changed before handler dispatch.",
     "http_negative_control": "The old wrong-name workspace returned 404 for the requested route. A correct workspace passed the same six real HTTP checks."
+  },
+  "integrated_runtime_compatibility": {
+    "runtime_source": "b60b82b41050d68df807e3d48635cf56f8e69dca",
+    "scope": "Separate development smoke after integrating the newer shared tool-wire boundary; not an extension of the qualification cohort.",
+    "trial_execution": {
+      "independent_request_checks": 34,
+      "generated_tests_discovered": true,
+      "persisted_completed": true,
+      "physical_calls": 4,
+      "provider_cost_usd": 0.000853951,
+      "wall_ms": 28253
+    },
+    "older_report_refusal": {
+      "reason": "stale_qualification",
+      "learned_inference_calls": 0,
+      "measured_physical_calls": 7,
+      "provider_cost_usd": 0.003378875,
+      "ordinary_fallback_completed": true
+    }
   },
   "interpretation": "The prespecified candidate passed this bounded synthetic study. Both earlier failed reports remain refused. Only 45 percent of compatible requests committed to the learned path; the others used ordinary fallback. Completion of fallback runs does not independently grade their requested behavior.",
   "limits": "Related synthetic case templates, one small application and one reviewed generator; no IID deployment sample or production reliability guarantee. The matched execution comparison is a small observational sample. A separate development smoke took 33782 ms, so these timings do not establish a general latency improvement. Qualification binds the measured artifacts and must be refreshed when their execution identity changes."
