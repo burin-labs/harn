@@ -9,6 +9,223 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.201
+
+### Breaking
+
+- **Run-tape format 10 supports stable redacted placeholders (#10792).** Model
+  requests and tool arguments match after credential redaction. Older recordings
+  remain readable and need a new full recording for branching. Lossy binary
+  redaction and invalid or unmeasured metadata remain refused; secret-bearing
+  file effects remain unservable, and prompt edits require intact source
+  provenance.
+
+  Migration: create a new full recording before branching from a tape recorded
+  with an older format. Rust consumers matching `TapeRecordKind::PayloadRedaction`
+  must match `TapeRecordKind::PayloadRedaction { replay }` and inspect its
+  `RedactionReplay` eligibility; only `StablePlaceholder` permits replay.
+- **Runtime content fingerprints include the linked artifact identity (#11334).**
+  `RuntimeContentFingerprint` adds the public `artifact_id: Option<String>` field,
+  and its content digest now includes the executable or shared library identity.
+
+  Migration: obtain measured fingerprints with
+  `harn_vm::runtime_content::runtime_content_fingerprint().clone()` rather than
+  constructing the record directly. Synthetic records must explicitly set
+  `artifact_id` to `None`; they do not prove native implementation identity.
+  Requalify learned workflows against the installed artifacts because older
+  qualification reports intentionally fail the new identity check.
+- **Tool policy records retain their declaration source (#11334).**
+  `ToolPolicy` adds `source: ToolPolicySource` so explicit execution declarations
+  remain distinct from legacy annotation projections across adapters.
+
+  Migration: Rust code constructing `ToolPolicy` directly must supply
+  `source: ToolPolicySource::Declared`; TypeScript literals use
+  `source: "declared"`. JSON policies default to declared;
+  projected legacy annotations carry `source: "legacy_annotations"`.
+- **Retained tool proposals have explicit confirmation and resolution events (#11353).**
+  `ToolBatchDispositionReceipt` adds optional `retained_proposal_id` and
+  `source_tool_call_id` fields. `ToolBatchDisposition` adds `Resolved`, and
+  `ToolBatchProposalStatus` adds `Confirmed`. The non-exhaustive `AgentEvent`
+  enum includes `ToolBatchProposalResolution`.
+
+  Migration: initialize both new receipt fields to `None` when constructing
+  a receipt without a retained proposal. Handle `Resolved` as a control
+  decision rather than an executed tool attempt, and handle the `Confirmed`
+  proposal status. Regenerate protocol bindings for the new event. Consume
+  serialized events by their tagged `type` names rather than Rust enum
+  ordinal positions.
+
+- **Session replacement returns its reminder accounting (#11353).**
+  `harness.agent.session_replace_messages` returns a dictionary rather than
+  `nil`, reporting preserved, expired, decremented and deduplicated reminders.
+
+  Migration: consume or discard the returned dictionary. Remove `nil` return
+  annotations or assertions around this call; callers already discarding its
+  result need no change.
+- **Capture final command output separately from shell setup.** Command tools accept `capture.final_stage` and return a
+  typed captured or unmeasured observation through foreground and terminal background results. The runner preserves
+  one-shell execution, redaction, live output and cancellation, and supplies no attribution for unsupported syntax or
+  transport. This enables verifier consumers to exclude earlier summaries without treating command output as proof that
+  tests ran. See [#11379](https://github.com/burin-labs/harn/pull/11379).
+
+  Migration: Rust embedders that exhaustively match `harn_hostlib::process::OutputCapture` must handle the Unix
+  `PipeWithStage` variant alongside ordinary pipe capture. `DescriptorTransfer::inherited` now takes a second slice
+  containing separately owned startup descriptors; pass `&[]` when there are none. Harn command calls retain their existing
+  behavior unless final-stage capture is requested.
+- Goal reminders can omit an objective already present verbatim in a selected
+  user message, while retaining full durable text and distinct criteria. Typed
+  goal projections require `lifecycle: managed | context` and
+  `objective_covered_body`. Context projections render saved goals without
+  participating in managed retarget or completion policy. Goal rendering stays
+  with the canonical formatter; no source anchors or message-origin fields are
+  added.
+
+  Migration: direct `GoalPinProjection` constructors must add `lifecycle` and
+  `objective_covered_body`. Use `"managed"` for an active goal that participates
+  in retarget and completion policy, and `"context"` for saved advisory context.
+  For example, `{spec: goal}` becomes
+  `{spec: goal, lifecycle: "managed", objective_covered_body: full_body}`;
+  using the full reminder body preserves its text without shortening. Prefer
+  the projection returned by `pin_reminder`, which prepares both renderings
+  through the canonical formatter. Apply any custom prefix or length bound to
+  both reminder renderings.
+
+### Added
+
+- Qualify reviewed tools with fresh execution evidence using `std/agent/learned`,
+  then select them through ordinary agent tool dispatch with typed decision
+  receipts, argument binding and semantic checks, enforced read-only preflight,
+  explicit runtime dispositions, source identities, verification, and fallback
+  (#11334).
+- `scripts/install_target_gc_maintenance.sh` accepts `HARN_TARGET_GC_SCHEDULE=none`.
+  It installs the target-cache collector wrapper and removes any daily schedule the
+  installer published before, for a host whose own maintenance job runs the wrapper.
+- Agent results retain the request context matched to the first successful actor response, so callers can distinguish
+  delivered instructions from prepared context, failed transport, and helper-only inference.
+- Expose typed shell exit evidence through `std/command` and command execution semantics, distinguishing proven command
+  chains from masked or unmeasured zero exits without changing shell behavior.
+
+### Changed
+
+- CLI localization generation now runs in Harn, with typed catalog and compiler-AST validation.
+  Generated message plans and scaffolded project files retain their existing behavior.
+  Generation refuses symlinked output files instead of overwriting their targets.
+- Canon feedback readers decode legacy event, tool-result, slice and reminder
+  containers before accessing fields, preserving extension fields, fallback
+  precedence, path coercions and host-owned reminder validation.
+- Forge pull-request normalization retains decoded envelope, repository and
+  revision contracts while preserving raw fields, scalar normalization and
+  provider-specific fallbacks. Connector binding matches keep their existing
+  duplicate-path refusal.
+- CI workflow helpers handle absent strategy and action-run containers before
+  decoding hyphenated keys, preserving false, zero and empty-string values.
+- Foreground embedding checks reuse the workspace dependency feature selection while still building only the standalone
+  example and running its initialization controls. A Cargo unit-graph guard rejects duplicate dependency compilation.
+- macOS CI installs required language servers during workspace-cache restoration, with an explicit prerequisite before tests.
+- Agent responses execute authored mutations after successful coissued observations
+  without another confirmation turn. Current controls, context, permissions and
+  resource checks still apply. Dependent observations must be requested before
+  authoring an edit; verification and completion retain their phase boundaries.
+- Mixed tool batches retain deferred call arguments for explicit resume or discard after observing results. Confirmed calls
+  pass through the original dispatcher and current policy. Accepted control changes and compaction invalidate pending
+  proposals, while synthetic deferrals and discarded proposals no longer count as execution attempts.
+
+### Fixed
+
+- **Optional-chain lint preserves declared fields in nested open records
+  (#9347).** Typed optional fields stay typed through property access and literal
+  string subscripts. Unknown extension keys and declared untyped values are
+  reported once even when they occur later in a chain through typed maps.
+- Literal string subscripts preserve declared record field types and typed row
+  tails, including raw strings; incompatible return types now fail checking
+  consistently with property access.
+- Empty dictionary fallbacks retain typed map values and record field types.
+  A nullable record falling back to `{}` keeps its fields optional; incompatible
+  callback arguments, returns, and writes remain type errors.
+- **Command-bound Git grants can clone private GitHub repositories (#11321).**
+  Supported confined macOS hosts keep the complete checkout private during
+  transfer, then publish an ordinary repository to a new destination before
+  foreground or background commands report success. Existing destinations are
+  preserved; destinations on a different filesystem from the private transfer
+  directory are refused before login exposure. Credential helpers, templates
+  and tracing cannot receive the login, and options that execute programs or
+  write configuration remain ungranted.
+- Recheck guarded tool execution after approval waits, and retire tool-failure
+  completion evidence from an objective the operator explicitly replaced.
+- Check learned argument bindings against the actual invocation after tool
+  interception, refusing rewritten values before execution.
+- Enforce declared read-only tool policies for local and served MCP handlers;
+  preserve the execution policy through the connected MCP tool catalog.
+- Preserve legacy tool classifications as advisory metadata rather than applying
+  preparation restrictions to existing tool handlers.
+- Retain deterministic mock-error billing receipts so transport retries preserve
+  their measured zero or simulated cost in complete agent accounting.
+- The target-cache collector now scans dot-named entries, such as the `.cache-src`
+  target of a checkout under `.cache/`, which it used to skip while reporting a
+  complete scan. A root whose entries the walk did not all cover, or could not
+  count, makes the pass `partial` and is reported as `unscanned_roots`.
+- Keep authored and provider-normalized message fingerprints in one bounded cache
+  so growing tool-call transcripts do not repeatedly hash unchanged history.
+- Require a successful owning consumer workflow and measured pass before CI can
+  approve a change. Matching job and step names no longer excuse different failed
+  tests, and unused automatic baseline builds and rehearsals have been removed.
+- Provider requests now pair each tool result with the name of its actual
+  invocation, including when confirmation dispatches a stored operation through
+  a different handler. Stored execution records retain the semantic handler name.
+- Resolve command-reader paths from explicit working directories and literal POSIX
+  `cd` success chains before workspace approval. Keep workspace authority fixed and
+  retain conservative checks for ambiguous shell control flow or earlier processes
+  that could change later directory entries.
+- Prepared package generations can be used from read-only application bundles
+  without creating installation locks. Shared readers retain publication and
+  generation leases; initializers that need to publish reload package authority
+  after acquiring the installation lock.
+- Tool outcome summaries and execution traces exclude deferred, skipped, and
+  resolved synthetic results. Their paired feedback and original proposals remain
+  in the transcript and audit history.
+- CI cache checks retain typed matrix rows when expanding cache families and
+  checking audit jobs. Checks that require static rows now refuse matrix and
+  include expressions; runner checks still inspect known axes when include
+  rows are dynamic.
+- **CI policy workflow decoding retains typed fields (#9347).** Action lifecycle
+  fields, runner selectors, timeouts, cancellation controls, and path filters
+  are checked at their owning boundary; malformed values are refused instead
+  of being silently coerced.
+- Transcript normalization decodes legacy message, tool call and usage containers
+  before reading their fields and preserves raw payloads and extension fields.
+  Argument diagnostics now distinguish encoded JSON null from absent arguments
+  and accept valid argument objects containing their own `_raw` key.
+- Keep deferred tool instructions with their discovered schemas instead of advertising unloaded tools in the initial
+  system prompt. Native tool search retains a stable system and tool prefix; client discovery reveals the same
+  instructions with each promoted tool.
+
+  Progress reporting uses that same guidance path, including custom tool names and nudges, so deferred progress tools
+  do not leave invocation instructions in the initial system prompt.
+- Explicitly resumed edits execute after successful reads in the same response,
+  without another confirmation round. Current permissions, controls and context
+  are checked again before execution; fresh edits and verification retain their
+  phase boundaries.
+- Confined commands retain Corepack's installed package-manager location when
+  Harn relocates workspace caches, so an already installed pnpm or Yarn remains
+  available offline. Existing filesystem and network restrictions still apply.
+- Keep advisory diagnostics distinct from verified runtime failures, and avoid repeating raw tool output as review guidance
+  by default.
+- Load shared skills with standard description metadata by resolving the compact card
+  from `short`, `metadata.short-description`, or `description`.
+  Explicit invalid cards still fail validation.
+- Do not certify a shell check from a successful envelope when a known execution wrapper's child arguments could not
+  be resolved. Environment assignments and ordinary external programs retain their existing exit evidence.
+- Use Anthropic's published $0.10 per million cached input tokens when estimating Sonnet 5.5 calls.
+
+### Security
+
+- A host-declared sandbox root (a process read, write or Unix-socket root, or
+  a capability read-only root) is resolved one component at a time, keeping
+  each directory's on-disk spelling, and a root reached through a link that
+  sits where a confined process can write is not granted. A write or socket
+  root on or over the user's git, gh or ssh configuration is not granted
+  either. Each refusal is reported once with the remedy.
+
 ## v0.10.200
 
 ### Breaking
