@@ -130,6 +130,19 @@ pipeline test_later_transport_failure_retains_earlier_successful_actor_context(h
       const request = result.llm.actor_request
       assert(request != nil, "a later failure must not erase an earlier successful response")
       assert_eq(request.run_id, result.run_id)
+      const calls = transcript_events_by_kind(harness.agent.snapshot(sid), "llm_call").filter(
+        { event -> event?.metadata?.call_role == "agent.main" },
+      )
+        .to_list()
+      assert_eq(len(calls), 2, "both actual actor call audit records must be present")
+      const successful_call = calls[0].metadata.call_id
+      const failed_call = calls[1].metadata.call_id
+      assert(successful_call != "" && failed_call != "" && successful_call != failed_call)
+      assert_eq(request.call_id, successful_call, "the receipt must name the first successful call")
+      assert(
+        request.call_id != failed_call,
+        "the later failed dispatch cannot replace delivery evidence",
+      )
       assert(
         request.context_manifest.segments.any(
           { segment ->
