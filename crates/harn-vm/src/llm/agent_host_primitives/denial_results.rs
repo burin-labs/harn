@@ -1,5 +1,14 @@
 use crate::agent_events::{DenialGate, ToolCallErrorCategory, ToolDenial, ToolMutationStatus};
 
+pub(super) fn execution_contract_changed() -> ToolDenial {
+    ToolDenial::terminal(
+        DenialGate::DeterministicPrecheck,
+        None,
+        "Execution contract changed while this tool call waited; execution refused.",
+    )
+    .with_audiences(Some("execution_contract_changed".into()), None)
+}
+
 pub(super) async fn deny_policy_tool_call(
     ctx: &crate::vm::AsyncBuiltinCtx,
     session_id: &str,
