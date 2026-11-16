@@ -62,6 +62,10 @@ impl ShellRedirect {
 }
 
 impl ShellAnalysis {
+    pub(crate) fn has_dynamic_redirect(&self) -> bool {
+        self.redirects.iter().any(|redirect| redirect.dynamic)
+    }
+
     pub(crate) fn unresolved() -> Self {
         Self {
             unresolved: true,

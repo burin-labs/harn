@@ -129,12 +129,7 @@ pub(super) fn scan_command_risk_scan_json(
         labels.insert("credential_file_read".to_string());
         rationale.push("credential-like file read detected");
     }
-    if command_analysis.unresolved
-        || command_analysis
-            .redirects
-            .iter()
-            .any(|redirect| redirect.dynamic)
-    {
+    if command_analysis.unresolved || command_analysis.has_dynamic_redirect() {
         labels.insert(EXECUTION_SEMANTICS_UNRESOLVED_LABEL.to_string());
         rationale.push("execution syntax, dialect, dynamic dispatch, or redirection destination left semantics unresolved");
     }
