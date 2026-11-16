@@ -35,6 +35,8 @@ mod session_update_payloads;
 mod session_update_rust_validation;
 mod session_update_validation;
 mod support;
+mod timeline_records;
+mod tool_annotation_records;
 mod values;
 
 mod go;

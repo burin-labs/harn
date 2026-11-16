@@ -686,25 +686,6 @@ export interface ACPClientCapabilities {
   }
 }
 
-export interface HarnToolArgSchema {
-  path_params: string[]
-  dependency_key_params: string[]
-  dependency_range_params: Array<Record<string, string>>
-  arg_aliases: Record<string, string>
-  required: string[]
-}
-
-export interface HarnToolAnnotations {
-  kind: ACPToolKind
-  side_effect_level: HarnSideEffectLevel
-  completion_evidence_role?: HarnCompletionEvidenceRole
-  arg_schema: HarnToolArgSchema
-  capabilities: Record<string, string[]>
-  emits_artifacts: boolean
-  result_readers: string[]
-  inline_result: boolean
-}
-
 export interface A2ATaskStatus {
   state: A2ATaskState
   message?: A2AMessage
@@ -887,77 +868,8 @@ export function isNotification(msg: ACPMessage): msg is ACPNotification {
 }
 "#,
     );
-    out.push_str(
-        r"
-export interface HarnSessionTimelineCursor {
-  topics: Record<string, number>
-}
-
-export interface HarnSessionTimelineQuery {
-  sessionId?: string | null
-  runId?: string | null
-  runPath?: string | null
-  projectId?: string | null
-  fromCursor: HarnSessionTimelineCursor
-  limit?: number | null
-}
-
-export interface HarnSessionTimelineReference {
-  kind: string
-  id?: string
-  topic?: string
-  eventId?: number
-}
-
-export interface HarnSessionTimelineLink {
-  kind: string
-  targetId?: string
-  traceId?: string
-  spanId?: string
-  eventId?: string
-}
-
-/** Harn-owned semantic chronology row. `kind` remains open for forward compatibility. */
-export interface HarnSessionTimelineNode {
-  id: string
-  parentId?: string
-  children: string[]
-  category: string
-  kind: string
-  name: string
-  status: string
-  traceId?: string
-  spanId?: string
-  occurredAtMs?: number
-  startMs?: number
-  durationMs?: number
-  attributes: ACPValue
-  references: HarnSessionTimelineReference[]
-  links: HarnSessionTimelineLink[]
-  order: number
-}
-
-export interface HarnSessionTimelineCoverage {
-  returned: number
-  available: number | null
-  truncated: boolean
-}
-
-export interface HarnSessionTimelineSnapshot {
-  schemaVersion: number
-  query: HarnSessionTimelineQuery
-  cursor: HarnSessionTimelineCursor
-  coverage: HarnSessionTimelineCoverage
-  nodes: HarnSessionTimelineNode[]
-}
-
-export interface HarnSessionTimelineUpdate {
-  schemaVersion: number
-  cursor: HarnSessionTimelineCursor
-  node: HarnSessionTimelineNode
-}
-",
-    );
+    super::tool_annotation_records::append(&mut out, super::records::Target::Typescript);
+    super::timeline_records::append(&mut out, super::records::Target::Typescript);
     append_typescript_prepared_session_types(&mut out);
     append_typescript_session_recap_types(&mut out);
     super::plan_records::append(&mut out, super::records::Target::Typescript);

@@ -2965,44 +2965,6 @@ public struct HarnACPAgentCapabilities: Codable, Sendable, Equatable {
     }
 }
 
-public struct HarnToolArgSchema: Codable, Sendable, Equatable {
-    public var pathParams: [String]
-    public var dependencyKeyParams: [String]
-    public var dependencyRangeParams: [[String: String]]
-    public var argAliases: [String: String]
-    public var required: [String]
-
-    enum CodingKeys: String, CodingKey {
-        case pathParams = "path_params"
-        case dependencyKeyParams = "dependency_key_params"
-        case dependencyRangeParams = "dependency_range_params"
-        case argAliases = "arg_aliases"
-        case required
-    }
-}
-
-public struct HarnToolAnnotations: Codable, Sendable, Equatable {
-    public var kind: HarnACPToolKind
-    public var sideEffectLevel: HarnSideEffectLevel
-    public var completionEvidenceRole: HarnCompletionEvidenceRole?
-    public var argSchema: HarnToolArgSchema
-    public var capabilities: [String: [String]]
-    public var emitsArtifacts: Bool
-    public var resultReaders: [String]
-    public var inlineResult: Bool
-
-    enum CodingKeys: String, CodingKey {
-        case kind
-        case sideEffectLevel = "side_effect_level"
-        case completionEvidenceRole = "completion_evidence_role"
-        case argSchema = "arg_schema"
-        case capabilities
-        case emitsArtifacts = "emits_artifacts"
-        case resultReaders = "result_readers"
-        case inlineResult = "inline_result"
-    }
-}
-
 public struct HarnA2ATaskStatus: Codable, Sendable, Equatable {
     public var state: HarnA2ATaskState
     public var message: HarnACPValue?
@@ -3217,6 +3179,52 @@ public struct HarnMCPOAuthDynamicClientRegistrationRequest: Codable, Sendable, E
         case scope
     }
 }
+public struct HarnToolArgSchema: Codable, Sendable, Equatable {
+    public var pathParams: [String]
+    public var dependencyKeyParams: [String]
+    public var dependencyRangeParams: [[String: String]]
+    public var argAliases: [String: String]
+    public var required: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case pathParams = "path_params"
+        case dependencyKeyParams = "dependency_key_params"
+        case dependencyRangeParams = "dependency_range_params"
+        case argAliases = "arg_aliases"
+        case required
+    }
+}
+
+public struct HarnToolAnnotations: Codable, Sendable, Equatable {
+    public var kind: HarnACPToolKind
+    public var sideEffectLevel: HarnSideEffectLevel
+    public var argSchema: HarnToolArgSchema
+    public var capabilities: [String: [String]]
+    public var emitsArtifacts: Bool
+    public var resultReaders: [String]
+    public var inlineResult: Bool
+    public var completionEvidenceRole: HarnCompletionEvidenceRole?
+    public var destructiveHint: Bool?
+    public var idempotentHint: Bool?
+    public var openWorldHint: Bool?
+    public var readOnlyHint: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case sideEffectLevel = "side_effect_level"
+        case argSchema = "arg_schema"
+        case capabilities
+        case emitsArtifacts = "emits_artifacts"
+        case resultReaders = "result_readers"
+        case inlineResult = "inline_result"
+        case completionEvidenceRole = "completion_evidence_role"
+        case destructiveHint
+        case idempotentHint
+        case openWorldHint
+        case readOnlyHint
+    }
+}
+
 public struct HarnSessionTimelineCursor: Codable, Sendable, Equatable {
     public var topics: [String: UInt64]
 }
@@ -3232,37 +3240,36 @@ public struct HarnSessionTimelineQuery: Codable, Sendable, Equatable {
 
 public struct HarnSessionTimelineReference: Codable, Sendable, Equatable {
     public var kind: String
+    public var eventId: UInt64?
     public var id: String?
     public var topic: String?
-    public var eventId: UInt64?
 }
 
 public struct HarnSessionTimelineLink: Codable, Sendable, Equatable {
     public var kind: String
+    public var eventId: String?
+    public var spanId: String?
     public var targetId: String?
     public var traceId: String?
-    public var spanId: String?
-    public var eventId: String?
 }
 
-/// Harn-owned semantic chronology row. `kind` remains open for forward compatibility.
-public struct HarnSessionTimelineNode: Codable, Sendable, Equatable, Identifiable {
+public struct HarnSessionTimelineNode: Codable, Sendable, Equatable {
     public var id: String
-    public var parentId: String?
     public var children: [String]
     public var category: String
     public var kind: String
     public var name: String
     public var status: String
-    public var traceId: String?
-    public var spanId: String?
-    public var occurredAtMs: Int64?
-    public var startMs: UInt64?
-    public var durationMs: UInt64?
     public var attributes: HarnACPValue
     public var references: [HarnSessionTimelineReference]
     public var links: [HarnSessionTimelineLink]
     public var order: UInt64
+    public var durationMs: UInt64?
+    public var occurredAtMs: Int64?
+    public var parentId: String?
+    public var spanId: String?
+    public var startMs: UInt64?
+    public var traceId: String?
 }
 
 public struct HarnSessionTimelineCoverage: Codable, Sendable, Equatable {
@@ -3284,6 +3291,9 @@ public struct HarnSessionTimelineUpdate: Codable, Sendable, Equatable {
     public var cursor: HarnSessionTimelineCursor
     public var node: HarnSessionTimelineNode
 }
+
+extension HarnSessionTimelineNode: Identifiable {}
+
 
 public struct HarnACPArtifactUpdateMetaHarn: Codable, Sendable, Equatable {
     public var artifactId: String

@@ -191,6 +191,13 @@ private struct RecapBindingProbe {
         }
         let recap = fixture["sessionRecapAvailability"] as! [String: Any]
         let plan = fixture["planDocument"] as! [String: Any]
+        let timeline = fixture["sessionTimeline"] as! [String: Any]
+        let timelineSnapshot = timeline["snapshot"] as! [String: Any]
+        let timelineUpdate = timeline["update"] as! [String: Any]
+        try roundTrip(HarnSessionTimelineSnapshot.self, timelineSnapshot, timelineSnapshot)
+        try roundTrip(HarnSessionTimelineUpdate.self, timelineUpdate, timelineUpdate)
+        let query: [String: Any] = ["fromCursor": ["topics": [String: UInt64]()]]
+        try roundTrip(HarnSessionTimelineQuery.self, query, query)
         try roundTrip(HarnPlanDocument.self, plan, plan)
         try requiredNullableField(HarnPlanStep.self, ["id": "step", "content": "Verify", "status": "pending"], "priority", "high")
         try optionalField(HarnPlanApproval.self, ["state": "unrequested"], "reviewers", ["reviewer"])

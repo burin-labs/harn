@@ -193,7 +193,7 @@ impl SideEffectLevel {
 
 /// Argument-key pair describing one inclusive numeric dependency range inside a
 /// path-scoped mutating tool call.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct ToolDependencyRangeParams {
     /// Argument key whose value is the inclusive start of a dependency range.
@@ -212,7 +212,7 @@ pub struct ToolDependencyRangeParams {
 ///   per-tool hardcoded branches (`arg_aliases`),
 /// - validate presence of required arguments at the dispatch boundary
 ///   (`required`).
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct ToolArgSchema {
     /// Argument keys whose values are workspace-relative paths.
@@ -237,7 +237,7 @@ pub struct ToolArgSchema {
 /// How a tool's completed result participates in a bounded completion check.
 /// This is orthogonal to ACP `ToolKind`: two execute tools can have different
 /// completion roles (for example, a verifier versus a release mutation).
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CompletionEvidenceRole {
     Observation,
@@ -253,7 +253,7 @@ impl CompletionEvidenceRole {
 /// Full annotations for one tool. Pipelines populate one of these per
 /// tool in the capability-policy registry; the VM consults the registry
 /// on every tool call.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct ToolAnnotations {
     /// ACP-aligned tool-kind classification.
@@ -295,6 +295,19 @@ pub struct ToolAnnotations {
     /// the server that supplied it is trusted enough to rely on it.
     #[serde(rename = "openWorldHint", skip_serializing_if = "Option::is_none")]
     pub open_world_hint: Option<bool>,
+}
+
+impl ToolAnnotations {
+    /// Serialized tool semantics shared by every generated host binding.
+    pub fn json_schema() -> serde_json::Value {
+        serde_json::to_value(
+            schemars::generate::SchemaSettings::draft2020_12()
+                .for_serialize()
+                .into_generator()
+                .into_root_schema_for::<Self>(),
+        )
+        .expect("tool annotations schema serializes")
+    }
 }
 
 #[cfg(test)]

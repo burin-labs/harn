@@ -278,6 +278,8 @@ fn generate_go_with_payloads(payloads: &SessionUpdatePayloads) -> String {
     ));
 
     out.push_str(&format_go_struct_fields(GO_TYPE_DEFINITIONS));
+    super::tool_annotation_records::append(&mut out, super::records::Target::Go);
+    super::timeline_records::append(&mut out, super::records::Target::Go);
     payloads.append(&mut out, super::records::Target::Go);
     append_go_prepared_session_types(&mut out);
     append_go_session_recap_types(&mut out);
@@ -297,81 +299,6 @@ type JSONValue = json.RawMessage
 
 // JSONObject mirrors `Record<string, JsonValue>`.
 type JSONObject = map[string]json.RawMessage
-
-// HarnSessionTimelineCursor advances independently over each projected topic.
-type HarnSessionTimelineCursor struct {
-	Topics map[string]uint64 `json:"topics"`
-}
-
-// HarnSessionTimelineQuery filters and bounds the canonical semantic timeline.
-type HarnSessionTimelineQuery struct {
-	SessionID  *string                   `json:"sessionId,omitempty"`
-	RunID      *string                   `json:"runId,omitempty"`
-	RunPath    *string                   `json:"runPath,omitempty"`
-	ProjectID  *string                   `json:"projectId,omitempty"`
-	FromCursor HarnSessionTimelineCursor `json:"fromCursor"`
-	Limit      *uint64                   `json:"limit,omitempty"`
-}
-
-// HarnSessionTimelineReference binds a semantic node to stable source evidence.
-type HarnSessionTimelineReference struct {
-	Kind    string  `json:"kind"`
-	ID      *string `json:"id,omitempty"`
-	Topic   *string `json:"topic,omitempty"`
-	EventID *uint64 `json:"eventId,omitempty"`
-}
-
-// HarnSessionTimelineLink carries causal or identity relationships.
-type HarnSessionTimelineLink struct {
-	Kind     string  `json:"kind"`
-	TargetID *string `json:"targetId,omitempty"`
-	TraceID  *string `json:"traceId,omitempty"`
-	SpanID   *string `json:"spanId,omitempty"`
-	EventID  *string `json:"eventId,omitempty"`
-}
-
-// HarnSessionTimelineNode is Harn's semantic chronology row; Kind remains open.
-type HarnSessionTimelineNode struct {
-	ID           string                         `json:"id"`
-	ParentID     *string                        `json:"parentId,omitempty"`
-	Children     []string                       `json:"children"`
-	Category     string                         `json:"category"`
-	Kind         string                         `json:"kind"`
-	Name         string                         `json:"name"`
-	Status       string                         `json:"status"`
-	TraceID      *string                        `json:"traceId,omitempty"`
-	SpanID       *string                        `json:"spanId,omitempty"`
-	OccurredAtMs *int64                         `json:"occurredAtMs,omitempty"`
-	StartMs      *uint64                        `json:"startMs,omitempty"`
-	DurationMs   *uint64                        `json:"durationMs,omitempty"`
-	Attributes   JSONValue                      `json:"attributes,omitempty"`
-	References   []HarnSessionTimelineReference `json:"references"`
-	Links        []HarnSessionTimelineLink      `json:"links"`
-	Order        uint64                         `json:"order"`
-}
-
-// HarnSessionTimelineCoverage states whether a bounded snapshot is complete.
-type HarnSessionTimelineCoverage struct {
-	Returned  uint64  `json:"returned"`
-	Available *uint64 `json:"available"`
-	Truncated bool    `json:"truncated"`
-}
-
-// HarnSessionTimelineSnapshot is a point-in-time semantic timeline query result.
-type HarnSessionTimelineSnapshot struct {
-	SchemaVersion uint32                      `json:"schemaVersion"`
-	Query         HarnSessionTimelineQuery    `json:"query"`
-	Cursor        HarnSessionTimelineCursor   `json:"cursor"`
-	Coverage      HarnSessionTimelineCoverage `json:"coverage"`
-	Nodes         []HarnSessionTimelineNode   `json:"nodes"`
-}
-
-// HarnSessionTimelineUpdate revises one semantic node for subscribers.
-type HarnSessionTimelineUpdate struct {
-	SchemaVersion uint32                    `json:"schemaVersion"`
-	Cursor        HarnSessionTimelineCursor `json:"cursor"`
-	Node          HarnSessionTimelineNode   `json:"node"`
-}
 
 // HarnPlanCommentState is the closed collaborative comment lifecycle.
 type HarnPlanCommentState string
@@ -669,27 +596,6 @@ type HarnAgentEventNotification struct {
 	JSONRPC string     `json:"jsonrpc"`
 	Method  string     `json:"method"`
 	Params  JSONObject `json:"params"`
-}
-
-// HarnToolArgSchema describes the static slice of a Harn tool's argument shape.
-type HarnToolArgSchema struct {
-	PathParams            []string            `json:"path_params"`
-	DependencyKeyParams   []string            `json:"dependency_key_params"`
-	DependencyRangeParams []map[string]string `json:"dependency_range_params"`
-	ArgAliases            map[string]string   `json:"arg_aliases"`
-	Required              []string            `json:"required"`
-}
-
-// HarnToolAnnotations describes Harn-side metadata for a tool.
-type HarnToolAnnotations struct {
-	Kind                   ACPToolKind                 `json:"kind"`
-	SideEffectLevel        HarnSideEffectLevel         `json:"side_effect_level"`
-	CompletionEvidenceRole *HarnCompletionEvidenceRole `json:"completion_evidence_role,omitempty"`
-	ArgSchema              HarnToolArgSchema           `json:"arg_schema"`
-	Capabilities           map[string][]string         `json:"capabilities"`
-	EmitsArtifacts         bool                        `json:"emits_artifacts"`
-	ResultReaders          []string                    `json:"result_readers"`
-	InlineResult           bool                        `json:"inline_result"`
 }
 
 // A2AMessage is one message inside an A2A task history.
