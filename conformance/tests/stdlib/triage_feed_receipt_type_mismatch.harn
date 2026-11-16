@@ -1,0 +1,15 @@
+import { triage_start_my_day } from "std/triage"
+
+fn invalid_receipt(obs: HarnessObs) -> string {
+  const feed = triage_start_my_day(obs, [])
+  const receipt = feed.receipts[0]
+  if receipt != nil {
+    const wrong_id: string = receipt.event_log_id
+    return wrong_id
+  }
+  return ""
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(type_of(invalid_receipt))
+}

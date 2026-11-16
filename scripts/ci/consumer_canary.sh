@@ -286,7 +286,8 @@ canary_record() {
 canary_bind() {
   local repo=$1 run_id=$2 head=$3 source=${SOURCE_REVISION:-}
   local producer=${CANARY_RELEASE_PRODUCER_RUN_ID:-} attempt=${CANARY_RELEASE_PRODUCER_RUN_ATTEMPT:-}
-  local paired=${CANARY_PAIRED_PULL:-} declared=${CANARY_DECLARED_PULL:-} manifest='' head_digest
+  local paired=${CANARY_PAIRED_PULL:-} declared=${CANARY_DECLARED_PULL:-} superseded=${CANARY_SUPERSEDED_PULLS:-}
+  local manifest='' head_digest
   if [[ "${CANARY_VERDICT:-}" != pass || -z "$producer$attempt" ]]; then
     echo "CONSUMER_CANARY binding=unrecorded reason=not_a_measured_release_pass"
     return 0
@@ -294,8 +295,15 @@ canary_bind() {
   if [[ ! "$head" =~ ^[0-9a-f]{40}$ || ! "$source" =~ ^[0-9a-f]{40}$
         || ! "$run_id" =~ ^[1-9][0-9]*$ || ! "$producer" =~ ^[1-9][0-9]*$ || ! "$attempt" =~ ^[1-9][0-9]*$
         || ! "$paired" =~ ^([1-9][0-9]*)?$ || ! "$declared" =~ ^([1-9][0-9]*)?$
+        || ! "$superseded" =~ ^([1-9][0-9]*(,[1-9][0-9]*)*)?$ || ( -n "$superseded" && -z "$declared" )
         || ! "${GITHUB_REPOSITORY:-}" =~ ^[^/]+/[^/]+$ ]]; then
     echo "::error::CONSUMER_CANARY binding=unrecorded reason=binding_identity_unmeasured"
+    return 1
+  fi
+  # The branch may have moved after dispatch; containment must hold for the
+  # revision the consumer run actually tested.
+  if [[ -n "$superseded" ]] && ! canary_check_superset "$repo" "$declared" "$head" "$superseded"; then
+    echo "::error::CONSUMER_CANARY binding=unrecorded reason=$CANARY_SUPERSET_REASON $CANARY_SUPERSET_DETAIL"
     return 1
   fi
   canary_api --optional manifest candidate_manifest_unread "$GITHUB_REPOSITORY" \
@@ -309,14 +317,17 @@ canary_bind() {
   [[ "$head_digest" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::CONSUMER_CANARY binding=unrecorded reason=digest_unavailable"; return 1; }
   jq -n --arg source "$source" --arg producer "$producer" --argjson attempt "$attempt" \
     --arg manifest "$manifest" --arg run "$run_id" --arg head "$head_digest" \
-    --arg paired "$paired" --arg declared "$declared" \
+    --arg paired "$paired" --arg declared "$declared" --arg superseded "$superseded" \
     '{schema:"harn.release.consumer_rehearsal_binding.v1",source_sha:$source,
       producer_run:$producer,producer_attempt:$attempt,manifest_digest:$manifest,
       consumer_run:$run,consumer_head_sha256:$head,
       consumer_pull:(if $paired == "" then null else $paired end),
-      declared_pull:(if $declared == "" then null else $declared end),verdict:"pass"}' > "$CANARY_BINDING_FILE" || return 1
+      declared_pull:(if $declared == "" then null else $declared end),
+      superseded_pulls:(if $superseded == "" then [] else ($superseded | split(",")) end),verdict:"pass"}' > "$CANARY_BINDING_FILE" || return 1
   echo "binding=$CANARY_BINDING_FILE" >> "$GITHUB_OUTPUT" || return 1
-  echo "CONSUMER_CANARY binding=recorded source=$source producer=$producer attempt=$attempt consumer=${paired:+pull-$paired}${paired:-default}"
+  local consumer=default
+  [[ -z "$paired" ]] || consumer=pull-$paired
+  echo "CONSUMER_CANARY binding=recorded source=$source producer=$producer attempt=$attempt consumer=$consumer${superseded:+ superseded=$superseded}"
 }
 
 # The shared source selector owns pairing grammar. This legacy dispatcher
@@ -324,11 +335,45 @@ canary_bind() {
 canary_read_pairing() {
   local text=$1 reader
   reader="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-pairing.mjs"
-  CANARY_PAIRED=$(printf '%s' "$text" | env -i PATH="$PATH" node "$reader" "${CONSUMER_PULL_REQUEST:-}") || exit 1
+  local claim
+  claim=$(printf '%s' "$text" | env -i PATH="$PATH" node "$reader" "${CONSUMER_PULL_REQUEST:-}") || exit 1
+  { read -r CANARY_PAIRED; read -r CANARY_SUPERSEDED || true; } <<< "$claim"
+  [[ "$CANARY_PAIRED" =~ ^([1-9][0-9]*)?$ && "$CANARY_SUPERSEDED" =~ ^([1-9][0-9]*(,[1-9][0-9]*)*)?$ ]] \
+    || canary_fail pairing_unrecognized
 }
 
-# The text whose trailers declare the pairing. A pull request description wins.
-# Otherwise an authenticated release producer reads every included commit, from
+# An explicit pull supersedes trailer-named pulls only when the revision it
+# rehearses contains every one of their heads, so the rehearsal still measures
+# each pairing. On refusal CANARY_SUPERSET_REASON and CANARY_SUPERSET_DETAIL
+# name the first pull that is missing or unmeasured.
+canary_check_superset() {
+  local repo=$1 paired=$2 rehearsed=$3 superseded=$4 pull head comparison status base
+  CANARY_SUPERSET_REASON=pairing_superset_unmeasured CANARY_SUPERSET_DETAIL="pull=$paired"
+  [[ "$rehearsed" =~ ^[0-9a-f]{40}$ ]] || return 1
+  for pull in ${superseded//,/ }; do
+    CANARY_SUPERSET_REASON=pairing_superset_unmeasured CANARY_SUPERSET_DETAIL="pull=$paired superseded=$pull"
+    head=''
+    canary_api --optional head pairing_superset_unmeasured secret:CONSUMER_CANARY_REPOSITORY \
+      "repos/$repo/pulls/$pull" --jq .head.sha || return 1
+    [[ "$head" =~ ^[0-9a-f]{40}$ ]] || return 1
+    comparison=''
+    canary_api --optional comparison pairing_superset_unmeasured secret:CONSUMER_CANARY_REPOSITORY \
+      "repos/$repo/compare/$head...$rehearsed" --jq '"\(.status) \(.merge_base_commit.sha)"' || return 1
+    read -r status base <<< "$comparison"
+    if [[ ! ( "$status" == identical || "$status" == ahead ) || "$base" != "$head" ]]; then
+      CANARY_SUPERSET_REASON=pairing_superset_missing CANARY_SUPERSET_DETAIL="pull=$paired missing=$pull"
+      return 1
+    fi
+  done
+}
+
+canary_require_superset() {
+  canary_check_superset "$@" || canary_fail "$CANARY_SUPERSET_REASON" "$CANARY_SUPERSET_DETAIL"
+  canary_say "CONSUMER_CANARY pairing pull=$2 superseded=$4 decision=superset_verified"
+}
+
+# Pinned PR checks use the pin job's current selection. Other callers may supply
+# an explicit description; otherwise a release producer reads included commits from
 # the previous stable tag through SOURCE_REVISION, because the commit that needs a consumer
 # change is usually a feature commit, not the release commit. Any other source
 # reads its own commit message. A range it cannot measure refuses rather than
@@ -336,6 +381,18 @@ canary_read_pairing() {
 canary_pairing_text() {
   local revision=$1 version=$2 scope=${3:-commit} source=${CANARY_PAIRING_SOURCE:-} base count
   case "$scope" in commit|release) ;; *) canary_fail pairing_scope_invalid ;; esac
+  if [[ -n "${CANARY_PULL_REQUEST_CLI_RUN:-}" ]]; then
+    # The pin job supplies its current authenticated selection alongside the
+    # exact consumer revision. The triggering event body may predate an edit.
+    if [[ "${CONSUMER_PULL_REQUEST:-}" == default ]]; then
+      CONSUMER_PULL_REQUEST=''
+    else
+      [[ "${CONSUMER_PULL_REQUEST:-}" =~ ^[1-9][0-9]*$ ]] \
+        || canary_fail consumer_pairing_selection_unmeasured
+    fi
+    CANARY_PAIRING_TEXT=''
+    return 0
+  fi
   CANARY_PAIRING_TEXT=${PAIRING_TEXT:-}
   [[ -z "$CANARY_PAIRING_TEXT" && -n "$source" ]] || return 0
   if [[ "$scope" == release ]] && release_version_is_canonical "$version" && ! release_version_is_prerelease "$version"; then
@@ -397,13 +454,14 @@ canary_dispatch() {
   canary_read_pairing "$CANARY_PAIRING_TEXT"
   paired=$CANARY_PAIRED
   CANARY_DECLARED_PULL=$paired
+  CANARY_SUPERSEDED_PULLS=$CANARY_SUPERSEDED
   if [[ -n "$paired" ]]; then
-    local pull state head_repo merged base default_branch
+    local pull state head_repo merged base default_branch rehearsed
     label=pull-$paired
     canary_api --detail "pull=$paired" pull paired_pull_unreadable \
       secret:CONSUMER_CANARY_REPOSITORY "repos/$repo/pulls/$paired" \
-      --jq '"\(.state) \(.head.repo.full_name // "none") \(.head.ref) \(.merged) \(.base.ref)"'
-    read -r state head_repo ref merged base <<< "$pull"
+      --jq '"\(.state) \(.head.repo.full_name // "none") \(.head.ref) \(.merged) \(.base.ref) \(.head.sha)"'
+    read -r state head_repo ref merged base rehearsed <<< "$pull"
     if [[ "$state" == closed && "$merged" == true ]]; then
       # A merged pairing's adaptation is on the base it merged into. Only the
       # default branch is what a release meets, so only that base is accepted.
@@ -411,10 +469,18 @@ canary_dispatch() {
       [[ -n "$default_branch" && "$base" == "$default_branch" ]] \
         || canary_fail paired_pull_merged_elsewhere "pull=$paired"
       canary_say "CONSUMER_CANARY pairing pull=$paired state=merged decision=rehearse_default reason=paired_pull_merged"
+      if [[ -n "$CANARY_SUPERSEDED_PULLS" ]]; then
+        canary_api rehearsed consumer_unreadable secret:CONSUMER_CANARY_REPOSITORY \
+          "repos/$repo/commits/$default_branch" --jq .sha
+        canary_require_superset "$repo" "$paired" "$rehearsed" "$CANARY_SUPERSEDED_PULLS"
+      fi
       paired='' ref=$default_branch label=default
     else
       [[ "$state" == open ]] || canary_fail paired_pull_closed_unmerged "pull=$paired state=$state"
       [[ "$head_repo" == "$repo" ]] || canary_fail paired_pull_from_fork "pull=$paired"
+      if [[ -n "$CANARY_SUPERSEDED_PULLS" ]]; then
+        canary_require_superset "$repo" "$paired" "$rehearsed" "$CANARY_SUPERSEDED_PULLS"
+      fi
     fi
   else
     canary_api ref consumer_unreadable secret:CONSUMER_CANARY_REPOSITORY "repos/$repo" --jq .default_branch
@@ -740,8 +806,9 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
       CANARY_DISPATCHING=true
       canary_dispatch
       [[ -n "${GITHUB_OUTPUT:-}" ]] || canary_fail observation_output_unset
-      printf 'run_id=%s\nstarted_at=%s\npaired_pull=%s\ndeclared_pull=%s\n' "$CANARY_RUN_ID" "$CANARY_STARTED_AT" \
-        "${CANARY_PAIRED_PULL:-}" "${CANARY_DECLARED_PULL:-}" >> "$GITHUB_OUTPUT"
+      printf 'run_id=%s\nstarted_at=%s\npaired_pull=%s\ndeclared_pull=%s\nsuperseded_pulls=%s\n' \
+        "$CANARY_RUN_ID" "$CANARY_STARTED_AT" "${CANARY_PAIRED_PULL:-}" "${CANARY_DECLARED_PULL:-}" \
+        "${CANARY_SUPERSEDED_PULLS:-}" >> "$GITHUB_OUTPUT"
       ;;
     --observe) canary_observe ;;
     --record) canary_record ;;

@@ -39,6 +39,8 @@ test('the actual deadline reader authenticates real archives and original produc
       steps:[declared,step(observerPublicationWitness(context),3,1001,1002,'success'),observed,published]};
     const fixture=path.join(scratch,'fixture.json'),preload=path.join(scratch,'fetch.mjs');
     fs.writeFileSync(preload,`import fs from 'node:fs';
+      import {readRetry} from ${JSON.stringify(new URL('../lib/consumer-observer.mjs', import.meta.url).href)};
+      readRetry.backoffMs=0;
       const fixture=JSON.parse(fs.readFileSync(${JSON.stringify(fixture)},'utf8'));
       let parentReads=0;
       globalThis.fetch=async(url,options={})=>{

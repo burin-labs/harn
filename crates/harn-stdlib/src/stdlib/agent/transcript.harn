@@ -208,7 +208,8 @@ fn __transcript_record_field(record: dict?, key: string) -> dict? {
     return nil
   }
   const value = record[key]
-  if type_of(value) != "dict" {
+  const kind = type_of(value)
+  if kind != "dict" && kind != "struct" {
     return nil
   }
   return value

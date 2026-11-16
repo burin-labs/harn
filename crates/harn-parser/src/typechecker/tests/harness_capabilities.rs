@@ -24,22 +24,36 @@ fn error_help(source: &str) -> String {
 
 // --- unknown capability -------------------------------------------------
 
-#[test]
-fn unknown_capability_property_is_error() {
-    let errs = errors("fn main(harness: Harness) {\n  const x = harness.bogus\n  log(x)\n}");
-    assert!(
-        has(&errs, "`Harness` has no capability `bogus`"),
-        "got: {errs:?}"
-    );
-}
-
-#[test]
-fn unknown_capability_method_call_is_error() {
-    let errs = errors("fn main(harness: Harness) {\n  log(harness.bogus.read())\n}");
-    assert!(
-        has(&errs, "`Harness` has no capability `bogus`"),
-        "got: {errs:?}"
-    );
+#[rstest::rstest]
+#[case::unknown_capability_property_is_error(
+    "fn main(harness: Harness) {\n  const x = harness.bogus\n  log(x)\n}",
+    "`Harness` has no capability `bogus`"
+)]
+#[case::unknown_capability_method_call_is_error(
+    "fn main(harness: Harness) {\n  log(harness.bogus.read())\n}",
+    "`Harness` has no capability `bogus`"
+)]
+#[case::near_miss_capability_suggests_the_real_one(
+    "fn main(harness: Harness) {\n  log(harness.stdi.println(\"x\"))\n}",
+    "did you mean `stdio`?"
+)]
+// Method declarations must be available to the parser without starting a VM.
+#[case::unknown_method_on_a_capability_is_error(
+    "fn main(harness: Harness) {\n  log(harness.fs.bogus_method())\n}",
+    "value of type HarnessFs has no method `bogus_method`"
+)]
+#[case::a_near_miss_method_suggests_the_real_name(
+    "fn main(harness: Harness) {\n  log(harness.fs.read_txt(\"a\"))\n}",
+    "did you mean `read_text`?"
+)]
+// Narrow handles reach the same check through their own type names.
+#[case::unknown_method_on_a_narrow_handle_is_error(
+    "fn read(fs: HarnessFs) {\n  log(fs.bogus_method())\n}",
+    "value of type HarnessFs has no method `bogus_method`"
+)]
+fn invalid_capability_uses_are_rejected(#[case] case_input: &str, #[case] case_expected: &str) {
+    let errs = errors(case_input);
+    assert!(has(&errs, case_expected), "got: {errs:?}");
 }
 
 /// The exact expression that cost two release attempts: `crypto` is a pure
@@ -56,12 +70,6 @@ fn harness_crypto_is_rejected_with_the_capability_list() {
         help.starts_with("available capabilities:") && help.contains("fs"),
         "expected the capability list in the help, got: {help:?}"
     );
-}
-
-#[test]
-fn near_miss_capability_suggests_the_real_one() {
-    let errs = errors("fn main(harness: Harness) {\n  log(harness.stdi.println(\"x\"))\n}");
-    assert!(has(&errs, "did you mean `stdio`?"), "got: {errs:?}");
 }
 
 #[test]
@@ -134,28 +142,6 @@ fn every_declared_capability_is_accepted() {
 
 // --- unknown method on a known capability --------------------------------
 
-/// Before this check, `harn check` accepted a misspelled capability method and
-/// the failure surfaced only when the expression executed. The parser could
-/// not tell the difference, because the only method set it could read was the
-/// one the VM installs at startup (#6101).
-#[test]
-fn unknown_method_on_a_capability_is_error() {
-    let errs = errors("fn main(harness: Harness) {\n  log(harness.fs.bogus_method())\n}");
-    assert!(
-        has(
-            &errs,
-            "value of type HarnessFs has no method `bogus_method`"
-        ),
-        "got: {errs:?}"
-    );
-}
-
-#[test]
-fn a_near_miss_method_suggests_the_real_name() {
-    let errs = errors("fn main(harness: Harness) {\n  log(harness.fs.read_txt(\"a\"))\n}");
-    assert!(has(&errs, "did you mean `read_text`?"), "got: {errs:?}");
-}
-
 /// The falsifier for the whole change. `harness.runtime.shared_cell` is
 /// declared by `#[harn_builtin]` inside `harn-vm`, so it is absent from the
 /// installed manifest in a parser-only process. Reporting the miss without
@@ -168,19 +154,6 @@ fn a_vm_declared_method_is_accepted_without_the_vm() {
     assert!(
         !has(&errs, "has no method"),
         "a VM-declared method must not be reported as unknown: {errs:?}"
-    );
-}
-
-/// A narrowed handle reaches the same check through its own type name.
-#[test]
-fn unknown_method_on_a_narrow_handle_is_error() {
-    let errs = errors("fn read(fs: HarnessFs) {\n  log(fs.bogus_method())\n}");
-    assert!(
-        has(
-            &errs,
-            "value of type HarnessFs has no method `bogus_method`"
-        ),
-        "got: {errs:?}"
     );
 }
 
