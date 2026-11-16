@@ -1,5 +1,6 @@
 //! A held command narrates progress without replacing the user's plan.
 
+use super::stop_during_wait::{reply_unavailable, InstallHostlib};
 use super::*;
 
 #[cfg(unix)]
@@ -14,7 +15,8 @@ async fn command_hold_projection(stop: bool, cancel_command: bool) {
     let pipeline = dir.path().join("hold.harn");
     std::fs::write(&pipeline, "pipeline default(harness: Harness) {}\n").unwrap();
     let (request_tx, mut response_rx, server, session_id) = start_acp_code_session_with_config(
-        AcpServerConfig::for_pipeline(pipeline.to_string_lossy().to_string()),
+        AcpServerConfig::for_pipeline(pipeline.to_string_lossy().to_string())
+            .with_runtime_configurator(Arc::new(InstallHostlib)),
         serde_json::json!(dir.path()),
     )
     .await;
@@ -74,6 +76,8 @@ pipeline default(harness: Harness) {{
             let message = recv_json(&mut response_rx).await;
             if message["method"] == "host/capabilities" {
                 reply_empty_result(&request_tx, &message);
+            } else if message["method"] == "host/call" {
+                reply_unavailable(&request_tx, &message);
             } else if message["method"] == "session/update" {
                 let update = &message["params"]["update"];
                 if update["sessionUpdate"] == "plan" {

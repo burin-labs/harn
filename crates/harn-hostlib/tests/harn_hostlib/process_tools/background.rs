@@ -2,7 +2,12 @@
 use super::*;
 use harn_vm::value::VmDictExt as _;
 
-fn assert_cancel_status_only(session_id: &str, handle_id: &str, expected_status: &str) {
+fn assert_cancel_status_only(
+    session_id: &str,
+    handle_id: &str,
+    expected_status: &str,
+    lease: &str,
+) {
     let items = harn_vm::orchestration::agent_inbox::drain(session_id);
     assert_eq!(
         items.len(),
@@ -18,7 +23,7 @@ fn assert_cancel_status_only(session_id: &str, handle_id: &str, expected_status:
     let status: serde_json::Value = serde_json::from_str(&items[0].content).unwrap();
     assert_eq!(
         status,
-        serde_json::json!({"handle_id":handle_id,"status":expected_status,"lease":"awaited"})
+        serde_json::json!({"handle_id":handle_id,"status":expected_status,"lease":lease})
     );
     assert!(status.get("stdout").is_none() && status.get("output_path").is_none());
 }
@@ -775,7 +780,7 @@ fn cancel_handle_kills_long_running_process() {
         let _ = rx.recv();
     }
 
-    assert_cancel_status_only(&session_id, &info.handle_id, "killed");
+    assert_cancel_status_only(&session_id, &info.handle_id, "killed", "awaited");
 }
 
 #[test]
@@ -900,7 +905,7 @@ fn cancel_handle_can_wait_for_timed_out_result() {
     assert!(byte_count >= 15);
     assert_eq!(reaped_child_count, 1);
 
-    assert_cancel_status_only(&session_id, &handle_id, "timed_out");
+    assert_cancel_status_only(&session_id, &handle_id, "timed_out", "service");
 }
 
 #[test]

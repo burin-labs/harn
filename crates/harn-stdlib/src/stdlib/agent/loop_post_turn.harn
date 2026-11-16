@@ -179,10 +179,17 @@ pub fn agent_loop_command_hold_transition(
   session_id: string,
   input: AgentLoopCommandHoldInput,
 ) -> AgentLoopCommandHoldResult {
-  // The process owner supplies handle identity and lease. Tool payload shape
-  // and the presence of other calls do not decide whether a command is awaited.
-  const reconciled = command_ledger_reconcile(harness, session_id, input.ledger, input.command_wait)
-  if !command_ledger_should_hold(reconciled, input.tool_count) {
+  // Explicit native completion uses the process owner's session handles.
+  // Generic consumers retain their local ledger and post-tool scheduling.
+  const native_completion = (input.command_wait.completion_tool ?? "") != ""
+  const reconciled = native_completion ? command_ledger_reconcile(
+    harness,
+    session_id,
+    input.ledger,
+    input.command_wait,
+  ) : input.ledger
+  if (!native_completion && input.tool_count != 0)
+    || !command_ledger_should_hold(reconciled, input.tool_count) {
     return {
       action: "proceed",
       ledger: reconciled,
