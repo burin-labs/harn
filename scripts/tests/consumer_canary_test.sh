@@ -512,7 +512,7 @@ fixture_commit() {
 }
 # fixture_release <trailer for the first feature commit, or empty>
 fixture_release() {
-  rm -rf "$history"
+  rm -rf "$history" "$history-origin"
   git init -q -b main "$history"
   fixture_commit 1.2.3 'Release v1.2.3'
   git -C "$history" tag v1.2.3
@@ -522,6 +522,8 @@ fixture_release() {
   fixture_commit 1.2.4-dev $'Promote a lint to an error\n\nPairs-with: consumer#7'
   fixture_commit 1.2.4-dev 'Unrelated change'
   fixture_commit 1.2.4 'Release v1.2.4'
+  git clone -q --bare "$history" "$history-origin"
+  git -C "$history" remote add origin "$history-origin"
 }
 # range_canary <workspace version> [pull request description] [release|ordinary]:
 # a release supplies the producer identity validated by the real dispatcher.
