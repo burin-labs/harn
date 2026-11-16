@@ -563,15 +563,21 @@ if [[ "${SETUP_PROFILE}" == "full" ]]; then
 
   # Only the pinned fork parses background/wait steps; `make lint-actions-source`
   # refuses any other actionlint, so replace one rather than keeping it.
+  # ci.yml's ACTIONLINT_VERSION is the one pin; CI installs the same version.
+  actionlint_version="$(sed -n -E 's/^[[:space:]]*ACTIONLINT_VERSION: "([^"]+)"$/\1/p' .github/workflows/ci.yml)"
+  if [[ -z "$actionlint_version" || "$actionlint_version" == *$'\n'* ]]; then
+    echo "error: expected one ACTIONLINT_VERSION in .github/workflows/ci.yml, found '${actionlint_version}'" >&2
+    exit 1
+  fi
   actionlint_found="$(actionlint --version 2>/dev/null | head -n 1 || true)"
-  # The go-installed build prints `v1.16.1`; the release tarball omits the `v`.
-  if [[ "${actionlint_found/ v/ }" == "actionlint.kjanat.dev 1.16.1" ]]; then
+  # The go-installed build prints `v<version>`; the release tarball omits the `v`.
+  if [[ "${actionlint_found/ v/ }" == "actionlint.kjanat.dev ${actionlint_version}" ]]; then
     echo "actionlint already installed."
   elif command -v go >/dev/null 2>&1; then
     echo "Installing actionlint with background/wait step support (found: ${actionlint_found:-none})..."
-    go install actionlint.kjanat.dev/cmd/actionlint@v1.16.1 || echo "warning: failed to install actionlint (non-fatal)"
+    go install "actionlint.kjanat.dev/cmd/actionlint@v${actionlint_version}" || echo "warning: failed to install actionlint (non-fatal)"
     actionlint_found="$(actionlint --version 2>/dev/null | head -n 1 || true)"
-    if [[ -n "$actionlint_found" && "${actionlint_found/ v/ }" != "actionlint.kjanat.dev 1.16.1" ]]; then
+    if [[ -n "$actionlint_found" && "${actionlint_found/ v/ }" != "actionlint.kjanat.dev ${actionlint_version}" ]]; then
       echo "warning: '$actionlint_found' still shadows the Go-installed actionlint on PATH; put \$(go env GOPATH)/bin first"
     fi
   else
