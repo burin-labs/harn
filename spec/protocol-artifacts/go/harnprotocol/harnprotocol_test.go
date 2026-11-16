@@ -174,6 +174,10 @@ func TestRoundTripFixture(t *testing.T) {
 	if err := json.Unmarshal(fixture["envelopes"], &envelopes); err != nil {
 		t.Fatalf("decode envelopes: %v", err)
 	}
+	var timeline map[string]json.RawMessage
+	if err := json.Unmarshal(fixture["sessionTimeline"], &timeline); err != nil {
+		t.Fatalf("decode timeline fixture: %v", err)
+	}
 
 	for _, item := range []struct {
 		name   string
@@ -192,6 +196,8 @@ func TestRoundTripFixture(t *testing.T) {
 		{"MCPInputRequiredResult", fixture["mcpInputRequiredResult"], &MCPInputRequiredResult{}},
 		{"MCPUnsupportedProtocolVersionError", fixture["mcpUnsupportedProtocolVersionError"], &MCPUnsupportedProtocolVersionError{}},
 		{"ToolCallReceipt", fixture["toolCallReceipt"], &ToolCallReceipt{}},
+		{"TimelineSnapshot", timeline["snapshot"], &HarnSessionTimelineSnapshot{}},
+		{"TimelineUpdate", timeline["update"], &HarnSessionTimelineUpdate{}},
 	} {
 		t.Run(item.name, func(t *testing.T) {
 			if err := json.Unmarshal(item.raw, item.target); err != nil {

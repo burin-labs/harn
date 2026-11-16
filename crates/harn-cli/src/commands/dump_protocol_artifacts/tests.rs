@@ -676,32 +676,43 @@ fn generated_rust_preserves_wire_constants_and_provenance() {
 }
 
 #[test]
-fn generated_bindings_expose_one_open_session_timeline_contract() {
-    let rust = generate_rust_for_tests();
-    let swift = generate_swift_for_tests();
-    let typescript = generate_typescript_for_tests();
-    let python = generate_python();
-    let go = generate_go();
+fn generated_timeline_bindings_preserve_runtime_records_and_defaults() {
+    use generated_rust_binding::{
+        HarnSessionTimelineQuery, HarnSessionTimelineSnapshot, HarnSessionTimelineUpdate,
+    };
+    let fixture = super::timeline_records::round_trip_fixture().unwrap();
+    let snapshot: HarnSessionTimelineSnapshot =
+        serde_json::from_value(fixture["snapshot"].clone()).unwrap();
+    let update: HarnSessionTimelineUpdate =
+        serde_json::from_value(fixture["update"].clone()).unwrap();
+    assert_eq!(snapshot.nodes.len(), 1);
+    assert_eq!(snapshot.nodes[0].kind, "future_kind");
+    assert_eq!(serde_json::to_value(snapshot).unwrap(), fixture["snapshot"]);
+    assert_eq!(serde_json::to_value(update).unwrap(), fixture["update"]);
+    let query: HarnSessionTimelineQuery = serde_json::from_value(json!({})).unwrap();
+    let runtime: harn_vm::session_timeline::SessionTimelineQuery =
+        serde_json::from_value(json!({})).unwrap();
+    assert_eq!(
+        serde_json::to_value(query).unwrap(),
+        serde_json::to_value(runtime).unwrap()
+    );
+    let mut invalid = fixture["snapshot"].clone();
+    invalid["nodes"][0]["references"][0]["eventId"] = json!("unmeasured");
+    assert!(serde_json::from_value::<HarnSessionTimelineSnapshot>(invalid).is_err());
+}
 
-    for type_name in [
-        "HarnSessionTimelineCursor",
-        "HarnSessionTimelineQuery",
-        "HarnSessionTimelineReference",
-        "HarnSessionTimelineLink",
-        "HarnSessionTimelineNode",
-        "HarnSessionTimelineCoverage",
-        "HarnSessionTimelineSnapshot",
-        "HarnSessionTimelineUpdate",
-    ] {
-        assert!(rust.contains(&format!("struct {type_name}")));
-        assert!(swift.contains(&format!("struct {type_name}")));
-        assert!(typescript.contains(&format!("interface {type_name}")));
-        assert!(python.contains(&format!("class {type_name}")));
-        assert!(go.contains(&format!("type {type_name} struct")));
-    }
-    assert!(rust.contains("pub kind: String"));
-    assert!(swift.contains("public var kind: String"));
-    assert!(typescript.contains("kind: string"));
+#[test]
+fn generated_tool_annotations_preserve_owned_safety_hints() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(&generate_round_trip_fixture().unwrap()).unwrap();
+    let expected = fixture["harnToolAnnotations"].clone();
+    let annotations: generated_rust_binding::HarnToolAnnotations =
+        serde_json::from_value(expected.clone()).unwrap();
+    assert_eq!(annotations.read_only_hint, Some(false));
+    assert_eq!(annotations.destructive_hint, Some(true));
+    assert_eq!(annotations.idempotent_hint, Some(false));
+    assert_eq!(annotations.open_world_hint, Some(true));
+    assert_eq!(serde_json::to_value(annotations).unwrap(), expected);
 }
 
 #[test]
