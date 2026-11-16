@@ -1,0 +1,8 @@
+import { approval_allow_all_reviewer } from "std/agent/approval_review"
+
+pipeline default(harness: Harness) {
+  const reviewer = approval_allow_all_reviewer({})
+  const decision = reviewer({category: "read_source"})
+  const wrong: int = decision.approved
+  harness.stdio.println(wrong)
+}
