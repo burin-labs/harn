@@ -597,7 +597,7 @@ function readCredential(credentials, url) {
   refuse('read_authority_or_identity_missing');
 }
 
-async function githubRead(token, url, fetchRecord) {
+async function githubRead(token, url, fetchRecord, knownArtifact = false) {
   const {credential, role} = readCredential(token, url);
   for (let attempt = 1; ; attempt += 1) {
     let response = null;
@@ -612,10 +612,12 @@ async function githubRead(token, url, fetchRecord) {
     } catch { /* Transport exceptions can contain private endpoints. */ }
     cleanupReadScopes.get(fetchRecord)?.remaining();
     if (response?.ok) return response;
-    const wait = await readRetryMs(response, attempt);
+    const missingArtifact = knownArtifact && response?.status === 404;
+    const wait = missingArtifact
+      ? readRetry.backoffMs * 2 ** (attempt - 1) : await readRetryMs(response, attempt);
     if (wait === undefined || wait > readRetry.limitMs || attempt >= readRetry.attempts) {
       if (response === null) refuse('github_read_unavailable',{attempts:attempt,read_role:role,retryable:true});
-      if (wait !== undefined) retryableReadResponses.set(response, Math.ceil(wait / 1000));
+      if (wait !== undefined && !missingArtifact) retryableReadResponses.set(response, Math.ceil(wait / 1000));
       return response;
     }
     await waitForRead(fetchRecord, wait);
@@ -932,8 +934,10 @@ async function githubArtifactPayload(token, repository, artifact, expected, fetc
     || artifact.size_in_bytes > 65_536) {
     refuse('dispatch_declaration_identity_unproven');
   }
+  // A finalized archive can be listed before its download is available.
+  // Only this identity-checked read may retry a 404.
   const archive = await githubRead(token,
-    `https://api.github.com/repos/${repository}/actions/artifacts/${artifact.id}/zip`, fetchRecord);
+    `https://api.github.com/repos/${repository}/actions/artifacts/${artifact.id}/zip`, fetchRecord, true);
   if (!archive.ok) refuse('dispatch_declaration_read_refused', refusalDiagnostic(archive));
   const bytes = Buffer.from(await archive.arrayBuffer());
   if (bytes.length > 65_536
