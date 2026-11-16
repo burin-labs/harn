@@ -103,7 +103,7 @@ mod tests {
         let root = VmValue::String("budget-root".into());
         let child = VmValue::String("budget-child".into());
         assert!(matches!(
-            loop_budget(&[root.clone()], &mut String::new()),
+            loop_budget(std::slice::from_ref(&root), &mut String::new()),
             Ok(VmValue::Nil)
         ));
         let snapshot = serde_json::json!({
@@ -113,20 +113,29 @@ mod tests {
             "grants_remaining": {"verification": 1, "recovery": 1, "terminal_report": 0}
         });
         set_loop_budget(&[root.clone(), json_to_vm(&snapshot)], &mut String::new()).unwrap();
-        let observed = loop_budget(&[root.clone()], &mut String::new()).unwrap();
+        let observed = loop_budget(std::slice::from_ref(&root), &mut String::new()).unwrap();
         assert_eq!(vm_to_json(&observed), snapshot);
         assert!(matches!(
             loop_budget(&[child], &mut String::new()),
             Ok(VmValue::Nil)
         ));
-        let mut invalid = snapshot;
+        let mut invalid = snapshot.clone();
         invalid["remaining"] = serde_json::json!(-1);
         assert!(
             set_loop_budget(&[root.clone(), json_to_vm(&invalid)], &mut String::new()).is_err()
         );
         assert_eq!(
-            vm_to_json(&loop_budget(&[root], &mut String::new()).unwrap())["remaining"],
+            vm_to_json(&loop_budget(std::slice::from_ref(&root), &mut String::new()).unwrap())
+                ["remaining"],
             0
+        );
+        let mut unmeasured = snapshot;
+        unmeasured["remaining"] = serde_json::Value::Null;
+        unmeasured["max_iterations"] = serde_json::Value::Null;
+        set_loop_budget(&[root.clone(), json_to_vm(&unmeasured)], &mut String::new()).unwrap();
+        assert_eq!(
+            vm_to_json(&loop_budget(std::slice::from_ref(&root), &mut String::new()).unwrap()),
+            unmeasured
         );
         assert!(loop_budget(
             &[VmValue::String("unknown-session".into())],

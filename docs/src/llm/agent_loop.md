@@ -709,7 +709,8 @@ invalid fields raise an `agent_loop` error before the first provider call.
 Tools and lifecycle callbacks can call
 `harness.agent.session_loop_budget(session_id)` to read the loop's current
 iteration budget. The read returns `nil` before the loop publishes a
-measurement. An unknown or closed session raises an error.
+measurement. A session without live host state raises an error. Retaining a
+completed session's transcript doesn't retain its callable budget.
 
 The snapshot uses schema `harn.agent_loop_budget_snapshot.v1`:
 

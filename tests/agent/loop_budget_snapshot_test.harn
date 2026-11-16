@@ -4,7 +4,7 @@ import { AgentSpec } from "std/agent/options"
 import { llm_tool_call, with_llm_script } from "std/testing"
 
 pipeline test_callable_budget_tracks_consumed_turn_and_terminal_retry(harness: Harness) {
-  const session = "budget-retry-" + harness.random.uuid()
+  const session = "budget-retry-${harness.random.uuid()}"
   let tools = tool_registry()
   tools = tool_define(
     tools,
@@ -66,6 +66,17 @@ pipeline test_callable_budget_tracks_consumed_turn_and_terminal_retry(harness: H
       assert_eq(result.status, "done")
       assert_eq(result.llm.iterations, 2)
       assert(
+        len(harness.agent.session_messages(session)) > 0,
+        "the completed session must retain its actual transcript",
+      )
+      const finalized_budget = try {
+        harness.agent.session_loop_budget(session)
+      }
+      assert(
+        is_err(finalized_budget),
+        "a retained transcript must not masquerade as a live loop-budget projection",
+      )
+      assert(
         result.adaptive_budget.decisions.any(
           { decision -> decision.reason == "terminal_callback_continue" },
         ),
@@ -76,7 +87,7 @@ pipeline test_callable_budget_tracks_consumed_turn_and_terminal_retry(harness: H
 }
 
 pipeline test_callable_budget_exposes_zero_at_an_unrescued_ceiling(harness: Harness) {
-  const session = "budget-stop-" + harness.random.uuid()
+  const session = "budget-stop-${harness.random.uuid()}"
   let tools = tool_registry()
   tools = tool_define(
     tools,
