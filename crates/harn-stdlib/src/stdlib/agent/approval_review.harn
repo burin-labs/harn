@@ -134,6 +134,8 @@ type ApprovalReviewProbabilityInput = {...dict<string, unknown>}
 
 type ApprovalReviewPolicyDecisionReference = {context?: unknown, ...dict<string, unknown>}
 
+type ApprovalReviewMemoContext = {...dict<string, unknown>}
+
 type ApprovalReviewRequestReference = {
   session_id?: unknown,
   policy_decision?: unknown,
@@ -1238,7 +1240,12 @@ pub fn approval_reviewer_for(harness: Harness, policy: dict, goal: string) -> Ap
       request
         + {
           policy_decision: raw_policy_decision
-            + {context: omit(policy_decision.context, ["repeat_count"])},
+            + {
+              context: omit(
+                schema_expect(policy_decision.context, schema_of(ApprovalReviewMemoContext)),
+                ["repeat_count"],
+              ),
+            },
         }
     } else {
       request

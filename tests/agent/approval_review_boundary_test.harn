@@ -136,6 +136,7 @@ pipeline test_generated_callback_retains_memoization_and_unavailable_receipts(ha
     [
       llm_text(json_stringify({risk: "low", authorization: "high", rationale: "source goal"})),
       llm_error("reviewer unavailable"),
+      llm_text(json_stringify({risk: "low", authorization: "high", rationale: "source goal"})),
     ],
     { ->
       const reviewer = approval_reviewer_for(harness, {}, "Read source")
@@ -143,23 +144,31 @@ pipeline test_generated_callback_retains_memoization_and_unavailable_receipts(ha
         tool: "read_file",
         category: "read_source",
         session_id: "session",
-        policy_decision: {context: {repeat_count: 1}},
+        policy_decision: {context: {repeat_count: 1, [7]: "first authority"}},
       }
       const first = reviewer(request)
       assert(first.approved)
       assert_eq(schema_expect(first, schema_of(ApprovalReviewDecision)), first)
-      const repeated = reviewer(request + {policy_decision: {context: {repeat_count: 2}}})
+      const repeated = reviewer(
+        request + {policy_decision: {context: {repeat_count: 2, [7]: "first authority"}}},
+      )
       assert(repeated.approved)
       assert_eq(repeated.memoized, true)
       assert_eq(repeated.cost_usd, 0.0)
       assert_eq(len(harness.llm.mock_calls()), 1, "an exact repeated refusal must not call again")
-      const unavailable = reviewer(request + {refused_paths: ["other"]})
+      const unavailable = reviewer(
+        request + {policy_decision: {context: {repeat_count: 3, [7]: "changed authority"}}},
+      )
       assert(!unavailable.approved)
       assert(!unavailable.reviewer_answered)
       assert_eq(unavailable.risk, nil)
       assert_eq(unavailable.unavailable_reason, "reviewer_error")
       assert_eq(len(harness.llm.mock_calls()), 2, "a changed refusal must reach the reviewer")
       assert_eq(schema_expect(unavailable, schema_of(ApprovalReviewDecision)), unavailable)
+      const scalar = reviewer(false)
+      assert(scalar.approved, "the generative callback retains its scalar-input fallback")
+      assert_eq(scalar.category, "unclassified")
+      assert_eq(len(harness.llm.mock_calls()), 3)
     },
   )
 }
