@@ -565,26 +565,80 @@ fn write_surfaces_resolve_relative_noncanonical_paths_against_execution_root() {
     );
 }
 
+/// A directory on the path swapped for a symlink while writes run: every
+/// write either lands beneath the root or is refused, never outside it. The
+/// swap must be observed at least once, so a run that never raced fails.
+#[cfg(unix)]
+#[test]
+fn write_file_parent_swap_never_lands_outside_the_root() {
+    use std::os::unix::fs::symlink;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let root = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+    let sub = root.path().join("sub");
+    let parked = root.path().join("sub.real");
+    fs::create_dir(&sub).unwrap();
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let swapper = {
+        let (stop, sub, parked, outside) = (
+            stop.clone(),
+            sub.clone(),
+            parked,
+            outside.path().to_path_buf(),
+        );
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                fs::rename(&sub, &parked).unwrap();
+                symlink(&outside, &sub).unwrap();
+                std::thread::yield_now();
+                fs::remove_file(&sub).unwrap();
+                fs::rename(&parked, &sub).unwrap();
+            }
+        })
+    };
+
+    let reg = registry();
+    let _guard = PolicyGuard::worktree(&[root.path()]);
+    let target = path_str(&sub.join("f.txt"));
+    let mut refused = 0;
+    for _ in 0..2000 {
+        let result = call(
+            &reg,
+            "hostlib_tools_write_file",
+            &[
+                ("path", vm_string(&target)),
+                ("content", vm_string("payload\n")),
+                ("create_parents", VmValue::Bool(false)),
+            ],
+        );
+        if matches!(result, Err(HostlibError::SandboxViolation { .. })) {
+            refused += 1;
+        }
+    }
+    stop.store(true, Ordering::Relaxed);
+    swapper.join().unwrap();
+
+    assert!(
+        !outside.path().join("f.txt").exists(),
+        "a write through the swapped parent landed outside the root"
+    );
+    assert!(
+        refused > 0,
+        "the swap was never observed; the run did not race"
+    );
+}
+
 /// Regression for audit finding F5 (filesystem write/delete symlink-swap
-/// TOCTOU).
+/// TOCTOU), with symlinks planted before the call:
 ///
-/// The scope check canonicalizes a *copy* of the path; the actual
-/// `write`/`remove_*` then ran on the raw path and followed a symlink at
-/// the final component at op time. An attacker with in-workspace write
-/// could plant a symlink at a check-passed path that points *outside* the
-/// roots, escaping the workspace on the subsequent write or delete.
-///
-/// A full race is impractical to drive deterministically, so this exercises
-/// the static guard two ways:
-///
-/// 1. An in-root symlink pointing *outside* — caught by the canonical
-///    scope check *and* the no-follow guard; the outside target must stay
-///    untouched.
-/// 2. An in-root symlink pointing to *another in-root* file — this passes
-///    the canonical scope check (its target is in-scope), so it isolates
-///    the new no-follow guard: the write must be refused / must not follow
-///    the link, leaving the link's in-root target unchanged. This is the
-///    case a swap-after-check would land on, made deterministic.
+/// 1. An in-root symlink pointing *outside*: refused, and the outside
+///    target stays untouched.
+/// 2. An in-root symlink pointing to *another in-root* file: it passes the
+///    canonical scope check, so only the no-follow open can refuse it. The
+///    refusal must be a sandbox violation on every Unix.
 ///
 /// A normal in-root real-file write + overwrite + delete must still
 /// succeed (no regression).
@@ -658,10 +712,15 @@ fn write_delete_reject_symlink_swap_escape() {
             ("content", vm_string("payload-via-symlink\n")),
         ],
     );
+    // A symlink refusal is reported as one on every Unix, whatever errno the
+    // platform uses for a refused no-follow open.
     assert!(
-        write_through_in_root.is_err(),
-        "the no-follow guard must refuse to write through a symlink-final path, got \
-         {write_through_in_root:?}"
+        matches!(
+            write_through_in_root,
+            Err(HostlibError::SandboxViolation { ref message, .. }) if message.contains("is a symlink")
+        ),
+        "the no-follow guard must refuse to write through a symlink-final path as a sandbox \
+         violation, got {write_through_in_root:?}"
     );
     assert_eq!(
         fs::read_to_string(&in_root_target).unwrap(),

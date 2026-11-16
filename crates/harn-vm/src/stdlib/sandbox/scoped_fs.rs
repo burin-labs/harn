@@ -12,8 +12,8 @@ use std::io::{self, Write as _};
 use std::path::{Component, Path, PathBuf};
 
 use super::paths::{
-    is_standard_io_device_for_access, normalize_for_policy, normalize_io_device_path,
-    path_is_within,
+    is_standard_io_device_for_access, lexical_for_policy, normalize_for_policy,
+    normalize_io_device_path, path_is_within,
 };
 use super::{
     check_fs_path_scope, locked_append, normalized_workspace_roots, workspace_env,
@@ -84,13 +84,17 @@ pub(crate) fn create_dir_scoped_at_open(
     }
 }
 
+/// A mutation the active path scope admits: the workspace root that holds it,
+/// and the path beneath that root. Open `root` once and resolve `relative`
+/// from it, so no component is looked up again from the host root.
 #[derive(Clone, Debug)]
-pub(super) struct ScopedMutationTarget {
-    pub(super) root: PathBuf,
-    pub(super) relative: PathBuf,
+pub struct ScopedMutationTarget {
+    pub root: PathBuf,
+    pub relative: PathBuf,
 }
 
-pub(super) fn scoped_mutation_target(
+/// The scoped target for `path`, or `None` when no path scope is active.
+pub fn scoped_mutation_target(
     builtin: &str,
     path: &Path,
     access: FsAccess,
@@ -107,7 +111,14 @@ pub(super) fn scoped_mutation_target(
     check_fs_path_scope(path, access).map_err(|violation| {
         io::Error::new(io::ErrorKind::PermissionDenied, violation.message(builtin))
     })?;
-    let candidate = normalize_for_policy(path);
+    // Resolve the parent, never the final component: a symlink there is what
+    // the mutation must refuse, so resolving it here would hand the caller
+    // the link's target instead of the link.
+    let lexical = lexical_for_policy(path);
+    let candidate = match (lexical.parent(), lexical.file_name()) {
+        (Some(parent), Some(name)) => normalize_for_policy(parent).join(name),
+        _ => normalize_for_policy(&lexical),
+    };
     let mut roots = normalized_workspace_roots(&policy);
     roots.extend(workspace_env::owned_runtime_dir_containing(&candidate));
     let Some(root) = roots
