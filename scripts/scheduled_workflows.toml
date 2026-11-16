@@ -164,6 +164,7 @@ crons = ["17 9 * * *"]
 cadence_reason = "Daily tests source health; each release candidate run separately smokes its exact archives."
 job_ids = ["smoke"]
 health_failures = 3
+health_events = ["schedule", "workflow_dispatch"]
 
 [[workflow]]
 path = ".github/workflows/repository-state-reconciliation.yml"
