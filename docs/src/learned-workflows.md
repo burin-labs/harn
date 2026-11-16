@@ -38,6 +38,17 @@ in [`std/eval/selective_risk`](eval-selective-risk-reference.md).
 A synthetic corpus supports a bounded experiment; it doesn't establish
 production accuracy.
 
+The [published-runtime experiment](https://github.com/burin-labs/harn/blob/main/experiments/learned-dispatch/results-v5.json)
+collected 150 fresh cases. The combined dispatch contract committed 57 times,
+and independent execution checks passed for all 57. It committed none of the
+30 incompatible requests. Coverage was 47.5 percent of compatible requests;
+the remaining requests used ordinary fallback. These related synthetic cases
+cover one application and one reviewed generator. The earlier
+[strict-accounting study](https://github.com/burin-labs/harn/blob/main/experiments/learned-dispatch/results-v4.json)
+remains refused because one ancillary provider charge was unknown. The later
+study declared how to retain unknown ancillary costs before collecting fresh
+cases; it did not reinterpret the earlier result.
+
 ## What can invalidate the result
 
 Qualification binds the decision definition, tool descriptors and package,
