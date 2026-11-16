@@ -26,6 +26,10 @@ inputs:
     required: false
     default: ''
     description: Retire a pending rehearsal when this paired pull request closes
+  source-declaration:
+    required: false
+    default: ''
+    description: Public pairing declaration whose components must remain eligible
   observer-context:
     required: false
     default: ''
@@ -58,6 +62,7 @@ runs:
           ${{ inputs.repository }}
         permission-actions: read
         permission-pull-requests: read
+        permission-contents: read
     - name: Observe the original child
       id: observe
       shell: bash
@@ -71,6 +76,7 @@ runs:
         CANARY_STARTED_AT: ${{ inputs.started-at }}
         CANARY_WORKFLOW: ${{ inputs.workflow }}
         CANARY_PAIRED_PULL: ${{ inputs.paired-pull }}
+        CANARY_SOURCE_DECLARATION: ${{ inputs.source-declaration }}
         OBSERVER_CONTEXT: ${{ inputs.observer-context }}
         REHEARSAL_PROMOTION_RUN_ID: ${{ inputs.rehearsal-promotion-run-id }}
         CANARY_WINDOW_SECONDS: '2700'

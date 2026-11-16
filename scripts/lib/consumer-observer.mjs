@@ -6,6 +6,8 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as pause } from 'node:timers/promises';
 import { assessConsumerObservation, unmeasuredConsumerTiming, consumerObservationBudget } from './consumer-observation-budget.mjs';
+export {consumerPairing} from './consumer-source.mjs';
+import {resolveConsumerComposition} from './consumer-source.mjs';
 
 const parentRepository = 'burin-labs/harn';
 export {parentRepository as observerParentRepository};
@@ -1005,29 +1007,6 @@ export async function dispatchObserverConsumer(parentToken, consumerToken, conte
   return {dispatched:true};
 }
 
-/** Pairing is declared in public source; private branch identity stays inside
- * the authenticated source selector and dispatcher. */
-export function consumerPairing(text, requestedPull = '') {
-  const lines=String(text??'').split(/\r?\n/).filter(line=>/^\s*Pairs-with:/.test(line));
-  const pairs=new Set();
-  if(requestedPull !== '') {
-    if(typeof requestedPull !== 'string' || !id.test(requestedPull)) refuse('consumer_pairing_invalid');
-    pairs.add(requestedPull);
-  }
-  for(const line of lines){
-    const match=/^\s*Pairs-with:\s*consumer#([1-9][0-9]*)\s*$/.exec(line);
-    if(!match) refuse('consumer_pairing_invalid');
-    pairs.add(match[1]);
-  }
-  if(pairs.size>1){
-    // Pull numbers are already public in the trailers; naming them says which to reconcile.
-    const error=new Error('CONSUMER_OBSERVER reason=consumer_pairing_ambiguous');
-    error.pulls=[...pairs].sort((left,right)=>Number(left)-Number(right));
-    throw error;
-  }
-  return pairs.size===1?[...pairs][0]:null;
-}
-
 export async function githubConsumerSource(token, repository, pairedPull = null, fetchRecord = fetch) {
   const read=async suffix=>{
     if (!token || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) refuse('read_authority_or_identity_missing');
@@ -1050,6 +1029,39 @@ export async function githubConsumerSource(token, repository, pairedPull = null,
   const commit=await read(`/commits/${encodeURIComponent(repositoryRecord.default_branch)}`);
   if(typeof commit?.sha!=='string' || !sha.test(commit.sha)) refuse('consumer_source_unmeasured');
   return {headSha:commit.sha,branch:repositoryRecord.default_branch};
+}
+
+export async function githubConsumerSelection(token, repository, declaration, fetchRecord = fetch) {
+  if (declaration?.kind === 'ordinary'
+    && Object.keys(declaration).sort().join(',') === 'kind,pull') {
+    return githubConsumerSource(token, repository, declaration.pull, fetchRecord);
+  }
+  if (!token || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository ?? '')) {
+    refuse('read_authority_or_identity_missing');
+  }
+  return resolveConsumerComposition(repository, declaration, async suffix => {
+    const response = await githubRead(token, `https://api.github.com/repos/${repository}${suffix}`, fetchRecord);
+    if (!response.ok) refuse('consumer_source_read_refused', refusalDiagnostic(response));
+    let value;
+    try { value = await response.json(); } catch { refuse('consumer_source_unmeasured'); }
+    return {value, more: /rel="next"/.test(response.headers?.get('link') ?? '')};
+  });
+}
+
+function selectedConsumerSource(token, expected, fetchRecord) {
+  if (expected.sourceDeclaration !== undefined) {
+    if (expected.requireCurrentDefault && (expected.sourceDeclaration?.kind !== 'ordinary' || expected.sourceDeclaration.pull !== null)
+      || expected.pairedPull !== undefined && (expected.pairedPull ?? null) !== expected.sourceDeclaration?.pull) {
+      refuse('parent_selection_unproven');
+    }
+    return githubConsumerSelection(token, expected.repository, expected.sourceDeclaration, fetchRecord);
+  }
+  return githubConsumerSource(token, expected.repository, expected.pairedPull ?? null, fetchRecord);
+}
+
+function sameConsumerSource(left, right) {
+  return left.headSha === right.headSha && left.branch === right.branch
+    && JSON.stringify(left.composition) === JSON.stringify(right.composition);
 }
 
 /** A public parent selector discovers custody; it does not grant it. Reuse
@@ -1109,8 +1121,8 @@ export async function readConsumerContextDecision(token, context, expected, fetc
     refuse('parent_state_unmeasured');
   }
   if(expected.requireCurrentDefault && expected.pairedPull!=null) refuse('parent_selection_unproven');
-  const scoped=expected.requireCurrentDefault || expected.pairedPull!=null;
-  const source=scoped?await githubConsumerSource(token,expected.repository,expected.pairedPull??null,fetchRecord):{};
+  const scoped=expected.requireCurrentDefault || expected.pairedPull!=null || expected.sourceDeclaration!==undefined;
+  const source=scoped?await selectedConsumerSource(token,expected,fetchRecord):{};
   const reading=await readConsumerProduct(token,observer,{...expected,...source},fetchRecord,extract,async()=>{
     const finalParent=await githubRecord(token,observer.parent_repository,observer.parent_run_id,fetchRecord);
     qualifyObserverParent(observer,finalParent);
@@ -1118,8 +1130,8 @@ export async function readConsumerContextDecision(token, context, expected, fetc
       refuse('parent_state_changed');
     }
     if(scoped){
-      const finalSource=await githubConsumerSource(token,expected.repository,expected.pairedPull??null,fetchRecord);
-      if(finalSource.headSha!==source.headSha||finalSource.branch!==source.branch) refuse('child_source_no_longer_eligible');
+      const finalSource=await selectedConsumerSource(token,expected,fetchRecord);
+      if(!sameConsumerSource(finalSource,source)) refuse('child_source_no_longer_eligible');
     }
   });
   if(reading.discovered!==1||reading.owned!==1||reading.pending!==0||reading.refused!==0||reading.product===null){
@@ -1231,13 +1243,13 @@ function timingChildState(child) {
  * a dispatch or rerun racing the observation. */
 export async function observeConsumerProduct(token, context, expected, fetchRecord = fetch, extract = artifactJsonFromZip) {
   const observer=observerContext(context);
-  const source=await githubConsumerSource(token,expected.repository,expected.pairedPull??null,fetchRecord);
+  const source=await selectedConsumerSource(token,expected,fetchRecord);
   return readConsumerProduct(token,observer,{...expected,...source},fetchRecord,extract,async()=>{
     const parent=await githubRecord(token,observer.parent_repository,observer.parent_run_id,fetchRecord);
     qualifyObserverParent(observer,parent);
     if(!liveStates.has(parent.status)) refuse('parent_no_longer_live');
-    const finalSource=await githubConsumerSource(token,expected.repository,expected.pairedPull??null,fetchRecord);
-    if(finalSource.branch!==source.branch||finalSource.headSha!==source.headSha) refuse('child_source_no_longer_eligible');
+    const finalSource=await selectedConsumerSource(token,expected,fetchRecord);
+    if(!sameConsumerSource(finalSource,source)) refuse('child_source_no_longer_eligible');
   });
 }
 

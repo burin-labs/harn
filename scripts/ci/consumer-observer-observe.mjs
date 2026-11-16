@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import {consumerProductVerdict, observeConsumerProduct, observerContext, observerRefusal } from '../lib/consumer-observer.mjs';
+import {consumerSourceEnvironment} from '../lib/consumer-source.mjs';
 
 async function main() {
   const env = process.env;
@@ -8,6 +9,7 @@ async function main() {
     repository:`${env.CANARY_OWNER}/${env.CANARY_NAME}`,
     workflow:`.github/workflows/${env.CANARY_WORKFLOW}`,
     pairedPull:env.CANARY_PAIRED_PULL||null,
+    sourceDeclaration:consumerSourceEnvironment(env),
   };
   const reading = await observeConsumerProduct(env.GH_TOKEN, context, expected);
   // The closed reading contains counts and a public source decision only.
