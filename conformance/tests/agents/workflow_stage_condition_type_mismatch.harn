@@ -1,0 +1,10 @@
+import { workflow_evaluate_condition } from "std/workflow/stage"
+
+fn invalid_condition() -> int {
+  const wrong_matched: int = workflow_evaluate_condition().matched
+  return wrong_matched
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(type_of(invalid_condition))
+}

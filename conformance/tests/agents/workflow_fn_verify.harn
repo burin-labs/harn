@@ -20,16 +20,16 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(v1.kind)
   harness.stdio.println(v1.ok)
-  harness.stdio.println(join(v1.findings, "|"))
+  harness.stdio.println(join(v1.findings ?? [], "|"))
   // 2. Bare bool verdict.
   const v2 = workflow_evaluate_verification({verify: { r -> return true }, result: {}})
   harness.stdio.println(v2.ok)
-  harness.stdio.println(len(v2.findings))
+  harness.stdio.println(len(v2.findings ?? []))
   // 3. Findings as a single string are normalized to a one-element list.
   const v3 = workflow_evaluate_verification(
     {verify: { r -> return {ok: false, findings: "one problem"} }, result: {}},
   )
-  harness.stdio.println(join(v3.findings, "|"))
+  harness.stdio.println(join(v3.findings ?? [], "|"))
   // 4. The verifier actually inspects the attempt result.
   const inspector = { r ->
     return {ok: contains(to_string(r?.visible_text), "GOOD"), findings: ["missing GOOD marker"]}
