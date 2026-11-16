@@ -305,6 +305,12 @@ requires full-suite CI at its own source, so a red source never publishes.
   may be evicted independently.
 - Promotion failed: rerun the failed jobs in the exact promotion run. It
   checks the existing tag's commit and refuses a conflicting tag.
+- Pull request pairing changed: on the same source head,
+  [rerun `Pin the consumer commit` and its dependent jobs](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs)
+  in the original CI run. The pin reads
+  the current declaration and reuses that run's authenticated CLI artifact.
+  A run retains the selector from its source revision, so integrate current
+  main first for branches that still use the older event-body selector.
 - Promotion refused a stale rehearsal binding: for `consumer_pull_head_moved`,
   dispatch the explicit repair below with `-f consumer_pull_request=N`; it
   measures the pull's current head against the original archives. For

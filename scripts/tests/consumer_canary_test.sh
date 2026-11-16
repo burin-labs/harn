@@ -440,6 +440,16 @@ canary $'Body\n\nPairs-with: consumer#7'
 grep -q -- '--ref fix-flag ' "$scratch/dispatched"
 grep -q "ref=pull-7" "$scratch/out"
 
+# A pinned PR rehearsal uses the pin's selection when its event body is stale.
+CANARY_PULL_REQUEST_CLI_RUN=123 \
+  CANARY_PULL_REQUEST_BASE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+  CANARY_CONSUMER_REVISION=$pin CONSUMER_PULL_REQUEST=7 canary 'Pairs-with: consumer#8'
+grep -q -- '--ref fix-flag ' "$scratch/dispatched"
+CANARY_PULL_REQUEST_CLI_RUN=123 \
+  CANARY_PULL_REQUEST_BASE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+  CANARY_CONSUMER_REVISION=$pin canary 'Pairs-with: consumer#7'
+grep -q -- '--ref main ' "$scratch/dispatched"
+
 # Recovery selects the same registered open pull without changing the source
 # commit's metadata. Matching metadata agrees; conflicting metadata refuses.
 canary '' 1.2.4-dev 7
