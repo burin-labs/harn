@@ -861,7 +861,7 @@ fn collect_redirect(redirect: Node<'_>, source: &[u8], analysis: &mut ShellAnaly
         return;
     };
     let (destination, dynamic) = shell_word(destination_node, source);
-    analysis.unresolved |= dynamic;
+    analysis.io_unresolved |= dynamic;
     if !dynamic && matches!(operator.as_str(), ">&" | "<&" | ">&-" | "<&-") {
         match destination.as_deref() {
             // Duplicating or closing a literal descriptor touches no file.

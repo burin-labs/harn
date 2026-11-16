@@ -1,6 +1,35 @@
 use super::*;
 
 #[test]
+fn dynamic_redirects_preserve_reader_cwd_without_allowing_directory_changes() {
+    let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    let root = dirs();
+    enter_run(&root.workspace, &root.workspace, &[], &[]);
+    let policy = harn_vm::orchestration::ToolApprovalPolicy::default();
+    let commands = [
+        ("if echo x >> \"$(cat WWS.path)\" 2>/dev/null; then echo WWS-R$((1+1)); else echo WWS-W$((1+1)); fi", true),
+        ("cd \"$TARGET\"; cat WWS.path", false),
+        ("eval \"$NEXT\"; cat WWS.path", false),
+        ("$NEXT; cat WWS.path", false),
+        ("echo x >> \"$(cat .env)\"", false),
+    ];
+    let results: Vec<_> = commands
+        .iter()
+        .map(|(command, allowed)| {
+            (
+                *command,
+                *allowed,
+                policy.evaluate_detailed("run", &serde_json::json!({"command": command})),
+            )
+        })
+        .collect();
+    leave_run();
+    for (command, allowed, result) in results {
+        assert_eq!(result.is_allow(), allowed, "{command}: {result:?}");
+    }
+}
+
+#[test]
 fn tool_permission_paths_follow_the_branch_workspace_before_execution() {
     let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
     let recorded = dirs();

@@ -112,7 +112,6 @@ pub(crate) fn permission_reader_paths(
                     &command,
                 );
                 analysis.unresolved
-                    || analysis.io_unresolved
                     || analysis
                         .stages
                         .iter()
