@@ -48,6 +48,11 @@ on:
         required: false
         type: boolean
         default: false
+      consumer_pull_request:
+        description: Optional consumer pull request; existing source-pairing and containment rules apply
+        required: false
+        default: ''
+        type: string
       warm_cache_only:
         description: 'Build the release matrix on main only to refresh default-branch Rust caches.'
         required: false
@@ -1806,6 +1811,7 @@ jobs:
     uses: ./.github/workflows/consumer-canary.yml
     with:
       source_revision: ${{ needs.setup.outputs.rehearsal_source_sha }}
+      consumer_pull_request: ${{ inputs.consumer_pull_request }}
       release_producer_run_id: ${{ needs.setup.outputs.build_mode == 'candidate' && github.run_id || '' }}
       release_producer_run_attempt: ${{ needs.setup.outputs.build_mode == 'candidate' && github.run_attempt || '' }}
     secrets:

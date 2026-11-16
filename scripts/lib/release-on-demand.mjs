@@ -1,4 +1,4 @@
-import {githubRecord, githubRunJobs, observerConclusionIsKnown, observerRunIsLive} from './consumer-observer.mjs';
+import {consumerPairing, githubRecord, githubRunJobs, observerConclusionIsKnown, observerRunIsLive} from './consumer-observer.mjs';
 
 export const releaseWorkflows = Object.freeze({candidate:'build-release-binaries.yml', promotion:'promote-release.yml'});
 export const releaseWaitMinutes = Object.freeze({candidate:210, promotion:120});
@@ -21,17 +21,19 @@ export async function requestsForMainPush(api, repository, source) {
     && pull.labels.some(label=>label.name==='release-needed')).map(pull=>pull.number);
 }
 
-export async function releaseRequest(api, repository, number, dryRun=false) {
+export async function releaseRequest(api, repository, number, dryRun=false, consumerPull='') {
   if (!/^[\w.-]+\/[\w.-]+$/.test(repository) || !Number.isSafeInteger(number) || number<1) refuse('request_identity_invalid');
   const pull = await api.read(`repos/${repository}/pulls/${number}`);
   if (pull.number!==number || pull.merged!==true || pull.state!=='closed' || pull.base?.ref!=='main'
     || pull.base?.repo?.full_name!==repository || !sha.test(pull.merge_commit_sha)
     || !Array.isArray(pull.labels)) refuse('merged_main_request_unmeasured');
   if (!dryRun && !pull.labels.some(label=>label.name==='release-needed')) refuse('release_needed_label_missing');
+  const consumer=consumerPairing('',consumerPull);
   const main = await api.read(`repos/${repository}/git/ref/heads/main`);
   if (!sha.test(main.object?.sha)) refuse('main_identity_unmeasured');
   await containsMerge(api,repository,pull.merge_commit_sha,main.object.sha);
-  return {repository,pr:number,merge_sha:pull.merge_commit_sha,source_sha:main.object.sha};
+  return {repository,pr:number,merge_sha:pull.merge_commit_sha,source_sha:main.object.sha,
+    ...(consumer===null?{}:{consumer_pull_request:consumer})};
 }
 
 async function containsMerge(api, repository, merge, source) {
@@ -82,6 +84,11 @@ export async function releaseObservation(api, request, phase, id) {
   return result;
 }
 
+function candidateInputs(request) {
+  return {source_candidate:true,...(request.consumer_pull_request===undefined?{}:
+    {consumer_pull_request:request.consumer_pull_request})};
+}
+
 /** This caller schedules owners; their existing gates alone authorize publication. */
 export async function runRequestedRelease(api, request, {dryRun=false,now=Date.now,
   sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms)),progress=async()=>{}}={}) {
@@ -90,7 +97,7 @@ export async function runRequestedRelease(api, request, {dryRun=false,now=Date.n
   await progress(state);
   if (dryRun) {
     state.verdict='dry-run';state.pending_jobs=['candidate and promotion are planned, not dispatched'];
-    state.dispatch_plan=[{workflow:releaseWorkflows.candidate,ref:'main',inputs:{source_candidate:true}},
+    state.dispatch_plan=[{workflow:releaseWorkflows.candidate,ref:'main',inputs:candidateInputs(request)},
       {workflow:releaseWorkflows.promotion,ref:'main',inputs:{candidate_sha:request.source_sha,candidate_run_id:'<returned candidate run ID>'}}];
     await progress(state);return state;
   }
@@ -98,7 +105,7 @@ export async function runRequestedRelease(api, request, {dryRun=false,now=Date.n
     for (const phase of ['candidate','promotion']) {
       state.phase=phase;state.verdict='pending';state.pending_jobs=[`${phase} dispatch`];state.failing_jobs=[];
       state.observed_jobs=0;delete state.run_id;delete state.status;delete state.conclusion;
-      const inputs=phase==='candidate'?{source_candidate:true}:
+      const inputs=phase==='candidate'?candidateInputs(request):
         {candidate_sha:state.source_sha,candidate_run_id:String(state.candidate_run_id)};
       const dispatched=await api.dispatch(releaseWorkflows[phase],inputs);
       const id=dispatched?.workflow_run_id;
