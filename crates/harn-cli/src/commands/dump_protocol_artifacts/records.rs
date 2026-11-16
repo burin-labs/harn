@@ -182,6 +182,16 @@ pub(super) struct Record {
     pub fields: Vec<Field>,
 }
 
+#[derive(Default)]
+pub(super) struct RecordOptions<'a> {
+    pub closed: bool,
+    pub mutable: bool,
+    pub preserve_wire_presence: bool,
+    pub swift_body: Option<(&'a str, &'a BTreeMap<String, String>)>,
+    pub zero_defaults: Option<&'a serde_json::Value>,
+    pub python_plain: bool,
+}
+
 pub(super) fn append_string_enum(out: &mut String, target: Target, name: &str, values: &[String]) {
     match target {
         Target::Typescript => out.push_str(&format!("export type {name} = {}\n", values.iter().map(|value| format!("{value:?}")).collect::<Vec<_>>().join(" | "))),
@@ -238,19 +248,29 @@ impl Record {
         self.append_record(
             out,
             target,
-            false,
-            true,
-            true,
-            Some((&body, &BTreeMap::new())),
+            RecordOptions {
+                mutable: true,
+                preserve_wire_presence: true,
+                swift_body: Some((&body, &BTreeMap::new())),
+                ..RecordOptions::default()
+            },
         );
     }
 
     pub(super) fn append(&self, out: &mut String, target: Target) {
-        self.append_record(out, target, false, false, false, None);
+        self.append_record(out, target, RecordOptions::default());
     }
 
     pub(super) fn append_closed(&self, out: &mut String, target: Target) {
-        self.append_record(out, target, true, true, false, None);
+        self.append_record(
+            out,
+            target,
+            RecordOptions {
+                closed: true,
+                mutable: true,
+                ..RecordOptions::default()
+            },
+        );
     }
 
     pub(super) fn append_mutable(
@@ -259,7 +279,15 @@ impl Record {
         target: Target,
         preserve_wire_presence: bool,
     ) {
-        self.append_record(out, target, false, true, preserve_wire_presence, None);
+        self.append_record(
+            out,
+            target,
+            RecordOptions {
+                mutable: true,
+                preserve_wire_presence,
+                ..RecordOptions::default()
+            },
+        );
     }
 
     pub(super) fn append_swift_with_body(
@@ -271,37 +299,67 @@ impl Record {
         self.append_record(
             out,
             Target::Swift,
-            false,
-            true,
-            false,
-            Some((body, defaults)),
+            RecordOptions {
+                mutable: true,
+                swift_body: Some((body, defaults)),
+                ..RecordOptions::default()
+            },
         );
     }
 
-    fn append_record(
+    pub(super) fn append_record(
         &self,
         out: &mut String,
         target: Target,
-        closed: bool,
-        mutable: bool,
-        preserve_wire_presence: bool,
-        swift_body: Option<(&str, &BTreeMap<String, String>)>,
+        options: RecordOptions<'_>,
     ) {
+        let RecordOptions {
+            closed,
+            mutable,
+            preserve_wire_presence,
+            swift_body,
+            zero_defaults,
+            python_plain,
+        } = options;
+        let default_for = |field: &Field| {
+            zero_defaults
+                .and_then(|schema| schema["properties"][field.wire_name.as_ref()].get("default"))
+        };
+        if zero_defaults.is_some() {
+            for field in &self.fields {
+                if let Some(value) = default_for(field) {
+                    assert!(
+                        is_zero_default(value),
+                        "nonzero default for {}.{}",
+                        self.name,
+                        field.wire_name
+                    );
+                }
+            }
+        }
         let name = &self.name;
         match target {
             Target::Rust if closed => out.push_str(&format!("#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]\n#[serde(rename_all = \"camelCase\", deny_unknown_fields)]\npub struct {name} {{\n")),
+            Target::Rust if !self.fields.is_empty() && self.fields.iter().all(|field| default_for(field).is_some()) => out.push_str(&format!("#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]\npub struct {name} {{\n")),
             Target::Rust => out.push_str(&format!("#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]\npub struct {name} {{\n")),
             Target::Swift => out.push_str(&format!("public struct {name}: Codable, Sendable, Equatable {{\n")),
             Target::Typescript => out.push_str(&format!("export interface {name} {{\n")),
+            Target::Python if python_plain => out.push_str(&format!("@dataclass\nclass {name}:\n")),
             Target::Python => out.push_str(&format!("@dataclass\nclass {name}({}):\n", if closed { "_HarnStrictRecapDataclass" } else { "_HarnDataclass" })),
             Target::Go => out.push_str(&format!("type {name} struct {{\n")),
         }
-        for field in &self.fields {
+        let mut fields = self.fields.iter().collect::<Vec<_>>();
+        if matches!(target, Target::Python) && zero_defaults.is_some() {
+            fields.sort_by_key(|field| !field.required || default_for(field).is_some());
+        }
+        for field in fields {
             let optional = if field.required { "" } else { "?" };
             let kind = field.kind.optional_type(target, field.required);
             match target {
                 Target::Rust => {
-                    if closed && matches!(field.kind, FieldKind::JsonObject) {
+                    if (closed && matches!(field.kind, FieldKind::JsonObject))
+                        || (field.required && default_for(field).is_some())
+                    {
                         out.push_str("    #[serde(default)]\n");
                     }
                     if !field.required {
@@ -338,7 +396,9 @@ impl Record {
                 }
                 Target::Python => {
                     let ident = super::python::field_ident(&field.wire_name);
-                    let default = if ident != field.wire_name {
+                    let default = if let Some(value) = default_for(field) {
+                        python_zero_default(value, &field.kind)
+                    } else if ident != field.wire_name {
                         let default = if !closed && !field.required {
                             "default=None, "
                         } else {
@@ -458,6 +518,30 @@ impl Record {
         } else {
             "}\n\n"
         });
+    }
+}
+
+fn is_zero_default(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Null => true,
+        serde_json::Value::Bool(value) => !value,
+        serde_json::Value::Number(value) => value.as_f64() == Some(0.0),
+        serde_json::Value::String(value) => value.is_empty(),
+        serde_json::Value::Array(value) => value.is_empty(),
+        serde_json::Value::Object(value) => value.values().all(is_zero_default),
+    }
+}
+
+fn python_zero_default(value: &serde_json::Value, kind: &FieldKind) -> String {
+    match (value, kind) {
+        (serde_json::Value::Null, _) => " = None".into(),
+        (serde_json::Value::Bool(false), _) => " = False".into(),
+        (serde_json::Value::Object(_), FieldKind::Named(name)) => {
+            format!(" = field(default_factory={name})")
+        }
+        (serde_json::Value::Object(_), _) => " = field(default_factory=dict)".into(),
+        (serde_json::Value::Array(_), _) => " = field(default_factory=list)".into(),
+        _ => format!(" = {value}"),
     }
 }
 

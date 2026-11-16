@@ -12,7 +12,7 @@ import py_compile
 import tempfile
 from pathlib import Path
 from collections.abc import Mapping
-from dataclasses import MISSING, fields as dataclass_fields, is_dataclass
+from dataclasses import MISSING, asdict, fields as dataclass_fields, is_dataclass
 
 
 def load_bindings(artifacts: Path):
@@ -104,6 +104,13 @@ def main() -> int:
     if ("HarnAgentEventHostToolResult", "rawOutput") not in required_json_fields:
         raise AssertionError("required JSON field census did not reach typed host output")
     print(f"typed event required JSON null cases: {len(json_null_cases)}; required JSON fields using shared writer: {len(required_json_fields)}")
+    timeline = fixture["sessionTimeline"]
+    for key, cls in [("snapshot", hp.HarnSessionTimelineSnapshot), ("update", hp.HarnSessionTimelineUpdate)]:
+        assert_round_trip("timeline " + key, timeline[key], asdict(cls(**timeline[key])))
+    first, second = hp.HarnSessionTimelineQuery(), hp.HarnSessionTimelineQuery()
+    first.fromCursor.topics["first"] = 1
+    if second.fromCursor.topics:
+        raise AssertionError("timeline constructors share a mutable cursor")
     cases = [
         ("ACPRequest", envelopes["request"], hp.ACPRequest),
         ("ACPResponse", envelopes["response"], hp.ACPResponse),

@@ -91,34 +91,32 @@ fn __agent_is_known_prompt_id(id: any) {
   return contains(__agent_prompt_ids(), id)
 }
 
-fn __agent_validate_prompt_entry(id: string, entry: dict) {
+fn __agent_validate_prompt_entry(id: AgentPromptId, entry: AgentPromptEntry) {
   const entry_type = type_of(entry)
   if entry_type == "string" || entry_type == "closure" {
     return entry
   }
   if entry_type != "dict" {
-    throw "agent_prompt_catalog: prompt override " + id
-      + " must be a path string, closure, {text}, or {path}"
+    throw "agent_prompt_catalog: prompt override ${id} must be a path string, closure, {text}, or {path}"
   }
   for key in entry.keys() {
     if !contains(["path", "text"], key) {
-      throw "agent_prompt_catalog: prompt override " + id + " has unknown entry key '" + key
-        + "'; expected text or path"
+      throw "agent_prompt_catalog: prompt override ${id} has unknown entry key '${key}'; expected text or path"
     }
   }
   const has_text = entry?.text != nil
   const has_path = entry?.path != nil
   if has_text && has_path {
-    throw "agent_prompt_catalog: prompt override " + id + " must set only one of text or path"
+    throw "agent_prompt_catalog: prompt override ${id} must set only one of text or path"
   }
   if !has_text && !has_path {
-    throw "agent_prompt_catalog: prompt override " + id + " must set text or path"
+    throw "agent_prompt_catalog: prompt override ${id} must set text or path"
   }
   if has_text && type_of(entry.text) != "string" {
-    throw "agent_prompt_catalog: prompt override " + id + ".text must be a string"
+    throw "agent_prompt_catalog: prompt override ${id}.text must be a string"
   }
   if has_path && type_of(entry.path) != "string" {
-    throw "agent_prompt_catalog: prompt override " + id + ".path must be a string"
+    throw "agent_prompt_catalog: prompt override ${id}.path must be a string"
   }
   return entry
 }

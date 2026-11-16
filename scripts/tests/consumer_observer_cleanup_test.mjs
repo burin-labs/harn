@@ -11,6 +11,32 @@ import { load } from 'js-yaml';
 import { createObserverContext, observerRunName, observerDeclarationName, observerPublicationWitness, qualifyObserverPublisher, githubParentDeclarations, observerDispatchActor, observerDeclarationStep, observerDispatchStep } from '../lib/consumer-observer.mjs';
 import {archiveFile, archiveJson} from './fixtures/artifact_archive.mjs';
 
+test('renewed cleanup authority can reauthenticate the final paired release binding', () => {
+  const workflow = load(fs.readFileSync(new URL('../../.github/workflows/consumer-canary.yml', import.meta.url), 'utf8'));
+  const steps = workflow.jobs.consumers.steps;
+  const token = steps.find(step => step.id === 'cleanup-token');
+  const record = steps.find(step => step.id === 'record');
+  const verifyAuthority = (selected) => {
+    assert.deepEqual(Object.fromEntries(Object.entries(selected.with)
+      .filter(([key]) => key.startsWith('permission-'))), {
+      'permission-actions': 'write', 'permission-contents': 'read', 'permission-pull-requests': 'read',
+    }, 'final binding must reauthenticate superseded consumer pulls with the renewed credential');
+    assert.deepEqual(selected.with.repositories.trim().split(/\r?\n/).map(line => line.trim()),
+      ['harn', '${{ secrets.CONSUMER_CANARY_REPOSITORY }}']);
+  };
+  verifyAuthority(token);
+  assert.equal(record.env.GH_TOKEN, '${{ steps.cleanup-token.outputs.token }}');
+  assert.equal(record.env.CANARY_SUPERSEDED_PULLS, '${{ steps.canary.outputs.superseded_pulls }}');
+  assert.match(record.run, /consumer_canary\.sh --record/);
+  const insufficient = structuredClone(token);
+  delete insufficient.with['permission-pull-requests'];
+  assert.throws(() => verifyAuthority(insufficient),
+    'the measured permission regression must fail the owning workflow contract');
+  const expanded = structuredClone(token);
+  expanded.with['permission-pull-requests'] = 'write';
+  assert.throws(() => verifyAuthority(expanded), 'the recorder needs read-only pull access');
+});
+
 test('manual cleanup rejects feature refs and checks out trusted code before credentials', () => {
   const workflow = load(fs.readFileSync(new URL('../../.github/workflows/consumer-observer-cleanup.yml', import.meta.url), 'utf8'));
   const job = workflow.jobs.reconcile;
