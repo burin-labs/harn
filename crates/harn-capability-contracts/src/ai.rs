@@ -761,6 +761,13 @@ capability_method!(
     "Read aggregate session totals."
 );
 capability_method!(
+    agent_session_loop_budget,
+    "harness.agent.session_loop_budget",
+    [],
+    "__cap_agent_session_loop_budget(session_id: string) -> {schema: string, iteration: int, remaining: int?, max_iterations: int?, reserve: {verification: int, recovery: int, terminal_report: int, total: int}, grants_remaining: {verification: int, recovery: int, terminal_report: int}}?",
+    "Read the current loop-owned budget projection, or nil before the loop has measured it."
+);
+capability_method!(
     agent_session_inject_feedback,
     "harness.agent.session_inject_feedback",
     // Match the corresponding `__host_agent_*` runtime_internal builtin

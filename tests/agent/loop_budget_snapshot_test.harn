@@ -1,0 +1,113 @@
+import { AgentLoopBudgetSnapshot } from "std/agent/control"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import { llm_tool_call, with_llm_script } from "std/testing"
+
+pipeline test_callable_budget_tracks_consumed_turn_and_terminal_retry(harness: Harness) {
+  const session = "budget-retry-" + harness.random.uuid()
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "emit",
+    "Publish the terminal report.",
+    {
+      parameters: {accepted: {type: "boolean"}},
+      handler: { args ->
+        const measured: AgentLoopBudgetSnapshot? = harness.agent.session_loop_budget(session)
+        assert(measured != nil, "the actual tool must receive a measured loop snapshot")
+        assert_eq(measured.schema, "harn.agent_loop_budget_snapshot.v1")
+        assert_eq(measured.remaining, 0, "the current request has already spent its turn")
+        if !args.accepted {
+          assert_eq(measured.iteration, 1)
+          assert_eq(measured.max_iterations, 1)
+          assert_eq(measured.grants_remaining.terminal_report, 1)
+          throw "terminal emit refused"
+        }
+        assert_eq(measured.iteration, 2)
+        assert_eq(measured.max_iterations, 2)
+        assert_eq(measured.grants_remaining.terminal_report, 0)
+        return "report persisted"
+      },
+      annotations: {kind: "read"},
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [
+      llm_tool_call("emit", {accepted: false}, "refused"),
+      llm_tool_call("emit", {accepted: true}, "retry"),
+    ],
+    { ->
+      const options: AgentSpec = {
+        provider: "mock",
+        session_id: session,
+        tools: tools,
+        loop_until_done: true,
+        final_wrapup: false,
+        stop_after_successful_tools: ["emit"],
+        iteration_budget: {mode: "fixed", initial: 1, max: 1, extend_by: 0, expose_decisions: true},
+        terminal_callback: { info ->
+          const measured = harness.agent.session_loop_budget(session)
+          assert(measured != nil)
+          assert_eq(measured.iteration, info.iteration)
+          assert_eq(measured.max_iterations, info.max_iterations)
+          assert_eq(measured.remaining, 0)
+          if info.final_status == "budget_exhausted" {
+            assert_eq(info.session_rejected_tools, ["emit"])
+            assert_eq(measured.grants_remaining.terminal_report, 1)
+            return {message: "Correct the refusal and publish once."}
+          }
+          assert_eq(info.final_status, "done")
+          assert_eq(measured.grants_remaining.terminal_report, 0)
+          return ""
+        },
+      }
+      const result = agent_loop(harness, "Publish the report.", nil, options)
+      assert_eq(result.status, "done")
+      assert_eq(result.llm.iterations, 2)
+      assert(
+        result.adaptive_budget.decisions.any(
+          { decision -> decision.reason == "terminal_callback_continue" },
+        ),
+        "the completed result must record the actual retry grant",
+      )
+    },
+  )
+}
+
+pipeline test_callable_budget_exposes_zero_at_an_unrescued_ceiling(harness: Harness) {
+  const session = "budget-stop-" + harness.random.uuid()
+  let tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "inspect",
+    "Inspect the target.",
+    {parameters: {}, handler: { _args -> "contents" }, annotations: {kind: "read"}},
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_tool_call("inspect", {}, "inspect")],
+    { ->
+      const options: AgentSpec = {
+        provider: "mock",
+        session_id: session,
+        tools: tools,
+        loop_until_done: true,
+        final_wrapup: false,
+        iteration_budget: {mode: "fixed", initial: 1, max: 1, extend_by: 0, expose_decisions: true},
+        terminal_callback: { info ->
+          assert_eq(info.stop_reason, "max_iterations")
+          const measured = harness.agent.session_loop_budget(session)
+          assert(measured != nil)
+          assert_eq(measured.iteration, 1)
+          assert_eq(measured.remaining, 0)
+          assert_eq(measured.max_iterations, 1)
+          return ""
+        },
+      }
+      const result = agent_loop(harness, "Inspect.", nil, options)
+      assert_eq(result.status, "budget_exhausted")
+      assert_eq(result.stop_reason, "max_iterations")
+    },
+  )
+}

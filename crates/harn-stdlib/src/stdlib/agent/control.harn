@@ -31,6 +31,19 @@ pub type AgentLoopBudgetDecision = {
   status: string,
 }
 
+/** Loop-owned grant counts; these aren't physical provider-request counts. */
+pub type AgentLoopBudgetGrants = {verification: int, recovery: int, terminal_report: int}
+
+/** The current measurement returned by `harness.agent.session_loop_budget`. */
+pub type AgentLoopBudgetSnapshot = {
+  schema: string,
+  iteration: int,
+  remaining: int?,
+  max_iterations: int?,
+  reserve: AgentLoopBudgetGrants & {total: int},
+  grants_remaining: AgentLoopBudgetGrants,
+}
+
 type AgentLoopCommandApplication = {
   stop: bool,
   final_status: string,
