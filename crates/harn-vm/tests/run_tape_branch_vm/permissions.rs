@@ -1,5 +1,62 @@
 use super::*;
 
+#[test]
+fn tool_permission_paths_follow_the_branch_workspace_before_execution() {
+    let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    let recorded = dirs();
+    let isolated = dirs();
+    let outside = dirs();
+    record(&source("once"), &recorded.tapes, &recorded.workspace);
+    std::fs::write(isolated.workspace.join("input.txt"), "branch input").unwrap();
+    std::os::unix::fs::symlink(&outside.workspace, isolated.workspace.join("escape")).unwrap();
+    let branch = start_branch(BranchPlan {
+        tape: EventTape::load(&recorded.tapes.join(TAPE_FILE_NAME)).unwrap(),
+        live_after_calls: 0,
+        workspace: location(&isolated.workspace),
+        state_root: isolated.markers.join("permission-state"),
+        host_state_roots: Vec::new(),
+        prompt_edits: Vec::new(),
+    })
+    .unwrap();
+    let scope = branch.scope().enter();
+    enter_run(&isolated.workspace, &isolated.workspace, &[], &[]);
+    let policy = harn_vm::orchestration::ToolApprovalPolicy::default();
+    let evaluate = |tool, arguments| policy.evaluate_detailed(tool, &arguments);
+    let command = evaluate(
+        "run",
+        serde_json::json!({"command": "python3 verifier.py", "cwd": recorded.workspace}),
+    );
+    let read = evaluate(
+        "read_file",
+        serde_json::json!({"path": recorded.workspace.join("input.txt")}),
+    );
+    let reader = evaluate(
+        "run",
+        serde_json::json!({"command": "cat input.txt", "cwd": recorded.workspace}),
+    );
+    let sensitive = evaluate(
+        "run",
+        serde_json::json!({"command": "cat .env", "cwd": recorded.workspace}),
+    );
+    let unrelated = evaluate(
+        "read_file",
+        serde_json::json!({"path": outside.workspace.join("input.txt")}),
+    );
+    let escape = evaluate(
+        "read_file",
+        serde_json::json!({"path": recorded.workspace.join("escape/input.txt")}),
+    );
+    leave_run();
+    drop(scope);
+    branch.finish();
+    assert!(command.is_allow(), "recorded command cwd: {command:?}");
+    assert!(read.is_allow(), "recorded input path: {read:?}");
+    assert!(reader.is_allow(), "reader in recorded cwd: {reader:?}");
+    assert!(sensitive.is_deny(), "sensitive reader: {sensitive:?}");
+    assert!(unrelated.is_deny(), "unrelated workspace: {unrelated:?}");
+    assert!(escape.is_deny(), "branch symlink escape: {escape:?}");
+}
+
 fn source(scope: &str) -> String {
     r#"
 import { agent_loop } from "std/agent/loop"

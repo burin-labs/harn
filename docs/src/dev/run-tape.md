@@ -101,6 +101,12 @@ symlink escapes. Host filesystem adapters use `workspace_path` at their I/O
 boundary. `BranchScope.workspace_identity()` exposes the two roots without
 assigning path policy to the host.
 
+Tool permission checks also resolve recorded path arguments and command working
+directories into the current working copy. Command-reader checks use that
+resolved directory. The original argument remains in the audit record; the
+original directory receives no additional authority. Unrelated roots, sensitive
+paths, and symlink escapes retain their normal refusals.
+
 Enter the branch scope before calling `start_recording` to record a descendant.
 Its header retains prior physical workspace roots, oldest first, while its request
 payloads retain the original logical identity. A later branch resolves every
