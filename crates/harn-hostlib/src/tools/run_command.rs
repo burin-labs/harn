@@ -33,6 +33,9 @@ use crate::tools::response::ResponseBuilder;
 pub(crate) const NAME: &str = "hostlib_tools_run_command";
 
 #[cfg(all(test, unix))]
+#[path = "run_command/clause_observation_tests.rs"]
+mod clause_observation_tests;
+#[cfg(all(test, unix))]
 #[path = "run_command/stage_receipt_tests.rs"]
 mod stage_receipt_tests;
 
@@ -171,7 +174,11 @@ pub(crate) fn prepare(
             harn_vm::shells::shell_descriptor_to_vm_value(&shell),
         );
     }
-    let (program, args) = parse_command(&params)?;
+    let ParsedCommand {
+        program,
+        args,
+        shell_source_arg,
+    } = parse_command(&params)?;
     let requested_cwd = optional_string(NAME, &params, "cwd")?;
     let cwd = harn_vm::orchestration::prepare_local_command_cwd(requested_cwd.as_deref())
         .map_err(|error| command_parameter_error(error, "cwd"))?;
@@ -188,7 +195,11 @@ pub(crate) fn prepare(
         params,
         invocation,
         handler: std::sync::Arc::new(move |_| {
-            let mut result = handle_bound(retained_params.clone(), &retained_invocation);
+            let mut result = handle_bound(
+                retained_params.clone(),
+                &retained_invocation,
+                shell_source_arg,
+            );
             if let Err(HostlibError::ProcessSpawn {
                 requested_cwd: reported,
                 ..
@@ -204,6 +215,7 @@ pub(crate) fn prepare(
 fn handle_bound(
     map: std::sync::Arc<harn_vm::value::DictMap>,
     invocation: &harn_vm::orchestration::CommandInvocation,
+    shell_source_arg: Option<usize>,
 ) -> Result<VmValue, HostlibError> {
     let private_filter = harn_vm::session_inputs::OutputFilter::capture_for_spawn();
     let program = invocation.argv()[0].clone();
@@ -215,7 +227,8 @@ fn handle_bound(
     let stdin = optional_string(NAME, &map, "stdin")?;
     let timeout = optional_timeout(NAME, &map, "timeout_ms")?;
     let hard_timeout_ms = optional_u64(NAME, &map, "hard_timeout_ms")?;
-    let capture = parse_capture(&map)?;
+    let mut capture = parse_capture(&map)?;
+    capture.shell_source_arg = shell_source_arg;
     let sandbox_profile = optional_string(NAME, &map, "sandbox_profile")?;
     let sandbox_scope = parse_sandbox_scope(&map)?;
     let env_mode = optional_env_mode(NAME, &map, !env.is_empty())?;
@@ -532,7 +545,23 @@ fn sandbox_profile_error_to_hostlib(error: harn_vm::VmError) -> HostlibError {
     }
 }
 
-fn parse_command(map: &harn_vm::value::DictMap) -> Result<(String, Vec<String>), HostlibError> {
+struct ParsedCommand {
+    program: String,
+    args: Vec<String>,
+    shell_source_arg: Option<usize>,
+}
+
+impl ParsedCommand {
+    fn argv(argv: Vec<String>) -> Result<Self, HostlibError> {
+        parse_argv_program(NAME, argv).map(|(program, args)| Self {
+            program,
+            args,
+            shell_source_arg: None,
+        })
+    }
+}
+
+fn parse_command(map: &harn_vm::value::DictMap) -> Result<ParsedCommand, HostlibError> {
     match optional_string(NAME, map, "mode")?
         .as_deref()
         .unwrap_or("argv")
@@ -543,7 +572,7 @@ fn parse_command(map: &harn_vm::value::DictMap) -> Result<(String, Vec<String>),
                     builtin: NAME,
                     param: "argv",
                 })?;
-            parse_argv_program(NAME, argv)
+            ParsedCommand::argv(argv)
         }
         mode @ ("shell" | "auto") => {
             let command =
@@ -586,17 +615,22 @@ fn parse_command(map: &harn_vm::value::DictMap) -> Result<(String, Vec<String>),
             // A command-bound grant reaches only the process it names, so one
             // plain command naming it runs without the shell.
             if let Some(argv) = resolved.command_grant_argv() {
-                return parse_argv_program(NAME, argv);
+                return ParsedCommand::argv(argv);
             }
             if mode == "auto" {
                 if let Some(argv) =
                     harn_vm::shells::plan_invocation(&resolved.program, &resolved.args)
                         .and_then(|plan| plan.argv)
                 {
-                    return parse_argv_program(NAME, argv);
+                    return ParsedCommand::argv(argv);
                 }
             }
-            Ok((resolved.program, resolved.args))
+            let shell_source_arg = resolved.posix_command_source_arg();
+            Ok(ParsedCommand {
+                program: resolved.program,
+                args: resolved.args,
+                shell_source_arg,
+            })
         }
         other => Err(HostlibError::InvalidParameter {
             builtin: NAME,
@@ -615,6 +649,8 @@ fn parse_capture(map: &harn_vm::value::DictMap) -> Result<CaptureConfig, Hostlib
                 capture.stderr = optional_bool(NAME, dict, "stderr")?.unwrap_or(true);
                 capture.merge_stderr = optional_bool(NAME, dict, "merge_stderr")?.unwrap_or(false);
                 capture.final_stage = optional_bool(NAME, dict, "final_stage")?.unwrap_or(false);
+                capture.clause_diagnostics =
+                    optional_string_list(NAME, dict, "clause_diagnostics")?;
                 if let Some(bytes) = optional_u64(NAME, dict, "max_inline_bytes")? {
                     capture.max_inline_bytes = usize::try_from(bytes).unwrap_or(usize::MAX);
                 }

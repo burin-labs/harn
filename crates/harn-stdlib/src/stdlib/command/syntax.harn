@@ -18,6 +18,27 @@ pub fn command_sequence_plan(source: string, cwd: string = "") -> CommandSequenc
   return __command_sequence_plan(source, cwd)
 }
 
+/** The static clause plan shared by failure diagnostics and output capture. */
+pub type CommandOutputPlan = {
+  status: "measured" | "unmeasured",
+  clauses: list<string>,
+  argv: list<string>,
+}
+
+/**
+ * Observe the original clauses of a fixed literal POSIX `&&` chain ending in
+ * an external command, including that command's literal argv. Unknown syntax
+ * returns unmeasured with no clauses or argv.
+ * This never executes a command or proves that native capture is available:
+ * shell startup, transport and terminal observations are checked at execution.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn command_output_plan(source: string) -> CommandOutputPlan {
+  return __command_output_plan(source)
+}
+
 /**
  * One pipeline stage of a shell line. A `command` stage is a simple command,
  * possibly with redirects, and `words` is its unquoted argv text. A `compound`

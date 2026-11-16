@@ -5,6 +5,33 @@ harn_vm_core::stdlib_module_installer!(Pure, pub(crate) fn register_command_plan
 
 #[harn_builtin(
     exposure = "pure",
+    sig = "__command_output_plan(source: string) -> {status: \"measured\" | \"unmeasured\", clauses: list<string>, argv: list<string>}",
+    category = "runtime",
+    doc = "Internal static clause-diagnostic projection for std/command. Does not execute commands or establish capture."
+)]
+fn command_output_plan_impl(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let source = args.first().map(VmValue::as_str_cow).unwrap_or_default();
+    let plan = crate::shells::plan_final_output_stage(&source);
+    let clauses = plan.as_ref().and_then(|plan| plan.clauses(&source));
+    let mut result = crate::value::DictMap::new();
+    result.put_str(
+        "status",
+        if clauses.is_some() {
+            "measured"
+        } else {
+            "unmeasured"
+        },
+    );
+    result.put("clauses", VmValue::strings(clauses.unwrap_or_default()));
+    result.put(
+        "argv",
+        VmValue::strings(plan.map(|plan| plan.argv).unwrap_or_default()),
+    );
+    Ok(VmValue::dict(result))
+}
+
+#[harn_builtin(
+    exposure = "pure",
     sig = "__command_sequence_plan(source: string, cwd: string) -> {status: \"measured\" | \"unmeasured\", steps: list<{argv: list<string>, cwd: string}>}",
     category = "runtime",
     doc = "Internal structural POSIX sequence observation for std/command. Does not execute commands."

@@ -103,6 +103,10 @@
           "type": "boolean", "default": false,
           "description": "Request runner-owned final-stage output. Unsupported syntax, startup state or transport is explicitly unmeasured; the original command still runs."
         },
+        "clause_diagnostics": {
+          "type": "array", "items": { "type": "string" },
+          "description": "With final_stage, one plain diagnostic string per measured source clause. The runner shell-quotes these strings and prints the failed clause's text only when native capture cannot be established. Diagnostic-only execution remains unmeasured."
+        },
         "max_inline_bytes": { "type": "integer", "minimum": 0, "default": 50000 },
         "transport": {
           "type": "string",

@@ -2,8 +2,12 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[path = "src/schemas/bundle.rs"]
+mod bundle;
+
 fn main() {
     println!("cargo:rerun-if-changed=schemas");
+    println!("cargo:rerun-if-changed=src/schemas/bundle.rs");
     let manifest = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").expect("manifest dir"));
     let schemas = manifest.join("schemas");
     let proof: serde_json::Value = serde_json::from_str(
@@ -42,22 +46,12 @@ fn main() {
         let mut schema: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&path).expect("read schema"))
                 .expect("parse schema");
-        if schema
-            .pointer("/properties/proof/$ref")
-            .and_then(serde_json::Value::as_str)
-            == Some("https://harnlang.com/schemas/hostlib/edit-proof.json")
-        {
-            schema["properties"]["proof"]["$ref"] = serde_json::json!("#/$defs/edit_proof");
-            schema["$defs"]["edit_proof"] = proof.clone();
-        }
-        if schema
-            .pointer("/properties/stage_output/$ref")
-            .and_then(serde_json::Value::as_str)
-            == Some("https://harnlang.com/schemas/hostlib/command-stage-output.json")
-        {
-            schema["properties"]["stage_output"]["$ref"] =
-                serde_json::json!("#/$defs/command_stage_output");
-            schema["$defs"]["command_stage_output"] = stage_output.clone();
+        for (property, name, resource) in [
+            ("proof", "edit_proof", &proof),
+            ("stage_output", "command_stage_output", &stage_output),
+        ] {
+            bundle::embed_shared_resource(&mut schema, property, name, resource)
+                .expect("shared hostlib schema projection");
         }
         let body = serde_json::to_string(&schema).expect("serialize schema");
         generated.push_str(&format!(

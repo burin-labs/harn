@@ -191,6 +191,7 @@ pub(crate) struct OutputState {
     pub(crate) combined: Vec<u8>,
     stage_stdout: Vec<u8>,
     stage_stderr: Vec<u8>,
+    stage_observation: Vec<u8>,
     capture_read_failed: bool,
     pub(crate) terminal: Option<VmValue>,
     /// Wall-clock instant of the most recent stdout/stderr chunk, used to derive
@@ -517,7 +518,7 @@ pub(crate) fn spawn_long_running_with_options(
     if let Some(granted) = &granted {
         proc::apply_command_grant(granted, &mut spec);
     }
-    let stage_capture = proc::stage_output::StageCapture::for_spawn(&mut spec, options.capture)?;
+    let stage_capture = proc::stage_output::StageCapture::for_spawn(&mut spec, &options.capture)?;
     let launching = granted.as_ref().map(|granted| granted.launching());
     let handle = process_handle::spawn_process(spec).map_err(|error| {
         proc::process_error_to_hostlib(builtin, requested_cwd.as_deref(), &effective_cwd, error)
@@ -750,6 +751,8 @@ fn waiter_thread(
         stage_stdout,
         #[cfg(unix)]
         stage_stderr,
+        #[cfg(unix)]
+        stage_observation,
         capture_read_failed,
     } = output::completed(&context.output_feed);
     if let Err(error) = waited.as_ref() {
@@ -809,7 +812,7 @@ fn waiter_thread(
             )
         }
     };
-    let inline = proc::inline_output(&stdout, &stderr, capture);
+    let inline = proc::inline_output(&stdout, &stderr, capture.clone());
     let sandbox_assessment = context.sandbox_reporting.assess_exit(
         exit_code == 0 && signal_name.is_none(),
         command_status == CommandStatus::Completed && sandbox_signal,
@@ -866,9 +869,7 @@ fn waiter_thread(
     payload.insert("timed_out".into(), serde_json::Value::Bool(timed_out));
     if let Some(stage) = context.stage_capture.as_ref() {
         let stage = if capture_read_failed {
-            proc::stage_output::StageOutput::Unmeasured {
-                reason: "capture_read_failed",
-            }
+            proc::stage_output::StageOutput::unmeasured("capture_read_failed")
         } else {
             stage
                 .finish(
@@ -881,14 +882,17 @@ fn waiter_thread(
                         stage_stdout: &stage_stdout,
                         #[cfg(unix)]
                         stage_stderr: &stage_stderr,
+                        #[cfg(unix)]
+                        observation: &stage_observation,
                     },
-                    command_status == CommandStatus::Completed && signal_name.is_none(),
-                    capture,
+                    (command_status == CommandStatus::Completed && signal_name.is_none())
+                        .then_some(exit_code),
+                    &capture,
                     &context.private_filter,
                 )
-                .unwrap_or(proc::stage_output::StageOutput::Unmeasured {
-                    reason: "capture_artifacts_unavailable",
-                })
+                .unwrap_or(proc::stage_output::StageOutput::unmeasured(
+                    "capture_artifacts_unavailable",
+                ))
         };
         payload.insert(
             "stage_output".into(),

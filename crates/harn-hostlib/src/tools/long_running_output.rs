@@ -22,6 +22,8 @@ pub(super) struct CompletedOutput {
     pub(super) stage_stdout: Vec<u8>,
     #[cfg(unix)]
     pub(super) stage_stderr: Vec<u8>,
+    #[cfg(unix)]
+    pub(super) stage_observation: Vec<u8>,
     pub(super) capture_read_failed: bool,
 }
 
@@ -38,6 +40,8 @@ pub(super) fn completed(feed: &OutputFeed) -> CompletedOutput {
         stage_stdout: state.stage_stdout.clone(),
         #[cfg(unix)]
         stage_stderr: state.stage_stderr.clone(),
+        #[cfg(unix)]
+        stage_observation: state.stage_observation.clone(),
         capture_read_failed: state.capture_read_failed,
     }
 }
@@ -49,6 +53,11 @@ struct LogicalStream {
     combined_file: Option<Arc<Mutex<std::fs::File>>>,
     feed: Arc<OutputFeed>,
     stdout: bool,
+}
+
+enum PrivateStream {
+    Stage(StreamRedactor),
+    Observation,
 }
 
 impl LogicalStream {
@@ -78,30 +87,41 @@ pub(super) fn spawn_drains(
     stage: Option<StageReaders>,
     context: DrainContext<'_>,
 ) -> Vec<std::thread::JoinHandle<()>> {
-    let (stage_stdout, stage_stderr) = match stage {
-        Some(stage) => (Some(stage.stdout), Some(stage.stderr)),
-        None => (None, None),
+    let (stage_stdout, stage_stderr, mut stage_observation) = match stage {
+        Some(stage) => (
+            Some(stage.stdout),
+            Some(stage.stderr),
+            Some(stage.observation),
+        ),
+        None => (None, None, None),
     };
     let mut threads = Vec::new();
     for (stdout_stream, ordinary, stage, path) in [
         (true, stdout, stage_stdout, context.stdout_path),
         (false, stderr, stage_stderr, context.stderr_path),
     ] {
+        let observation = if stdout_stream {
+            stage_observation.take()
+        } else {
+            None
+        };
         let shared = Arc::new(Mutex::new(LogicalStream {
             redactor: context.filter.stream(),
-            readers: usize::from(ordinary.is_some()) + usize::from(stage.is_some()),
+            readers: usize::from(ordinary.is_some())
+                + usize::from(stage.is_some())
+                + usize::from(observation.is_some()),
             file: std::fs::OpenOptions::new().append(true).open(path).ok(),
             combined_file: context.combined_file.clone(),
             feed: context.feed.clone(),
             stdout: stdout_stream,
         }));
-        for (reader, stage_stream) in [(ordinary, false), (stage, true)] {
+        for (reader, private) in [
+            (ordinary, None),
+            (stage, Some(PrivateStream::Stage(context.filter.stream()))),
+            (observation, Some(PrivateStream::Observation)),
+        ] {
             if let Some(reader) = reader {
-                threads.push(spawn_drain(
-                    reader,
-                    shared.clone(),
-                    stage_stream.then(|| context.filter.stream()),
-                ));
+                threads.push(spawn_drain(reader, shared.clone(), private));
             }
         }
     }
@@ -120,7 +140,7 @@ fn deliver_stage(stream: &LogicalStream, chunk: &[u8]) {
 fn spawn_drain(
     mut reader: Box<dyn Read + Send>,
     shared: Arc<Mutex<LogicalStream>>,
-    mut stage_redactor: Option<StreamRedactor>,
+    mut private: Option<PrivateStream>,
 ) -> std::thread::JoinHandle<()> {
     harn_parser::runtime_stack::spawn(move || {
         let mut buffer = [0; 8192];
@@ -140,21 +160,35 @@ fn spawn_drain(
                 }
             };
             let mut stream = shared.lock().unwrap_or_else(|p| p.into_inner());
-            stream
-                .feed
-                .state
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .last_output_at = Some(std::time::Instant::now());
-            if let Some(redactor) = stage_redactor.as_mut() {
-                deliver_stage(&stream, &redactor.push(&buffer[..read]));
-            } else {
-                let chunk = stream.redactor.push(&buffer[..read]);
-                stream.deliver(&chunk);
+            if !matches!(&private, Some(PrivateStream::Observation)) {
+                stream
+                    .feed
+                    .state
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .last_output_at = Some(std::time::Instant::now());
+            }
+            match private.as_mut() {
+                Some(PrivateStream::Stage(redactor)) => {
+                    deliver_stage(&stream, &redactor.push(&buffer[..read]));
+                }
+                Some(PrivateStream::Observation) => {
+                    stream
+                        .feed
+                        .state
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .stage_observation
+                        .extend_from_slice(&buffer[..read]);
+                }
+                None => {
+                    let chunk = stream.redactor.push(&buffer[..read]);
+                    stream.deliver(&chunk);
+                }
             }
         }
         let mut stream = shared.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some(redactor) = stage_redactor.as_mut() {
+        if let Some(PrivateStream::Stage(redactor)) = private.as_mut() {
             deliver_stage(&stream, &redactor.finish());
         }
         stream.readers -= 1;
@@ -251,6 +285,7 @@ mod tests {
             Some(StageReaders {
                 stdout: Box::new(stage),
                 stderr: Box::new(std::io::empty()),
+                observation: Box::new(std::io::empty()),
             }),
             DrainContext {
                 filter: &filter,
@@ -274,6 +309,38 @@ mod tests {
         drop(state);
         drop(current);
         harn_vm::agent_sessions::close(&session);
+    }
+
+    #[test]
+    fn clause_observations_are_private_and_do_not_claim_output_activity() {
+        let feed = Arc::new(OutputFeed::default());
+        let stdout = tempfile::NamedTempFile::new().unwrap();
+        let stderr = tempfile::NamedTempFile::new().unwrap();
+        let drains = spawn_drains(
+            None,
+            None,
+            Some(StageReaders {
+                stdout: Box::new(std::io::empty()),
+                stderr: Box::new(std::io::empty()),
+                observation: Box::new(std::io::Cursor::new(b"1\n2\n")),
+            }),
+            DrainContext {
+                filter: &OutputFilter::capture_for_spawn(),
+                feed: feed.clone(),
+                stdout_path: stdout.path().to_owned(),
+                stderr_path: stderr.path().to_owned(),
+                combined_file: None,
+            },
+        );
+        for drain in drains {
+            drain.join().unwrap();
+        }
+        let state = feed.state.lock().unwrap();
+        assert_eq!(state.stage_observation, b"1\n2\n");
+        assert!(state.stdout.is_empty() && state.stderr.is_empty() && state.combined.is_empty());
+        assert!(state.stage_stdout.is_empty() && state.stage_stderr.is_empty());
+        assert!(state.last_output_at.is_none());
+        assert!(!state.capture_read_failed);
     }
 
     #[test]

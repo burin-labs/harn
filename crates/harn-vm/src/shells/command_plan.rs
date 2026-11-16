@@ -8,7 +8,10 @@ use tree_sitter::Node;
 mod sequence;
 pub use sequence::plan_posix_sequence;
 mod output_stage;
-pub use output_stage::{plan_invocation_output_stage, FinalOutputStage, OutputStageInvocation};
+pub use output_stage::{
+    plan_final_output_stage, plan_invocation_clause_diagnostics, plan_invocation_output_stage,
+    FinalOutputStage, OutputStageInvocation,
+};
 
 /// The first statically named executable and the environment prefixes that
 /// affect its lookup. `argv` is available only for a plain external command.
@@ -101,6 +104,17 @@ fn plan_posix_command_inner(source: &str, allow_builtin: bool) -> Option<Command
         return None;
     }
     let mut command = root.named_child(0)?;
+    if allow_builtin && root.child_count() == 1 {
+        if let Some(argv) = literal_setup_builtin(command, source) {
+            return Some(CommandPlan {
+                program: argv[0].clone(),
+                environment: BTreeMap::new(),
+                literal_argv: Some(argv.clone()),
+                argv: Some(argv),
+                requires_clean_shell_environment: false,
+            });
+        }
+    }
     let single = root.child_count() == 1 && command.kind() == "command";
     while matches!(command.kind(), "list" | "pipeline" | "redirected_statement") {
         command = command.named_child(0)?;
@@ -182,6 +196,45 @@ fn plan_posix_command_inner(source: &str, allow_builtin: bool) -> Option<Command
         literal_argv: (single && all_literal).then(|| argv[index..].to_vec()),
         argv: (plain && index == 0).then_some(argv),
     })
+}
+
+fn literal_setup_builtin(node: Node<'_>, source: &str) -> Option<Vec<String>> {
+    match node.kind() {
+        "declaration_command" if node.child(0)?.kind() == "export" => {
+            let mut argv = vec!["export".to_owned()];
+            for argument in node.named_children(&mut node.walk()) {
+                argv.push(literal(argument, source)?);
+            }
+            Some(argv)
+        }
+        "test_command"
+            if node.child(0)?.kind() == "["
+                && node.child(node.child_count().checked_sub(1)?)?.kind() == "]" =>
+        {
+            let expression = node.named_child(0)?;
+            if expression.kind() != "unary_expression" {
+                return None;
+            }
+            let operator = expression.child_by_field_name("operator")?;
+            if operator.kind() != "test_operator" {
+                return None;
+            }
+            let operands = expression
+                .named_children(&mut expression.walk())
+                .filter(|child| *child != operator)
+                .collect::<Vec<_>>();
+            let [operand] = operands.as_slice() else {
+                return None;
+            };
+            Some(vec![
+                "[".to_owned(),
+                literal(operator, source)?,
+                literal(*operand, source)?,
+                "]".to_owned(),
+            ])
+        }
+        _ => None,
+    }
 }
 
 fn literal(node: Node<'_>, source: &str) -> Option<String> {

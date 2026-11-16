@@ -1,0 +1,32 @@
+import { command_output_plan } from "std/command"
+
+fn main(harness: Harness) {
+  const source =
+    "printf 'setup && not a separator' && cd 'test project' && ./prepare --local && pytest 'case with spaces.py'"
+  const measured = command_output_plan(source)
+  assert_eq(measured.status, "measured")
+  assert_eq(measured.argv, ["pytest", "case with spaces.py"])
+  assert_eq(
+    measured.clauses,
+    [
+      "printf 'setup && not a separator'",
+      "cd 'test project'",
+      "./prepare --local",
+      "pytest 'case with spaces.py'",
+    ],
+  )
+  for unsupported in [
+    "",
+    "printf ready; pytest case.py",
+    "printf ready || pytest case.py",
+    "printf ready | pytest case.py",
+    "printf ready && pytest $(printf case.py)",
+    "trap 'printf fake' EXIT && pytest case.py",
+  ] {
+    const plan = command_output_plan(unsupported)
+    assert_eq(plan.status, "unmeasured")
+    assert_eq(plan.clauses, [])
+    assert_eq(plan.argv, [])
+  }
+  harness.stdio.println("command output plan: literal clauses and refusal controls passed")
+}

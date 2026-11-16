@@ -22,12 +22,14 @@ import {
 } from "std/command/shell"
 import { command_step_ref_impl } from "std/command/step_ref"
 pub import {
+  CommandOutputPlan,
   CommandSequencePlan,
   CommandSequenceStep,
   ShellCommandSegment,
   ShellCommandShape,
   ShellCommandStage,
   ShellExitEvidence,
+  command_output_plan,
   command_sequence_plan,
   shell_command_shape,
   shell_exit_evidence,

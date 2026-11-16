@@ -96,7 +96,7 @@ pub(crate) struct SpawnOutcome {
 
 pub(crate) use crate::process::EnvMode;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct CaptureConfig {
     pub(crate) stdout: bool,
     pub(crate) stderr: bool,
@@ -104,6 +104,8 @@ pub(crate) struct CaptureConfig {
     pub(crate) max_inline_bytes: usize,
     pub(crate) transport: CaptureTransport,
     pub(crate) final_stage: bool,
+    pub(crate) clause_diagnostics: Option<Vec<String>>,
+    pub(crate) shell_source_arg: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,6 +123,8 @@ impl Default for CaptureConfig {
             max_inline_bytes: DEFAULT_MAX_INLINE_BYTES,
             transport: CaptureTransport::Pipe,
             final_stage: false,
+            clause_diagnostics: None,
+            shell_source_arg: None,
         }
     }
 }
@@ -250,7 +254,7 @@ pub(crate) fn run_with_filter(
     if let Some(granted) = &granted {
         apply_command_grant(granted, &mut spec);
     }
-    let mut stage_capture = stage_output::StageCapture::for_spawn(&mut spec, req.capture)?;
+    let mut stage_capture = stage_output::StageCapture::for_spawn(&mut spec, &req.capture)?;
     let call = crate::host_call::HostCallContext::current();
     let scope = call.process_scope();
     let launch_permit = match scope {
@@ -287,11 +291,18 @@ pub(crate) fn run_with_filter(
     let stage_readers = stage_capture
         .as_mut()
         .and_then(|stage| stage.take_readers());
-    let (stage_stdout, stage_stderr) = stage_readers
-        .map(|readers| (Some(readers.stdout), Some(readers.stderr)))
-        .unwrap_or((None, None));
+    let (stage_stdout, stage_stderr, stage_observation) = stage_readers
+        .map(|readers| {
+            (
+                Some(readers.stdout),
+                Some(readers.stderr),
+                Some(readers.observation),
+            )
+        })
+        .unwrap_or((None, None, None));
     let (stage_out_rx, stage_stdout_thread) = spawn_reader_thread(stage_stdout);
     let (stage_err_rx, stage_stderr_thread) = spawn_reader_thread(stage_stderr);
+    let (observation_rx, observation_thread) = spawn_reader_thread(stage_observation);
 
     // Poll `harn_vm::op_interrupt::requested` alongside the child wait so
     // scope cancellation, `deadline` expiry, and VM drop terminate the
@@ -348,6 +359,16 @@ pub(crate) fn run_with_filter(
             || stage_stdout_drain.process_cleanup.is_some(),
         &killer,
     );
+    let observation_drain = drain_output(
+        observation_rx,
+        deadline,
+        wait_killed
+            || stdout_drain.process_cleanup.is_some()
+            || stderr_drain.process_cleanup.is_some()
+            || stage_stdout_drain.process_cleanup.is_some()
+            || stage_stderr_drain.process_cleanup.is_some(),
+        &killer,
+    );
     // Do not join unconditionally: a descendant that inherited stdout/stderr can
     // keep the pipe open after the direct child exits. The drain helper enforces
     // the same command deadline/interrupt and kills the cleanup-token family.
@@ -355,6 +376,7 @@ pub(crate) fn run_with_filter(
     drop(stderr_thread);
     drop(stage_stdout_thread);
     drop(stage_stderr_thread);
+    drop(observation_thread);
 
     let (stdout_bytes, stderr_bytes) = match file_capture.as_ref() {
         Some(files) => files.read(req.builtin)?,
@@ -369,17 +391,20 @@ pub(crate) fn run_with_filter(
     let drain_timed_out = stdout_drain.timed_out
         || stderr_drain.timed_out
         || stage_stdout_drain.timed_out
-        || stage_stderr_drain.timed_out;
+        || stage_stderr_drain.timed_out
+        || observation_drain.timed_out;
     let drain_interrupted = stdout_drain.interrupted
         || stderr_drain.interrupted
         || stage_stdout_drain.interrupted
-        || stage_stderr_drain.interrupted;
+        || stage_stderr_drain.interrupted
+        || observation_drain.interrupted;
     let mut drain_cleanup = None::<process_handle::ProcessCleanupReport>;
     for cleanup in [
         stdout_drain.process_cleanup,
         stderr_drain.process_cleanup,
         stage_stdout_drain.process_cleanup,
         stage_stderr_drain.process_cleanup,
+        observation_drain.process_cleanup,
     ]
     .into_iter()
     .flatten()
@@ -492,10 +517,9 @@ pub(crate) fn run_with_filter(
                 || stderr_drain.read_failed
                 || stage_stdout_drain.read_failed
                 || stage_stderr_drain.read_failed
+                || observation_drain.read_failed
             {
-                return Ok(stage_output::StageOutput::Unmeasured {
-                    reason: "capture_read_failed",
-                });
+                return Ok(stage_output::StageOutput::unmeasured("capture_read_failed"));
             }
             stage.finish(
                 stage_output::StageOutputBytes {
@@ -507,9 +531,12 @@ pub(crate) fn run_with_filter(
                     stage_stdout: &stage_stdout_bytes,
                     #[cfg(unix)]
                     stage_stderr: &stage_stderr_bytes,
+                    #[cfg(unix)]
+                    observation: &observation_drain.bytes,
                 },
-                command_status == CommandStatus::Completed && signal.is_none(),
-                req.capture,
+                (command_status == CommandStatus::Completed && signal.is_none())
+                    .then_some(exit_code),
+                &req.capture,
                 &private_filter,
             )
         })
