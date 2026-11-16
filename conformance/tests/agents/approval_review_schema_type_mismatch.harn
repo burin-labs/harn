@@ -1,0 +1,7 @@
+import { approval_review_verdict_schema } from "std/agent/approval_review"
+
+pipeline default(harness: Harness) {
+  const schema = approval_review_verdict_schema({})
+  const wrong: int = schema.required
+  harness.stdio.println(wrong)
+}

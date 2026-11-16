@@ -1,0 +1,165 @@
+import {
+  ApprovalReviewDecision,
+  ApprovalReviewScreenVerdict,
+  ApprovalReviewVerdictSchema,
+  approval_allow_all_reviewer,
+  approval_review_decision_questions,
+  approval_review_floor_decision,
+  approval_review_is_floor,
+  approval_review_permits,
+  approval_review_screen_verdict,
+  approval_review_system_prompt,
+  approval_review_verdict_schema,
+  approval_reviewer_for,
+} from "std/agent/approval_review"
+import { llm_error, llm_text, with_llm_script } from "std/testing"
+
+struct VerdictReference {
+  risk_levels: unknown
+  authorization_levels: unknown
+  thresholds: unknown
+}
+
+struct ReviewRequest {
+  category: string
+  site: unknown
+}
+
+struct ScreenAnswer {
+  kind: string
+  probabilities: unknown
+}
+
+struct ScreenInput {
+  risk: unknown
+  authorization: unknown
+}
+
+fn answer(levels: list<string>, values: list) -> dict {
+  let probabilities = {[7]: "unrelated extension"}
+  let index = 0
+  for level in levels {
+    probabilities = probabilities + {[level]: values[index]}
+    index = index + 1
+  }
+  return {kind: "score", probabilities: probabilities, extension: { -> "opaque" }}
+}
+
+pipeline test_partial_policy_references_keep_legacy_shapes(harness: Harness) {
+  const verdict = VerdictReference {
+    risk_levels: ["low"],
+    authorization_levels: ["unknown", "high"],
+    thresholds: {low: "high"},
+  }
+  const policy = {
+    verdict: verdict,
+    denylist: {categories: [0, false, "sensitive"]},
+    trust: {trusted_inputs: ["goal"], untrusted_inputs: []},
+    floor: {never_grant: "credential_exfiltration"},
+    extension: { -> "opaque" },
+    [7]: "integer key",
+  }
+  const schema = approval_review_verdict_schema(policy)
+  assert_eq(schema.properties.risk.enum, ["low"])
+  assert_eq(schema_expect(schema, schema_of(ApprovalReviewVerdictSchema)), schema)
+  assert(approval_review_permits(policy, "low", "high"))
+  assert(!approval_review_permits({}, "low", "high"), "partial helpers do not resolve defaults")
+  assert(approval_review_is_floor(policy, "credential_exfiltration"))
+  assert(contains(approval_review_system_prompt(policy), "0, false, sensitive"))
+  const malformed = try {
+    approval_review_system_prompt({denylist: {categories: false}})
+  }
+  assert(is_err(malformed), "an invalid selected list must retain its refusal")
+}
+
+pipeline test_floor_and_allow_callbacks_return_typed_decisions(harness: Harness) {
+  const allow = approval_allow_all_reviewer({})
+  const permitted = allow(ReviewRequest {category: "read_source", site: false})
+  const approved: bool = permitted.approved
+  assert(approved)
+  assert_eq(permitted.site, false)
+  assert_eq(permitted.cost_usd, 0.0)
+  assert_eq(schema_expect(permitted, schema_of(ApprovalReviewDecision)), permitted)
+  const denied = allow(ReviewRequest {category: "credential_exfiltration", site: 0})
+  assert(!denied.approved, "the same callback must retain the catastrophic floor")
+  assert_eq(denied.site, 0)
+  assert_eq(denied.unavailable_reason, "floor")
+  assert(!denied.reviewer_answered)
+  assert_eq(schema_expect(denied, schema_of(ApprovalReviewDecision)), denied)
+  assert_eq(approval_review_floor_decision({}, {category: "read_source"}), nil)
+  assert(
+    is_err(
+      try {
+        allow(false)
+      },
+    ),
+    "the allow-all helper retains its record requirement",
+  )
+}
+
+pipeline test_screen_decodes_records_without_granting_malformed_answers(harness: Harness) {
+  const questions = approval_review_decision_questions()
+  const risk = answer(questions.risk.levels, [1, 0, 0, 0])
+  const authorization = answer(questions.authorization.levels, [0, 0, 0, 1])
+  const approved = approval_review_screen_verdict(
+    {},
+    ScreenInput {
+      risk: ScreenAnswer {kind: "score", probabilities: risk.probabilities},
+      authorization: authorization,
+    },
+  )
+  assert_eq(approved.outcome, "approved", "the valid distribution must reach the grant path")
+  assert_eq(approved.approve_probability, 1.0)
+  assert_eq(schema_expect(approved, schema_of(ApprovalReviewScreenVerdict)), approved)
+  for malformed in [
+    nil,
+    false,
+    0,
+    "legacy",
+    [],
+    {},
+    answer(questions.authorization.levels, [0, 0, 0, 0]),
+    answer(questions.authorization.levels, [0, 0, 0, 2]),
+    answer(questions.authorization.levels, ["0", 0, 0, 1]),
+  ] {
+    const verdict = approval_review_screen_verdict({}, {risk: risk, authorization: malformed})
+    assert_eq(verdict.outcome, "escalated")
+    assert_eq(verdict.reason, "malformed")
+    assert_eq(verdict.risk, nil)
+    assert_eq(schema_expect(verdict, schema_of(ApprovalReviewScreenVerdict)), verdict)
+  }
+}
+
+pipeline test_generated_callback_retains_memoization_and_unavailable_receipts(harness: Harness) {
+  with_llm_script(
+    harness.llm,
+    [
+      llm_text(json_stringify({risk: "low", authorization: "high", rationale: "source goal"})),
+      llm_error("reviewer unavailable"),
+    ],
+    { ->
+      const reviewer = approval_reviewer_for(harness, {}, "Read source")
+      const request = {
+        tool: "read_file",
+        category: "read_source",
+        session_id: "session",
+        policy_decision: {context: {repeat_count: 1}},
+      }
+      const first = reviewer(request)
+      assert(first.approved)
+      assert_eq(schema_expect(first, schema_of(ApprovalReviewDecision)), first)
+      const repeated = reviewer(request + {policy_decision: {context: {repeat_count: 2}}})
+      assert(repeated.approved)
+      assert_eq(repeated.memoized, true)
+      assert_eq(repeated.cost_usd, 0.0)
+      assert_eq(len(harness.llm.mock_calls()), 1, "an exact repeated refusal must not call again")
+      const unavailable = reviewer(request + {refused_paths: ["other"]})
+      assert(!unavailable.approved)
+      assert(!unavailable.reviewer_answered)
+      assert_eq(unavailable.risk, nil)
+      assert_eq(unavailable.unavailable_reason, "reviewer_error")
+      assert_eq(len(harness.llm.mock_calls()), 2, "a changed refusal must reach the reviewer")
+      assert_eq(schema_expect(unavailable, schema_of(ApprovalReviewDecision)), unavailable)
+    },
+  )
+}
