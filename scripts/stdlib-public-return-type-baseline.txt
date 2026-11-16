@@ -152,7 +152,6 @@
 # count    6  crates/harn-stdlib/src/stdlib/workflow/map.harn
 # count    6  crates/harn-stdlib/src/stdlib/workflow/patterns.harn
 # count    6  crates/harn-stdlib/src/stdlib/workflow/prompts.harn
-# count    8  crates/harn-stdlib/src/stdlib/workflow/stage.harn
 
 crates/harn-stdlib/src/stdlib/agent/action_graph.harn::action_graph
 crates/harn-stdlib/src/stdlib/agent/action_graph.harn::action_graph_batches
@@ -1174,11 +1173,3 @@ crates/harn-stdlib/src/stdlib/workflow/prompts.harn::workflow_render_artifacts_c
 crates/harn-stdlib/src/stdlib/workflow/prompts.harn::workflow_render_verification_context
 crates/harn-stdlib/src/stdlib/workflow/prompts.harn::workflow_stage_prompt
 crates/harn-stdlib/src/stdlib/workflow/prompts.harn::workflow_verification_context_intro
-crates/harn-stdlib/src/stdlib/workflow/stage.harn::workflow_classify_stage_outcome
-crates/harn-stdlib/src/stdlib/workflow/stage.harn::workflow_evaluate_condition
-crates/harn-stdlib/src/stdlib/workflow/stage.harn::workflow_evaluate_verification
-crates/harn-stdlib/src/stdlib/workflow/stage.harn::workflow_execute_stage_attempts
-crates/harn-stdlib/src/stdlib/workflow/stage.harn::workflow_flatten_agent_loop_options
-crates/harn-stdlib/src/stdlib/workflow/stage.harn::workflow_prepare_static_stage
-crates/harn-stdlib/src/stdlib/workflow/stage.harn::workflow_stage_attempt_outcome
-crates/harn-stdlib/src/stdlib/workflow/stage.harn::workflow_stage_retry_task

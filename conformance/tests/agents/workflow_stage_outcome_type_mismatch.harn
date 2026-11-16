@@ -1,0 +1,10 @@
+import { workflow_classify_stage_outcome } from "std/workflow/stage"
+
+fn invalid_outcome() -> int {
+  const wrong_branch: int = workflow_classify_stage_outcome().branch
+  return wrong_branch
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(type_of(invalid_outcome))
+}

@@ -16,7 +16,7 @@
         "name": "node"
       }
     ],
-    "normalizers": [],
+    "normalizers": [{"function": "__stage_reference", "argument": 0}],
     "containers": []
   }
 }
