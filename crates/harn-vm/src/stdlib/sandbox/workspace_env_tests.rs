@@ -428,7 +428,14 @@ fn a_confined_jvm_uses_private_temp_without_launcher_options() {
     let explicit = "-Djava.io.tmpdir=\"/caller/private temp\" -Xmx1g";
     let mut env = vec![("JAVA_TOOL_OPTIONS".to_string(), explicit.to_string())];
     inject_workspace_process_env(&mut env, &policy(workspace.path()));
-    assert_eq!(env[0].1, explicit, "an explicit JVM temp choice wins");
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| key == "JAVA_TOOL_OPTIONS")
+            .unwrap()
+            .1,
+        explicit,
+        "an explicit JVM temp choice wins"
+    );
 }
 
 #[test]
@@ -471,8 +478,11 @@ fn a_loopback_grant_makes_the_jvm_prefer_ipv6_on_macos() {
             .count(),
         1
     );
-    assert!(env[0]
-        .1
-        .starts_with("-Djava.net.preferIPv4Stack=true -Djava.io.tmpdir="));
-    assert!(!env[0].1.contains(JVM_PREFER_IPV6_ADDRESSES));
+    let value = &env
+        .iter()
+        .find(|(key, _)| key == "JAVA_TOOL_OPTIONS")
+        .unwrap()
+        .1;
+    assert!(value.starts_with("-Djava.net.preferIPv4Stack=true -Djava.io.tmpdir="));
+    assert!(!value.contains(JVM_PREFER_IPV6_ADDRESSES));
 }
