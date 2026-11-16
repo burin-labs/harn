@@ -405,6 +405,29 @@ const run={id:42,run_attempt:1,head_sha:source,status:'completed',conclusion:'su
   head_repository:{full_name:'burin-labs/harn'}};
 if(endpoint.pathname.includes('/acme/widget-host')){
   if(endpoint.pathname.endsWith('/actions/runs/77'))console.log(head);
+  else if(endpoint.pathname.endsWith('/pulls/7'))console.log('open false acme/widget-host '+head);
+  else if(/\\/pulls\\/(8|9)$/.test(endpoint.pathname)){
+    const second=endpoint.pathname.endsWith('/9');
+    if(process.argv.at(-1)!=='.head.sha')process.exit(1);
+    const component={state:process.env.SCENARIO==='superset_closed_component'?'closed':'open',merged:false};
+    if(process.env.SCENARIO==='superset_unreadable_head'&&second)process.exit(1);
+    if(process.env.SCENARIO==='superset_empty_head'&&second)console.log('');
+    else if(process.env.SCENARIO==='superset_invalid_head'&&second)console.log('invalid');
+    else {
+      component.head={sha:process.env.SCENARIO==='superset_identical'?head:
+        ((process.env.SCENARIO==='superset_moved'||process.env.SCENARIO==='superset_advanced_contained')&&second?'d':second?'e':'c').repeat(40)};
+      console.log(component.head.sha);
+    }
+  }
+  else if(endpoint.pathname.includes('/compare/')&&process.env.SCENARIO.startsWith('superset_')){
+    const component=endpoint.pathname.split('/compare/')[1].split('...')[0];
+    if(process.env.SCENARIO==='superset_unreadable_compare')process.exit(1);
+    if(process.env.SCENARIO==='superset_empty_compare')console.log('');
+    else if(process.env.SCENARIO==='superset_wrong_base')console.log('ahead '+('f'.repeat(40)));
+    else if(process.env.SCENARIO==='superset_unknown_status')console.log('unknown '+component);
+    else console.log((process.env.SCENARIO==='superset_moved'&&component==='d'.repeat(40)?'diverged':
+      process.env.SCENARIO==='superset_behind'?'behind':component===head?'identical':'ahead')+' '+component);
+  }
   else if(endpoint.pathname.includes('/compare/'))console.log('identical 0');
   else console.log('main');
 }else if(endpoint.pathname.endsWith('/runs/42/attempts/1'))console.log(JSON.stringify(run));
@@ -432,7 +455,24 @@ else process.exit(1);
 `,{mode:0o700});
     const script=path.join(scratch,'binding.sh');
     fs.writeFileSync(script,`#!/usr/bin/env bash\nset -euo pipefail\nsource '${fileURLToPath(new URL('../lib/release_consumer_verdict.sh',import.meta.url))}'\nrelease_require_rehearsal_binding burin-labs/harn 42 '${source}'\n`);
-    for(const scenario of ['good','partial','duplicate','wrong_name','wrong_attempt','manifest_attempt',
+    const root=fileURLToPath(new URL('../..',import.meta.url));
+    const workflow=fs.readFileSync(path.join(root,'.github/workflows/promote-release.yml'),'utf8');
+    const match=/name: Re-read the producer rehearsal binding[\s\S]*?\n        run: \|\n((?:          .*\n)+)/.exec(workflow);
+    assert.ok(match,'the owning workflow step must be reached');
+    const step=path.join(scratch,'step.sh'),output=path.join(scratch,'step.outputs');
+    fs.writeFileSync(step,match[1].replace(/^          /gm,''));
+    const allowed=new Set(['good','ordinary_empty','superset_good','superset_advanced_contained','superset_identical','superset_closed_component']);
+    const malformed=new Map([
+      ['superset_null',null],['superset_string','8'],['superset_object',{}],
+      ['superset_empty_element',['']],['superset_number',[8]],['superset_duplicate',['8','8']],
+      ['superset_self',['7']],['superset_zero',['0']],['superset_leading_zero',['08']],
+      ['superset_newline',['8\n']],
+    ]);
+    for(const scenario of ['good','ordinary_empty','superset_moved','superset_good','superset_advanced_contained','superset_identical','superset_closed_component',
+      'superset_unreadable_head','superset_empty_head','superset_invalid_head','superset_unreadable_compare',
+      'superset_empty_compare','superset_wrong_base','superset_unknown_status','superset_behind',
+      'superset_missing_declared','superset_wrong_declared','superset_numeric_declared','superset_private_declared','superset_newline_declared',...malformed.keys(),
+      'partial','duplicate','wrong_name','wrong_attempt','manifest_attempt',
       'wrong_manifest','changed','changed_after_consumer','job_failure','bad_digest']){
       fs.writeFileSync(calls,'');
       const manifest={schemaVersion:'burin-labs.candidate_manifest.v1',repository,sourceCommit:source,
@@ -445,6 +485,14 @@ else process.exit(1);
         producer_run:'42',producer_attempt:scenario==='wrong_attempt'?2:1,
         manifest_digest:scenario==='wrong_manifest'?`sha256:${'f'.repeat(64)}`:manifestDigest,
         consumer_run:'77',consumer_head_sha256:createHash('sha256').update(head).digest('hex'),consumer_pull:null};
+      if(scenario==='ordinary_empty')Object.assign(binding,{declared_pull:null,superseded_pulls:[]});
+      if(scenario.startsWith('superset_'))Object.assign(binding,{consumer_pull:'7',declared_pull:'7',superseded_pulls:['8','9']});
+      if(malformed.has(scenario))binding.superseded_pulls=malformed.get(scenario);
+      if(scenario==='superset_missing_declared')delete binding.declared_pull;
+      if(scenario==='superset_wrong_declared')binding.declared_pull='10';
+      if(scenario==='superset_numeric_declared')Object.assign(binding,{consumer_pull:null,declared_pull:7});
+      if(scenario==='superset_private_declared')Object.assign(binding,{consumer_pull:null,declared_pull:'PRIVATE-COMPONENT-NAME-CANARY'});
+      if(scenario==='superset_newline_declared')Object.assign(binding,{consumer_pull:null,declared_pull:'7\n'});
       const bindingFile=path.join(scratch,'consumer-rehearsal-binding.json'),bindingZip=path.join(scratch,'binding.zip');
       fs.writeFileSync(bindingFile,JSON.stringify(binding));fs.rmSync(bindingZip,{force:true});
       execFileSync('zip',['-q','-X',bindingZip,'consumer-rehearsal-binding.json'],{cwd:scratch});
@@ -455,22 +503,38 @@ else process.exit(1);
         MANIFEST_DIGEST:manifestDigest,BINDING_ZIP:bindingZip,BINDING_SIZE:String(bindingBytes.length),
         BINDING_DIGEST:`sha256:${createHash('sha256').update(bindingBytes).digest('hex')}`};
       const result=spawnSync('bash',[script],{encoding:'utf8',env});
-      if(scenario==='good'){
+      const requireComponentReads=()=>{
+        if(!scenario.startsWith('superset_'))return;
+        const recorded=fs.readFileSync(calls,'utf8').trim().split('\n');
+        assert.ok(recorded.includes('/repos/acme/widget-host/pulls/8'),'the component head must be read');
+        assert.ok(recorded.includes('/repos/acme/widget-host/pulls/9'),'every component head must be read');
+        const first=scenario==='superset_identical'?head:'c'.repeat(40);
+        const second=scenario==='superset_identical'?head:(scenario==='superset_advanced_contained'?'d':'e').repeat(40);
+        assert.ok(recorded.includes('/repos/acme/widget-host/compare/'+first+'...'+head),
+          'the measured component must be compared with the rehearsed consumer');
+        assert.ok(recorded.includes('/repos/acme/widget-host/compare/'+second+'...'+head),
+          'the final component must be compared with the rehearsed consumer');
+      };
+      if(allowed.has(scenario)){
         assert.equal(result.status,0,result.stderr);
         assert.deepEqual(JSON.parse(result.stdout),{producer_attempt:1,manifest_id:100,manifest_digest:manifestDigest});
-        const root=fileURLToPath(new URL('../..',import.meta.url));
-        const workflow=fs.readFileSync(path.join(root,'.github/workflows/promote-release.yml'),'utf8');
-        const match=/name: Re-read the producer rehearsal binding[\s\S]*?\n        run: \|\n((?:          .*\n)+)/.exec(workflow);
-        assert.ok(match,'the owning workflow step must be reached');
-        const step=path.join(scratch,'step.sh'),output=path.join(scratch,'step.outputs');
-        fs.writeFileSync(step,match[1].replace(/^          /gm,''));fs.writeFileSync(output,'');fs.writeFileSync(calls,'');
-        const stepResult=spawnSync('bash',[step],{encoding:'utf8',cwd:root,env:{...env,GITHUB_REPOSITORY:repository,
-          SOURCE_SHA:source,CANDIDATE_RUN_ID:'42',GITHUB_OUTPUT:output}});
-        assert.equal(stepResult.status,0,stepResult.stderr);
-        assert.equal(fs.readFileSync(output,'utf8'),`expected_attempt=1\nexpected_manifest_id=100\nexpected_manifest_digest=${manifestDigest}\n`);
+        requireComponentReads();
       }else{
         assert.notEqual(result.status,0,`${scenario} accepted: ${result.stderr}`);
         assert.equal(result.stdout,'');
+        assert.ok(!result.stderr.includes('PRIVATE-COMPONENT-NAME-CANARY'),'malformed metadata must not reach public diagnostics');
+      }
+      fs.writeFileSync(output,'');fs.writeFileSync(calls,'');
+      const stepResult=spawnSync('bash',[step],{encoding:'utf8',cwd:root,env:{...env,GITHUB_REPOSITORY:repository,
+        SOURCE_SHA:source,CANDIDATE_RUN_ID:'42',GITHUB_OUTPUT:output}});
+      if(allowed.has(scenario)){
+        assert.equal(stepResult.status,0,stepResult.stderr);
+        assert.equal(fs.readFileSync(output,'utf8'),`expected_attempt=1\nexpected_manifest_id=100\nexpected_manifest_digest=${manifestDigest}\n`);
+        requireComponentReads();
+      }else{
+        assert.notEqual(stepResult.status,0,`${scenario} accepted by publication step: ${stepResult.stderr}`);
+        assert.equal(fs.readFileSync(output,'utf8'),'');
+        assert.ok(!stepResult.stderr.includes('PRIVATE-COMPONENT-NAME-CANARY'),'publication diagnostics exclude malformed private metadata');
       }
     }
   }finally{fs.rmSync(scratch,{recursive:true,force:true});}

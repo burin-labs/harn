@@ -18,6 +18,7 @@ const RECEIPT_SCHEMA: &str = "harn.llm.schema_compat_sanitization.v1";
 pub enum SchemaCompatProfile {
     OpenAiLenient,
     OpenAiStrict,
+    AnthropicLenient,
     AnthropicStrict,
     Google,
 }
@@ -127,6 +128,7 @@ impl SchemaCompatProfile {
         match self {
             Self::OpenAiLenient => "openai_lenient",
             Self::OpenAiStrict => "openai_strict",
+            Self::AnthropicLenient => "anthropic_lenient",
             Self::AnthropicStrict => "anthropic_strict",
             Self::Google => "google",
         }
@@ -134,7 +136,7 @@ impl SchemaCompatProfile {
 
     fn unsupported_keywords(self) -> &'static [&'static str] {
         match self {
-            Self::OpenAiLenient => &["$schema", "$id", "id", "default"],
+            Self::OpenAiLenient | Self::AnthropicLenient => &["$schema", "$id", "id", "default"],
             Self::OpenAiStrict => &[
                 "$schema",
                 "$id",
@@ -225,7 +227,7 @@ impl SchemaCompatProfile {
         match self {
             Self::OpenAiStrict | Self::AnthropicStrict => AdditionalPropertiesPolicy::Closed,
             Self::Google => AdditionalPropertiesPolicy::Remove,
-            Self::OpenAiLenient => AdditionalPropertiesPolicy::Preserve,
+            Self::OpenAiLenient | Self::AnthropicLenient => AdditionalPropertiesPolicy::Preserve,
         }
     }
 

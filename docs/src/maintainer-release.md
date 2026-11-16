@@ -197,7 +197,12 @@ Follow the runs for the commit you named in
    it rehearses contains each trailer-named pull's head; otherwise it refuses
    with `pairing_superset_missing` and names the missing pull. The canary
    rechecks containment against the revision the consumer run tested and
-   records the superseded pulls in the rehearsal binding. A paired pull
+   records the superseded pulls in the rehearsal binding. Publication rechecks
+   every recorded component's current head against that rehearsed revision.
+   A component may be closed; its current head must still be contained.
+   If a component advances beyond that revision, publication refuses with
+   `pairing_superset_missing`; run another rehearsal.
+   A paired pull
    already merged into the consumer's default branch rehearses that branch and
    logs `decision=rehearse_default`; a pull closed without merging refuses.
    A passing release rehearsal must retain `consumer-rehearsal-binding-<attempt>`;
@@ -305,6 +310,12 @@ requires full-suite CI at its own source, so a red source never publishes.
   may be evicted independently.
 - Promotion failed: rerun the failed jobs in the exact promotion run. It
   checks the existing tag's commit and refuses a conflicting tag.
+- Pull request pairing changed: on the same source head,
+  [rerun `Pin the consumer commit` and its dependent jobs](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/re-run-workflows-and-jobs)
+  in the original CI run. The pin reads
+  the current declaration and reuses that run's authenticated CLI artifact.
+  A run retains the selector from its source revision, so integrate current
+  main first for branches that still use the older event-body selector.
 - Promotion refused a stale rehearsal binding: for `consumer_pull_head_moved`,
   dispatch the explicit repair below with `-f consumer_pull_request=N`; it
   measures the pull's current head against the original archives. For

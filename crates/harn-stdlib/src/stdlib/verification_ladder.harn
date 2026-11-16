@@ -139,13 +139,15 @@ pub fn __verification_row_timing_kind(
 
 pub fn __verification_row_p95_ms(row: dict, opts: dict, timing_kind: string) -> int {
   const kind = lowercase(trim(to_string(timing_kind)))
-  const timings = row?.timings ?? {}
+  const timings = __verification_reference(row?.timings ?? {})
+  const warm = __verification_reference(timings?.warmMs)
+  const cold = __verification_reference(timings?.coldMs)
   const raw = if kind == "cold" {
-    timings?.coldMs?.p95
+    cold?.p95
   } else if kind == "any" {
-    timings?.warmMs?.p95 ?? timings?.coldMs?.p95
+    warm?.p95 ?? cold?.p95
   } else {
-    timings?.warmMs?.p95 ?? timings?.coldMs?.p95
+    warm?.p95 ?? cold?.p95
   }
   return to_int(raw) ?? to_int(opts?.unknown_p95_ms) ?? 999999
 }
@@ -164,7 +166,11 @@ pub fn __verification_command_present(command: unknown) -> bool {
   return true
 }
 
-pub fn __verification_skip(row_id: string, reason: string, profile_match: dict) -> dict {
+pub fn __verification_skip(
+  row_id: string,
+  reason: string,
+  profile_match: dict,
+) -> VerificationLadderSkip {
   return {
     row_id: row_id,
     reason: reason,
@@ -173,7 +179,10 @@ pub fn __verification_skip(row_id: string, reason: string, profile_match: dict) 
   }
 }
 
-pub fn __verification_ladder_candidate(profile_match: dict, opts: dict) {
+pub fn __verification_ladder_candidate(
+  profile_match: dict,
+  opts: dict,
+) -> VerificationLadderCandidate {
   const row = profile_match?.row ?? {}
   const row_id = __verification_profile_row_id(row, to_int(profile_match?.index) ?? 0)
   const check = __verification_check(row)
@@ -320,16 +329,17 @@ pub fn __verification_hud_plan_options(dir: string, opts: dict) -> dict {
   return plan_options
 }
 
-pub fn __verification_hud_entry(entry: any) {
+pub fn __verification_hud_entry(entry: any) -> VerificationHudEntry? {
   if type_of(entry) != "dict" {
     return nil
   }
   const command = __verification_command_label(entry?.command)
+  const row = __verification_reference(entry?.row)
   return {
     row_id: entry?.row_id,
     rung: entry?.rung,
     command: command,
-    label: trim(to_string(entry?.row?.label ?? entry?.row?.name ?? entry?.row_id ?? "")),
+    label: trim(to_string(row?.label ?? row?.name ?? entry?.row_id ?? "")),
     p95_ms: entry?.p95_ms,
     p95: __verification_duration_label(entry?.p95_ms),
     timing_kind: entry?.timing_kind ?? "warm",
@@ -340,7 +350,11 @@ pub fn __verification_hud_entry(entry: any) {
   }
 }
 
-pub fn __verification_hud_last_check(state: dict, current_hashes: dict, now_ms: int) {
+pub fn __verification_hud_last_check(
+  state: dict,
+  current_hashes: dict,
+  now_ms: int,
+) -> VerificationHudLastCheck? {
   const last = state?.last_check ?? state?.lastCheck
   if type_of(last) != "dict" {
     return nil

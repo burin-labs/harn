@@ -1,0 +1,10 @@
+import { VerificationStartedCheck } from "std/verification"
+
+fn wrong_status(value: VerificationStartedCheck) -> int {
+  const status: int = value.started.status
+  return status
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(type_of(wrong_status))
+}

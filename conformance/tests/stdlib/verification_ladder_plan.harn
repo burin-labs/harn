@@ -1,5 +1,7 @@
 import { verification_ladder_plan } from "std/verification"
 
+type ShellCommand = {mode: string, command: string}
+
 pipeline test(harness: Harness, task: unknown) {
   harness.runtime.verification_profiles_set(
     {
@@ -110,48 +112,49 @@ pipeline test(harness: Harness, task: unknown) {
   assert_eq(plan.schema, "harn.verification.ladder_plan.v1")
   assert_eq(plan.reason, "profile_rows_selected")
   assert_eq(len(plan.selected), 5)
-  assert_eq(plan.selected[0].row_id, "tx/parse")
-  assert_eq(plan.selected[0].rung, "R0")
-  assert_eq(plan.selected[0].resource_class, "cheap")
-  assert_eq(plan.selected[0].p95_ms, 80)
-  assert_eq(plan.selected[0].runnable, true)
-  assert_eq(plan.selected[1].row_id, "tx/r0-slow-cheap")
-  assert_eq(plan.selected[1].p95_ms, 2000000000)
-  assert_eq(plan.selected[2].row_id, "tx/r0-fast-moderate")
-  assert_eq(plan.selected[3].row_id, "tx/r1-fast")
-  assert_eq(plan.selected[3].rung, "R1")
-  assert_eq(plan.selected[4].row_id, "tx/unit")
-  assert_eq(plan.selected[4].rung_rank, 2)
-  assert_eq(plan.selected[4].command.command, "echo unit")
+  assert_eq(plan.selected[0]?.row_id, "tx/parse")
+  assert_eq(plan.selected[0]?.rung, "R0")
+  assert_eq(plan.selected[0]?.resource_class, "cheap")
+  assert_eq(plan.selected[0]?.p95_ms, 80)
+  assert_eq(plan.selected[0]?.runnable, true)
+  assert_eq(plan.selected[1]?.row_id, "tx/r0-slow-cheap")
+  assert_eq(plan.selected[1]?.p95_ms, 2000000000)
+  assert_eq(plan.selected[2]?.row_id, "tx/r0-fast-moderate")
+  assert_eq(plan.selected[3]?.row_id, "tx/r1-fast")
+  assert_eq(plan.selected[3]?.rung, "R1")
+  assert_eq(plan.selected[4]?.row_id, "tx/unit")
+  assert_eq(plan.selected[4]?.rung_rank, 2)
+  const unit_command = schema_expect(plan.selected[4]?.command, schema_of(ShellCommand))
+  assert_eq(unit_command.command, "echo unit")
   assert_eq(plan.fallback, false)
-  assert_eq(plan.skipped[0].row_id, "tx/full-stale")
-  assert_eq(plan.skipped[0].reason, "resource_class_filtered")
-  assert_eq(plan.skipped[1].row_id, "tx/no-rung")
-  assert_eq(plan.skipped[1].reason, "missing_or_invalid_rung")
-  assert_eq(plan.skipped[2].row_id, "tx/no-command")
-  assert_eq(plan.skipped[2].reason, "missing_command")
-  assert_eq(plan.skipped[3].row_id, "tx/row-stale")
-  assert_eq(plan.skipped[3].reason, "stale_prone_filtered")
-  assert_eq(plan.skipped[4].row_id, "any/full")
-  assert_eq(plan.skipped[4].reason, "resource_class_filtered")
+  assert_eq(plan.skipped[0]?.row_id, "tx/full-stale")
+  assert_eq(plan.skipped[0]?.reason, "resource_class_filtered")
+  assert_eq(plan.skipped[1]?.row_id, "tx/no-rung")
+  assert_eq(plan.skipped[1]?.reason, "missing_or_invalid_rung")
+  assert_eq(plan.skipped[2]?.row_id, "tx/no-command")
+  assert_eq(plan.skipped[2]?.reason, "missing_command")
+  assert_eq(plan.skipped[3]?.row_id, "tx/row-stale")
+  assert_eq(plan.skipped[3]?.reason, "stale_prone_filtered")
+  assert_eq(plan.skipped[4]?.row_id, "any/full")
+  assert_eq(plan.skipped[4]?.reason, "resource_class_filtered")
   const bounded = verification_ladder_plan(harness.runtime, query, {max_rung: "R1"})
   assert_eq(len(bounded.selected), 5)
-  assert_eq(bounded.selected[0].row_id, "tx/parse")
+  assert_eq(bounded.selected[0]?.row_id, "tx/parse")
   const numeric_bounded = verification_ladder_plan(
     harness.runtime,
     query,
     {min_rung: 1, max_rung: 2, resource_classes: ["cheap", "moderate"], allow_stale_prone: false},
   )
   assert_eq(len(numeric_bounded.selected), 2)
-  assert_eq(numeric_bounded.selected[0].row_id, "tx/r1-fast")
-  assert_eq(numeric_bounded.selected[1].row_id, "tx/unit")
+  assert_eq(numeric_bounded.selected[0]?.row_id, "tx/r1-fast")
+  assert_eq(numeric_bounded.selected[1]?.row_id, "tx/unit")
   const limited = verification_ladder_plan(
     harness.runtime,
     query,
     {resource_classes: ["cheap", "moderate"], allow_stale_prone: false, limit: 3},
   )
   assert_eq(len(limited.selected), 3)
-  assert_eq(limited.selected[2].row_id, "tx/r0-fast-moderate")
+  assert_eq(limited.selected[2]?.row_id, "tx/r0-fast-moderate")
   harness.runtime.verification_profiles_set({rows: []})
   const empty = verification_ladder_plan(harness.runtime, query)
   assert_eq(empty.fallback, true)
