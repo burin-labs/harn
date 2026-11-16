@@ -1,0 +1,4 @@
+tracked_writes_are_ordinary_risks=true
+nested_and_numeric_redirects_remain_writes=true
+sinks_and_literal_prose_are_not_writes=true
+unrelated_destruction_retains_floor=true

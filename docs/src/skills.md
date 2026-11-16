@@ -102,7 +102,7 @@ Ship it: `$ARGUMENTS`. Skill directory: `${HARN_SKILL_DIR}`.
 | `name` | string | Optional in frontmatter when the directory name already provides it; Harn falls back to the enclosing skill directory basename. |
 | `short` | string | Compact card loaded into the startup registry and catalogs. When omitted, Harn uses `metadata.short-description`, then `description`. An explicitly empty or invalid card is rejected. |
 | `description` | string | Optional longer summary. Useful for richer CLI output or custom matchers, but not required for lazy discovery. |
-| `metadata` | mapping | Shared tool metadata. `short-description` (or `short_description`) supplies the compact card when `short` is omitted. |
+| `metadata` | string-to-string mapping | Optional metadata retained in full and discovery-only skill registry entries. `short-description` (or `short_description`) supplies the compact card when `short` is omitted. Metadata does not change tool permissions. |
 | `when-to-use` | string | Longer activation trigger. |
 | `disable-model-invocation` | bool | If `true`, never auto-activate — explicit use only. |
 | `allowed-tools` | list of string | Restrict tool surface while the skill is active. Entries accept three shapes: an exact tool name (`"deploy_service"`), a namespace tag (`"namespace:read"` — matches every tool declared with `namespace: "read"`), or `"*"` (escape hatch that keeps the full surface, useful for skills that only carry prompt context). |
