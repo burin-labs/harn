@@ -1100,6 +1100,8 @@ fn every_session_dispatch_arm_checks_authentication() {
 mod batch_verification_stop;
 mod caching;
 mod canonical_fork;
+#[cfg(all(feature = "hostlib", unix))]
+mod command_hold_progress;
 mod commands;
 mod config_values;
 mod conservative_admission;

@@ -82,6 +82,9 @@ pipeline main(harness: Harness, task: unknown) {
   const tool_caller = { envelope, _next ->
     const snapshot = harness.runtime.shared_snapshot(dispatches)
     harness.runtime.shared_cas(dispatches, snapshot, snapshot.value + 1)
+    // The command may finish before the loop first reconciles its running
+    // receipt. Delivery must not require a second model request to wake it.
+    harness.agent.post_event(session, "tool_result", terminal, "hostlib.long_running.exit")
     return {
       ok: true,
       status: "running",
@@ -110,7 +113,7 @@ pipeline main(harness: Harness, task: unknown) {
             session,
             "tool_result",
             terminal,
-            "test.terminal_replay",
+            "hostlib.long_running.exit",
           )
         }
       }
@@ -130,11 +133,6 @@ pipeline main(harness: Harness, task: unknown) {
           model: "mock",
         },
       }
-    }
-    if call_number == 2 {
-      // This terminal wakes the real command-ledger hold. The subscriber above
-      // then replays the same immutable receipt after that hold consumed it.
-      harness.agent.post_event(session, "tool_result", terminal, "test.terminal")
     }
     return {
       ok: true,

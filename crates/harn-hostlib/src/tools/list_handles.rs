@@ -16,22 +16,28 @@
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
-use crate::tools::payload::{optional_string, require_dict_arg};
+use crate::tools::payload::{optional_string, optional_string_list, require_dict_arg};
 
 pub(crate) const NAME: &str = "hostlib_tools_list_handles";
 
 pub(crate) fn handle(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     // Tolerate a bare call, an empty dict, or `{ session_id }`.
-    let requested = match args.first() {
+    let (requested, completed) = match args.first() {
         Some(VmValue::Dict(_)) => {
             let map = require_dict_arg(NAME, args)?;
-            optional_string(NAME, &map, "session_id")?
+            (
+                optional_string(NAME, &map, "session_id")?,
+                optional_string_list(NAME, &map, "completed_handle_ids")?.unwrap_or_default(),
+            )
         }
-        _ => None,
+        _ => (None, Vec::new()),
     };
     let session_id = requested
         .filter(|s| !s.is_empty())
         .or_else(harn_vm::current_agent_session_id)
         .unwrap_or_default();
-    Ok(super::long_running::list_session_handles(&session_id))
+    Ok(super::long_running::list_session_handles(
+        &session_id,
+        &completed,
+    ))
 }

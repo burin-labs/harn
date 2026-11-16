@@ -1,8 +1,3 @@
 ## Native tool protocol
 
-The provider exposes tool definitions outside this prompt.
-
-- Invoke tools only through the provider's native tool-calling channel.
-- The current workflow/system prompt may mention only the tool names available for this stage; do not assume tools from earlier stages remain available.
-- Do not write tool-call syntax by hand in assistant text, including text-mode tags, function-call snippets, Markdown code fences, or JSON tool-call envelopes.
-- Keep assistant prose short and operational. {{ if done_sentinel }}When the task is complete and no more tool calls are needed, include `{{ done_sentinel }}` exactly once in assistant text.{{ else }}When the task is complete and no more tool calls are needed, give the final user-facing answer as plain assistant text and stop calling tools; that signals completion.{{ end }}
+Use the provider's native tool-calling channel and the supplied definitions. Tools from earlier stages may be unavailable. Never write tool calls in prose, tags, code fences or JSON envelopes. Keep prose concise; when finished, answer in plain assistant text and stop calling tools.

@@ -1,3 +1,4 @@
+import { agent_progress_payload_value } from "std/agent/progress"
 import {
   agent_emit_event,
   agent_session_await_inbox,
@@ -8,8 +9,7 @@ import {
 //
 // A session-scoped registry of long-running `run_command` handles that the
 // agent loop OWNS instead of asking the model to poll. Rows are created from
-// `status=="running" && handle_id` dispatch results; while any `awaited` row is
-// live and a model segment produces no tool calls, the loop parks on
+// the native session handle store; while any `awaited` row is live, the loop parks on
 // `agent_session_await_inbox` (zero inference) and re-enters the model only on
 // its own sparse, delta-gated decision schedule with ONE coalesced
 // `command_status` digest covering every live handle.
@@ -48,6 +48,10 @@ const __CL_HOLD_REENTRY_MAX_TOKENS = 96
 
 const __CL_HOLD_REENTRY_BUDGET = 8
 
+const __CL_WAITING_MESSAGE = "Waiting for running commands"
+
+const __CL_FINISHED_MESSAGE = "Command finished"
+
 // -------------------------------------------------------------------------------------------------
 
 // Options contract. Harn defines the shape and normalizes ALL defaults once at
@@ -56,6 +60,7 @@ const __CL_HOLD_REENTRY_BUDGET = 8
 // -------------------------------------------------------------------------------------------------
 
 pub type CommandWaitOptions = {
+  completion_tool?: string,
   inline_window_ms?: int,
   decision_base_ms?: int,
   decision_multiplier?: int,
@@ -81,6 +86,7 @@ pub type CommandHoldResult = {
   terminal_succeeded?: bool,
   reentry_cap?: int?,
   receipts: list,
+  completed_handles?: list<string>,
 }
 
 fn __cl_pos_int(value: any, fallback: int) -> int {
@@ -116,6 +122,7 @@ pub fn command_wait_normalize(raw: any) -> CommandWaitOptions {
     "kill"
   }
   return {
+    completion_tool: trim(to_string(opts?.completion_tool ?? "")),
     inline_window_ms: __cl_pos_int(opts?.inline_window_ms, 10000),
     decision_base_ms: __cl_pos_int(opts?.decision_base_ms, __CL_DECISION_BASE_MS),
     decision_multiplier: __cl_pos_int(opts?.decision_multiplier, __CL_DECISION_MULTIPLIER),
@@ -235,6 +242,67 @@ pub fn command_ledger_ingest(ledger: any, dispatch_results: list?, now_ms: any, 
   return out
 }
 
+/** Ingest the process owner's roster without interpreting a tool's payload. */
+pub fn command_ledger_ingest_handles(ledger: list, handles: list, now_ms: int, cw: dict) -> list {
+  let out = ledger
+  for handle in handles {
+    const id = trim(to_string(handle?.handle_id ?? ""))
+    if id == "" || !["awaited", "service"].contains(handle?.lease) {
+      continue
+    }
+    if __cl_row_index(out, id) < 0 {
+      out.push(__cl_new_row(handle, now_ms, cw))
+    }
+    const index = __cl_row_index(out, id)
+    const status = to_string(handle?.status ?? "running")
+    if status != "running" && status != "" && out[index]?.lease != "retired" {
+      out = __cl_replace_row(out, id, out[index] + {status: status})
+    }
+  }
+  return out
+}
+
+/** Reconcile native process ownership before consuming its queued snapshots. */
+pub fn command_ledger_reconcile(
+  harness: Harness,
+  session_id: string,
+  ledger: list,
+  cw: dict,
+) -> list {
+  const snapshot = harness.tools.list_handles({session_id: session_id})
+  const now = harness.clock.monotonic_ms()
+  let live = command_ledger_ingest_handles(ledger, snapshot?.handles ?? [], now, cw)
+  const entries = agent_session_drain_command_updates(harness.agent, session_id)
+  let unknown = []
+  const live_ids = (snapshot?.handles ?? []).map({ handle -> handle.handle_id }).to_list()
+  // Explicit cancellation intentionally has no terminal inbox event. Resolve
+  // a known handle missing from the live roster through the same retained
+  // store, preserving its original lease and the registered completion path.
+  for row in live {
+    if row?.lease != "retired" && row?.status == "running"
+      && !live_ids.contains(row.handle_id) {
+      unknown.push(to_string(row.handle_id))
+    }
+  }
+  for entry in entries {
+    const update = __cl_parse_snapshot(entry)
+    const handle = trim(to_string(update?.handle_id ?? ""))
+    if handle != "" && __cl_row_index(live, handle) < 0 && !unknown.contains(handle) {
+      unknown.push(handle)
+    }
+  }
+  if len(unknown) > 0 {
+    const raced = harness.tools.list_handles(
+      {session_id: session_id, completed_handle_ids: unknown},
+    )
+    // The waiter publishes its terminal before removing the live entry. Either
+    // side of that atomic transition therefore supplies the original lease.
+    const owned = (raced?.handles ?? []) + (raced?.completed_handles ?? [])
+    live = command_ledger_ingest_handles(live, owned, now, cw)
+  }
+  return command_ledger_apply_updates(live, entries, harness.clock.monotonic_ms(), cw)
+}
+
 fn __cl_awaited_running(ledger: list) {
   let out = []
   for row in ledger {
@@ -258,15 +326,14 @@ pub fn command_ledger_has_awaited(ledger: list) -> bool {
 }
 
 /**
- * True when a no-tool-call model segment should park rather than end the turn:
- * the model emitted zero tool calls AND a live `awaited` handle exists.
+ * True when an awaited handle needs waiting or terminal delivery.
  *
  * @effects: []
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_should_hold(ledger: list, tool_call_count: int?) -> bool {
-  return to_int(tool_call_count ?? 0) == 0 && command_ledger_has_awaited(ledger)
+pub fn command_ledger_should_hold(ledger: list, _tool_call_count: int?) -> bool {
+  return command_ledger_has_awaited(ledger) || __cl_has_terminal_awaited(ledger)
 }
 
 /**
@@ -386,7 +453,7 @@ pub fn command_ledger_apply_updates(ledger: any, entries: list?, now_ms: any, cw
     if snapshot != nil {
       const handle = trim(to_string(snapshot?.handle_id ?? ""))
       const index = __cl_row_index(out, handle)
-      if handle != "" && index >= 0 {
+      if handle != "" && index >= 0 && out[index]?.lease != "retired" {
         out = __cl_replace_row(out, handle, __cl_apply_one(out[index], snapshot, now_ms, cw))
       }
     }
@@ -398,24 +465,24 @@ pub fn command_ledger_apply_updates(ledger: any, entries: list?, now_ms: any, cw
 // Decision pass: delta gate + event triggers + schedule. One mechanism.
 // -------------------------------------------------------------------------------------------------
 
-fn __cl_row_fires(row: dict, now_ms: any, cw: dict) -> bool {
+fn __cl_row_fires(row: dict, now_ms: any, cw: dict) -> {fire: bool, recovery: bool} {
   if row.status != "running" {
     // Terminal: always fires immediately (the completion payload).
-    return true
+    return {fire: true, recovery: false}
   }
   if row?.first_stderr_edge ?? false {
-    return true
+    return {fire: true, recovery: false}
   }
   if !(row?.stall_fired ?? false) && row.silence_ms >= cw.stall_after_ms {
-    return true
+    return {fire: true, recovery: true}
   }
   if now_ms >= row.next_decision_at_ms {
     const has_new_output = row.output_offset > row.last_digest_offset
     const silence_floor_hit = now_ms - (row?.last_digest_at_ms ?? row.started_at_ms)
       >= cw.silence_floor_ms
-    return has_new_output || silence_floor_hit
+    return {fire: has_new_output || silence_floor_hit, recovery: false}
   }
-  return false
+  return {fire: false, recovery: false}
 }
 
 fn __cl_advance_schedule_row(row: dict, now_ms: any, cw: dict) {
@@ -439,11 +506,14 @@ fn __cl_advance_schedule_row(row: dict, now_ms: any, cw: dict) {
  */
 pub fn command_ledger_decide(ledger: list, now_ms: any, cw: dict) -> dict {
   let fire = false
+  let recovery = false
   let out = []
   for row in ledger {
     if row?.lease == "awaited" && (row.status == "running" || row?.status == nil) {
-      if __cl_row_fires(row, now_ms, cw) {
+      const decision = __cl_row_fires(row, now_ms, cw)
+      if decision.fire {
         fire = true
+        recovery = recovery || decision.recovery
         out.push(row)
       } else if now_ms >= row.next_decision_at_ms {
         out.push(__cl_advance_schedule_row(row, now_ms, cw))
@@ -458,7 +528,7 @@ pub fn command_ledger_decide(ledger: list, now_ms: any, cw: dict) -> dict {
       out.push(row)
     }
   }
-  return {ledger: out, fire: fire}
+  return {ledger: out, fire: fire, recovery: recovery}
 }
 
 fn __cl_earliest_deadline(ledger: list, cw: dict) -> int {
@@ -573,7 +643,12 @@ pub fn command_ledger_build_digest(ledger: list, now_ms: any, cw: dict) -> strin
  * @errors: []
  * @api_stability: experimental
  */
-pub fn command_ledger_after_digest(ledger: list, now_ms: any, cw: dict) -> list {
+pub fn command_ledger_after_digest(
+  ledger: list,
+  now_ms: any,
+  cw: dict,
+  model_reentry: bool = true,
+) -> list {
   let out = []
   for row in ledger {
     if row?.lease != "awaited" {
@@ -591,14 +666,15 @@ pub fn command_ledger_after_digest(ledger: list, now_ms: any, cw: dict) -> list 
             new_output: "",
             first_stderr_edge: false,
             stall_fired: row.silence_ms >= cw.stall_after_ms || row?.stall_fired,
-            reentries: row.reentries + 1,
+            reentries: row.reentries + (model_reentry ? 1 : 0),
             decision_interval_ms: next_interval,
             next_decision_at_ms: now_ms + next_interval,
           },
       )
+    } else {
+      // Retain only identity, so an immutable terminal replay cannot reopen it.
+      out.push({handle_id: row.handle_id, lease: "retired", status: row.status})
     }
-    // A terminal awaited row is dropped here: its completion was surfaced in
-    // this digest exactly once, so it is now retired from the ledger.
   }
   return out
 }
@@ -744,6 +820,27 @@ pub fn command_ledger_hold(
   let live = ledger
   let state = hold_state
   let receipts = []
+  if len(__cl_awaited_running(live)) > 0 {
+    agent_emit_event(
+      harness.agent,
+      session_id,
+      "progress_reported",
+      agent_progress_payload_value(
+        {
+          message: __CL_WAITING_MESSAGE,
+          entries: [],
+          replace: false,
+          metadata: {
+            producer: "harn.command_hold",
+            commands: __cl_awaited_running(live).map(
+              { row -> {handle_id: row.handle_id, descriptor: row.descriptor, status: row.status} },
+            )
+              .to_list(),
+          },
+        },
+      ),
+    )
+  }
   while true {
     if len(__cl_awaited_running(live)) == 0 && !__cl_has_terminal_awaited(live) {
       return {ledger: live, outcome: "resolved", hold_state: state, receipts: receipts}
@@ -785,17 +882,61 @@ pub fn command_ledger_hold(
     }
     const earliest = __cl_earliest_deadline(live, cw)
     const timeout = max(0, earliest - now)
-    const woke = agent_session_await_inbox(harness.agent, session_id, timeout)
+    const woke = if __cl_has_terminal_awaited(live) {
+      false
+    } else {
+      agent_session_await_inbox(harness.agent, session_id, timeout)
+    }
     const entries = agent_session_drain_command_updates(harness.agent, session_id)
     const now2 = __cl_now_ms(harness.clock)
     if len(entries) > 0 {
       live = command_ledger_apply_updates(live, entries, now2, cw)
+      agent_emit_event(
+        harness.agent,
+        session_id,
+        "progress_reported",
+        agent_progress_payload_value(
+          {
+            message:
+              len(__cl_awaited_running(live)) == 0 ? __CL_FINISHED_MESSAGE : __CL_WAITING_MESSAGE,
+            entries: [],
+            replace: false,
+            metadata: {
+              producer: "harn.command_hold",
+              commands: live.filter({ row -> row?.lease == "awaited" }).map(
+                { row ->
+                  {
+                    handle_id: row.handle_id,
+                    descriptor: row.descriptor,
+                    status: row.status,
+                    elapsed_ms: row.last_elapsed_ms,
+                    byte_count: row.output_offset,
+                  }
+                },
+              )
+                .to_list(),
+            },
+          },
+        ),
+      )
     }
     const decision = command_ledger_decide(live, now2, cw)
     live = decision.ledger
     if decision.fire {
+      if (cw?.completion_tool ?? "") != "" && !decision.recovery
+        && !__cl_has_terminal_awaited(live) {
+        // Ordinary output is host narration in registered-completion mode.
+        // Advance the same cursor/schedule without charging an inference.
+        live = command_ledger_after_digest(live, now2, cw, false)
+        continue
+      }
       const digest = command_ledger_build_digest(live, now2, cw)
       const terminal_succeeded = __cl_terminal_batch_succeeded(live)
+      const completed_handles = live.filter(
+        { row -> row?.lease == "awaited" && row.status != "running" },
+      )
+        .map({ row -> to_string(row.handle_id) })
+        .to_list()
       // A digest carrying a terminal completion re-enters the model UNCAPPED —
       // acting on results needs reasoning budget. A progress-only digest ("keep
       // waiting") is capped: the model's cheapest action (say nothing) is right.
@@ -804,7 +945,11 @@ pub fn command_ledger_hold(
       } else {
         cw.hold_reentry_max_tokens
       }
-      live = command_ledger_after_digest(live, now2, cw)
+      // A registered completion tool owns durable delivery. Keep terminal rows
+      // pending until its normal dispatch runs, including across control events.
+      if len(completed_handles) == 0 || (cw?.completion_tool ?? "") == "" {
+        live = command_ledger_after_digest(live, now2, cw)
+      }
       state = state + {reentries: state.reentries + 1}
       return {
         ledger: live,
@@ -814,6 +959,7 @@ pub fn command_ledger_hold(
         reentry_cap: cap,
         hold_state: state,
         receipts: receipts,
+        completed_handles: completed_handles,
       }
     }
     if woke && len(entries) == 0 {

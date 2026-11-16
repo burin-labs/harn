@@ -48,6 +48,15 @@ const FAILED_JSON: &str = r#"{"handle_id":"hto-1","status":"completed","exit_cod
 /// and the surviving ledger length. `reentries` seeds the hold-state budget;
 /// `wall_ms` overrides the awaited-wall ceiling.
 fn hold_snippet(session: &str, reentries: i64, wall_ms: i64) -> String {
+    hold_snippet_with_completion(session, reentries, wall_ms, "")
+}
+
+fn hold_snippet_with_completion(
+    session: &str,
+    reentries: i64,
+    wall_ms: i64,
+    completion_tool: &str,
+) -> String {
     format!(
         r#"
 import {{
@@ -58,7 +67,7 @@ import {{
 }} from "std/agent/command_ledger"
 
 pipeline main(harness: Harness) {{
-  const cw = command_wait_normalize({{max_awaited_wall_ms: {wall_ms}}})
+  const cw = command_wait_normalize({{max_awaited_wall_ms: {wall_ms}, completion_tool: "{completion_tool}"}})
   const running = {{
     status: "running",
     handle_id: "hto-1",
@@ -75,6 +84,8 @@ pipeline main(harness: Harness) {{
   harness.stdio.log("HAS_DIGEST=" + to_string(r?.digest != nil))
   harness.stdio.log("LEDGER_LEN=" + to_string(len(r.ledger)))
   harness.stdio.log("TERMINAL_SUCCEEDED=" + to_string(r?.terminal_succeeded ?? false))
+  harness.stdio.log("REENTRIES=" + to_string(r.hold_state.reentries))
+  harness.stdio.log("COMPLETED_COUNT=" + to_string(len(r?.completed_handles ?? [])))
   if r?.digest != nil {{
     harness.stdio.log("DIGEST=" + r.digest)
   }}
@@ -201,7 +212,12 @@ fn park_wakes_on_terminal_then_returns_digest() {
                 !task.is_finished(),
                 "hold must PARK while the awaited handle runs, not resolve synchronously"
             );
-            agent_inbox::push(session, "tool_result", TERMINAL_JSON, "test");
+            agent_inbox::push(
+                session,
+                "tool_result",
+                TERMINAL_JSON,
+                agent_inbox::COMMAND_TERMINAL_SOURCE,
+            );
             task.await.expect("join").expect("snippet ok")
         },
     );
@@ -235,7 +251,12 @@ fn failed_terminal_digest_requires_model_reentry() {
         |_paused, task| async move {
             yield_times(8).await;
             assert!(!task.is_finished(), "hold must park while the handle runs");
-            agent_inbox::push(session, "tool_result", FAILED_JSON, "test");
+            agent_inbox::push(
+                session,
+                "tool_result",
+                FAILED_JSON,
+                agent_inbox::COMMAND_TERMINAL_SOURCE,
+            );
             task.await.expect("join").expect("snippet ok")
         },
     );
@@ -298,7 +319,12 @@ fn delta_gate_suppresses_no_change_rung() {
                 "a no-output decision rung must be delta-gated (re-park), not fire a digest"
             );
             // A real terminal now ends the hold.
-            agent_inbox::push(session, "tool_result", TERMINAL_JSON, "test");
+            agent_inbox::push(
+                session,
+                "tool_result",
+                TERMINAL_JSON,
+                agent_inbox::COMMAND_TERMINAL_SOURCE,
+            );
             task.await.expect("join").expect("snippet ok")
         },
     );
@@ -312,6 +338,61 @@ fn delta_gate_suppresses_no_change_rung() {
         digest.contains("completed"),
         "final digest is the terminal: {digest}"
     );
+}
+
+#[test]
+fn registered_completion_narrates_output_across_rungs_without_model_reentry() {
+    let session = "hold-registered-progress-sess";
+    let lines = run_scenario(
+        hold_snippet_with_completion(session, 0, 900_000, "collect_command"),
+        |paused, task| async move {
+            yield_times(8).await;
+            assert!(
+                !task.is_finished(),
+                "registered completion must initially park"
+            );
+            agent_inbox::push(
+                session,
+                "tool_progress",
+                r#"{"handle_id":"hto-1","status":"running","byte_count":120,"stderr_byte_count":8,"stdout":"compiling","stderr":"warning","silence_ms":0}"#,
+                agent_inbox::COMMAND_PROGRESS_SOURCE,
+            );
+            yield_times(8).await;
+            assert!(
+                !task.is_finished(),
+                "ordinary stderr must not request inference"
+            );
+            paused.advance(Duration::from_secs(30));
+            yield_times(8).await;
+            assert!(
+                !task.is_finished(),
+                "output at the decision rung must remain local"
+            );
+            agent_inbox::push(
+                session,
+                "tool_progress",
+                r#"{"handle_id":"hto-1","status":"running","byte_count":180,"stderr_byte_count":16,"stdout":"more compiling","stderr":"another warning","silence_ms":0}"#,
+                agent_inbox::COMMAND_PROGRESS_SOURCE,
+            );
+            paused.advance(Duration::from_secs(60));
+            yield_times(8).await;
+            assert!(
+                !task.is_finished(),
+                "later output must not request inference"
+            );
+            agent_inbox::push(
+                session,
+                "tool_result",
+                TERMINAL_JSON,
+                agent_inbox::COMMAND_TERMINAL_SOURCE,
+            );
+            task.await.expect("join").expect("snippet ok")
+        },
+    );
+    assert_eq!(line_value(&lines, "OUTCOME"), Some("digest"));
+    assert_eq!(line_value(&lines, "REENTRIES"), Some("1"));
+    assert_eq!(line_value(&lines, "COMPLETED_COUNT"), Some("1"));
+    assert_eq!(line_value(&lines, "TERMINAL_SUCCEEDED"), Some("true"));
 }
 
 // (d): re-entry budget exhaustion returns `exhausted` (the loop maps this to the

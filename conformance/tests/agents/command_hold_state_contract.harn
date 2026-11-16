@@ -1,4 +1,4 @@
-import { AgentLoopCommandHoldResult } from "std/agent/loop_post_turn"
+import { AgentLoopCommandHoldResult } from "std/agent/loop_command_hold_types"
 
 fn next_hold_state(result: AgentLoopCommandHoldResult) -> {reentries: int} {
   return result.hold_state

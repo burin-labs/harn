@@ -1,5 +1,12 @@
 [
   {
+    "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+    "expression": "__agent_loop_budget_exhaustion(\n              harness.agent,\n              harness.clock,\n              session.session_id,\n              budget,\n              iteration,\n              totals,\n              loop_start_ms,\n              current_max,\n            )",
+    "owner": "__agent_loop_budget_exhaustion",
+    "evidence": "The command-completion boundary checks the same already-resolved IterationBudget before waiting. That budget consumer remains independently scanned under IterationBudget; no new AgentSpec value is interpreted here."
+  },
+  {
     "scope": "AgentBudget",
     "file": "crates/harn-stdlib/src/stdlib/agent/budget.harn",
     "expression": "agent.budget_pre_call_blocked(session.session_id, envelope)",
@@ -617,7 +624,7 @@
   {
     "scope": "IterationBudget",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "agent_compute_terminal_callback(\n        harness.agent,\n        session,\n        opts,\n        {\n          iteration: iteration,\n          final_status: terminal.final_status,\n          stop_reason: terminal.stop_reason,\n          terminal_error: terminal?.error,\n          max_iterations: current_max,\n          iteration_budget: iteration_budget,\n          session_successful_tools: successful_tools_seen,\n          session_rejected_tools: rejected_tools_seen,\n        },\n      )",
+    "expression": "agent_compute_terminal_callback(\n        harness.agent,\n        session,\n        opts,\n        {\n          iteration: iteration,\n          final_status: terminal.final_status,\n          stop_reason: terminal.stop_reason,\n          terminal_error: terminal.error,\n          max_iterations: current_max,\n          iteration_budget: iteration_budget,\n          session_successful_tools: successful_tools_seen,\n          session_rejected_tools: rejected_tools_seen,\n        },\n      )",
     "owner": "agent_compute_terminal_callback",
     "evidence": "Consumer agent_compute_terminal_callback has an explicit parameter origin for IterationBudget at the recorded nested path; its literal reads are audited independently.",
     "consumers": [

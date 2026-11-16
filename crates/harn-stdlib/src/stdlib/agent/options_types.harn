@@ -1,3 +1,4 @@
+import { CommandWaitOptions } from "std/agent/command_ledger"
 import { CompletionPrecheckConfig } from "std/agent/completion_precheck"
 import { GoalSpec } from "std/agent/goal_contract"
 import { AgentStallCheckpoint } from "std/agent/stall_types"
@@ -425,6 +426,7 @@ pub type AgentModelSpec = {
  */
 pub type AgentExecutionSpec = {
   profile?: string,
+  command_wait?: CommandWaitOptions,
   loop_until_done?: bool,
   done_sentinel?: string,
   max_iterations?: int,

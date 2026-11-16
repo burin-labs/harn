@@ -2,6 +2,27 @@
 use super::*;
 use harn_vm::value::VmDictExt as _;
 
+fn assert_cancel_status_only(session_id: &str, handle_id: &str, expected_status: &str) {
+    let items = harn_vm::orchestration::agent_inbox::drain(session_id);
+    assert_eq!(
+        items.len(),
+        1,
+        "one status wake, no duplicate model feedback: {items:?}"
+    );
+    assert_eq!(items[0].session_id, session_id);
+    assert_eq!(items[0].kind, "tool_progress");
+    assert_eq!(
+        items[0].source,
+        harn_vm::orchestration::agent_inbox::COMMAND_PROGRESS_SOURCE
+    );
+    let status: serde_json::Value = serde_json::from_str(&items[0].content).unwrap();
+    assert_eq!(
+        status,
+        serde_json::json!({"handle_id":handle_id,"status":expected_status,"lease":"awaited"})
+    );
+    assert!(status.get("stdout").is_none() && status.get("output_path").is_none());
+}
+
 // -------- background handles --------
 
 #[test]
@@ -347,6 +368,21 @@ fn list_handles_reports_live_awaited_handle_and_clears_on_exit() {
         0,
         "a completed-and-drained handle must leave the live list",
     );
+    let mut query = dict_map();
+    query.insert(
+        "completed_handle_ids".into(),
+        vlist_str(&[&handle_id, "unknown-handle"]),
+    );
+    let completed = require_dict(call_tool("hostlib_tools_list_handles", query.clone()).unwrap());
+    let rows = require_list(&completed, "completed_handles");
+    assert_eq!(rows.len(), 1, "only the retained native identity is owned");
+    let row = as_dict(&rows[0]);
+    assert_eq!(require_str(&row, "handle_id"), handle_id);
+    assert_eq!(require_str(&row, "lease"), "awaited");
+    assert_eq!(require_str(&row, "status"), "completed");
+    query.put_str("session_id", "different-session");
+    let foreign = require_dict(call_tool("hostlib_tools_list_handles", query).unwrap());
+    assert!(require_list(&foreign, "completed_handles").is_empty());
 }
 
 // A bare `background: true` (detach) with no inline window is the fire-and-forget
@@ -375,9 +411,17 @@ fn run_command_detach_registers_service_lease() {
         "a bare detach is a fire-and-forget service lease",
     );
 
+    let done = register_completion_notifier(&handle_id).expect("live service completion barrier");
     let mut cancel = dict_map();
     cancel.insert("handle_id".into(), vm_string(&handle_id));
     let _ = call_tool("hostlib_tools_cancel_handle", cancel);
+    done.recv().expect("service terminal reached");
+    let mut query = dict_map();
+    query.insert("completed_handle_ids".into(), vlist_str(&[&handle_id]));
+    let completed = require_dict(call_tool("hostlib_tools_list_handles", query).unwrap());
+    let rows = require_list(&completed, "completed_handles");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(require_str(&as_dict(&rows[0]), "lease"), "service");
 }
 
 // The conversion snapshot seeds the loop's per-handle delta cursor and the
@@ -731,13 +775,7 @@ fn cancel_handle_kills_long_running_process() {
         let _ = rx.recv();
     }
 
-    // Cancelled handles never push feedback — drain returns empty.
-    let items = harn_vm::orchestration::agent_inbox::drain(&session_id);
-    assert!(
-        items.is_empty(),
-        "cancelled handle should not push feedback, got {} entries",
-        items.len()
-    );
+    assert_cancel_status_only(&session_id, &info.handle_id, "killed");
 }
 
 #[test]
@@ -862,12 +900,7 @@ fn cancel_handle_can_wait_for_timed_out_result() {
     assert!(byte_count >= 15);
     assert_eq!(reaped_child_count, 1);
 
-    let items = harn_vm::orchestration::agent_inbox::drain(&session_id);
-    assert!(
-        items.is_empty(),
-        "cancel result should not also enqueue feedback, got {} entries",
-        items.len()
-    );
+    assert_cancel_status_only(&session_id, &handle_id, "timed_out");
 }
 
 #[test]

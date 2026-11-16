@@ -1,4 +1,5 @@
 import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
 import { llm_text, with_llm_script } from "std/testing"
 
 fn lookup_tools() {
@@ -67,6 +68,27 @@ pipeline main(harness: Harness) {
       const empty_system = empty_calls[0].system ?? ""
       harness.stdio.println(!contains(empty_system, "Native tool protocol"))
       harness.stdio.println(!contains(empty_system, "<user_response>"))
+    },
+  )
+  with_llm_script(
+    harness.llm,
+    [llm_text("Finished. ##DONE##")],
+    { ->
+      const options: AgentSpec = {
+        provider: "mock",
+        tools: lookup_tools(),
+        tool_format: "native",
+        loop_until_done: false,
+        done_sentinel: "##DONE##",
+        max_iterations: 1,
+      }
+      agent_loop(harness, "Inspect evidence and finish.", nil, options)
+      const calls = harness.llm.mock_calls()
+      require len(calls) == 1, "the primary provider call must fire"
+      require len(split(calls[0].system, "##DONE##")) == 2,
+        "the completion owner supplies the sentinel instruction exactly once"
+      require contains(calls[0].system, "provider's native tool-calling channel"),
+        "removing duplicate completion advice preserves native tool instructions"
     },
   )
 }

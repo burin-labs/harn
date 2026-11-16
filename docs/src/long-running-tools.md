@@ -26,6 +26,27 @@ output artifacts. `command_wait` joins completion,
 deadline expires, and `command_cancel` tears down the owned process group. The
 output wait subscribes to capture publication; it does not poll artifact files.
 
+The agent loop owns commands tagged `awaited`, including commands that outlive
+their foreground window. It reconciles the session's native handles before
+requesting another model response and parks on the existing command inbox.
+Explicitly detached `service` handles allow the loop to continue other work.
+Command progress is reported through the normal progress event without a model
+request. Stop and steer retain the normal control path.
+
+An embedder can set `command_wait.completion_tool` to its registered command-wait
+tool. On a terminal receipt, Harn dispatches that tool with the native handle and
+`timeout_ms: 0` through the current tool registry and middleware. The call has
+explicit local generation provenance and a distinct paired result, with no
+provider usage or model iteration. The tool keeps ownership of its result text,
+verification facts and output artifacts. A missing tool is a configuration error;
+the loop does not fall back to a privileged raw runner.
+
+`tools.list_handles({session_id, completed_handle_ids})` returns live `handles`
+plus identity and original lease for the specifically requested retained
+`completed_handles`. The latter closes the race where a command exits before
+the loop's first live snapshot. Unknown, expired and other-session identities
+remain absent, and querying them does not consume their terminal result.
+
 ```harn,ignore
 import {
   command_cancel, command_run, command_wait_for_output,

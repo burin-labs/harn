@@ -2,7 +2,8 @@ use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
 use super::{
-    next_progress_interval, CancelState, HandleStore, TerminalResult, TERMINAL_RESULT_CAPACITY,
+    next_progress_interval, CancelState, HandleStore, LeaseTag, TerminalResult,
+    TERMINAL_RESULT_CAPACITY,
 };
 use crate::process::ProcessCleanupReport;
 
@@ -84,6 +85,7 @@ fn terminal_result_ledger_is_bounded_and_evicts_oldest() {
             format!("handle-{index}"),
             TerminalResult {
                 session_id: "session".to_string(),
+                lease: LeaseTag::Awaited,
                 value: harn_vm::VmValue::Int(index as i64),
             },
         );
@@ -104,6 +106,7 @@ fn session_cleanup_removes_only_its_terminal_results() {
             handle_id.to_string(),
             TerminalResult {
                 session_id: session_id.to_string(),
+                lease: LeaseTag::Awaited,
                 value: harn_vm::VmValue::String(handle_id.into()),
             },
         );

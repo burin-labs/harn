@@ -1,3 +1,4 @@
+import { AgentLoopCommandHoldResult } from "std/agent/loop_command_hold_types"
 import "std/agent/loop_result_status"
 import "std/agent/loop_turn_options"
 import { agent_emit_event, agent_session_record_usage } from "std/agent/state"
@@ -16,6 +17,8 @@ pub type AgentPostDispatchUsage = {
   usage_unknown_calls: int,
 }
 
+pub type CommandCompletionBoundary = fn(AgentPostDispatchUsage) -> AgentLoopCommandHoldResult?
+
 pub type AgentPostDispatchTerminal = {
   reason: string,
   error: {
@@ -30,7 +33,11 @@ pub type AgentPostDispatchTerminal = {
 pub type AgentPostDispatchResult = {
   totals: AgentPostDispatchUsage,
   bridge_step_delivered: int,
+  delivery_occurred: bool,
   terminal: AgentPostDispatchTerminal?,
+  command_hold: AgentLoopCommandHoldResult?,
+  dispatch: AgentToolDispatch,
+  calls: list,
 }
 
 fn __tool_result_denial(result: dict) {
@@ -146,6 +153,7 @@ pub fn __agent_loop_post_dispatch(
   current_max: any,
   dispatch: AgentToolDispatch,
   prior_dispatch: AgentToolDispatch,
+  complete_commands: CommandCompletionBoundary? = nil,
 ) -> AgentPostDispatchResult {
   const iteration = iteration_index + 1
   const totals = agent_session_record_usage(
@@ -155,6 +163,31 @@ pub fn __agent_loop_post_dispatch(
     turn_llm_opts,
     iteration,
   )
+  const checkpoint = agent_stage(
+    harness.agent,
+    session_id,
+    "post_tool_dispatch",
+    {iteration: iteration},
+  )
+  const command_hold = if complete_commands != nil && !agent_stage_has_delivery(checkpoint) {
+    complete_commands(totals)
+  } else {
+    nil
+  }
+  const local = command_hold?.completion_dispatch
+  const completed_dispatch = local == nil ? dispatch : (dispatch ?? []) + (local.dispatch ?? [])
+  const completed_calls = (type_of(tool_calls) == "list" ? tool_calls : [])
+    + (local?.calls ?? [])
+  // A local completion is a real tool dispatch. Its own checkpoint delivers
+  // inputs queued during that call before any completion decision can run.
+  const completion_checkpoint = if local != nil {
+    agent_stage(harness.agent, session_id, "post_tool_dispatch", {iteration: iteration})
+  } else {
+    nil
+  }
+  const delivery_occurred = agent_stage_has_delivery(checkpoint)
+    || (completion_checkpoint != nil && agent_stage_has_delivery(completion_checkpoint))
+  const bridge_step_delivered = checkpoint.delivered + (completion_checkpoint?.delivered ?? 0)
   agent_emit_event(
     harness.agent,
     session_id,
@@ -166,20 +199,14 @@ pub fn __agent_loop_post_dispatch(
         harness.clock,
         session_id,
         llm_result,
-        len(tool_calls),
+        len(completed_calls),
         visible_text,
         totals,
         loop_start_ms,
       ),
     },
   )
-  const checkpoint = agent_stage(
-    harness.agent,
-    session_id,
-    "post_tool_dispatch",
-    {iteration: iteration},
-  )
-  const denial_signature = __non_retryable_denial_signature(dispatch)
+  const denial_signature = __non_retryable_denial_signature(completed_dispatch)
   const prior_signature = __non_retryable_denial_signature(prior_dispatch)
   if denial_signature != nil && denial_signature == prior_signature {
     __emit_non_retryable_denial_cutoff(
@@ -187,12 +214,16 @@ pub fn __agent_loop_post_dispatch(
       session_id,
       iteration,
       current_max,
-      dispatch,
+      completed_dispatch,
       denial_signature,
     )
     return {
       totals: totals,
-      bridge_step_delivered: checkpoint.delivered,
+      command_hold: command_hold,
+      dispatch: completed_dispatch,
+      calls: completed_calls,
+      bridge_step_delivered: bridge_step_delivered,
+      delivery_occurred: delivery_occurred,
       terminal: {
         reason: "repeated_non_retryable_denial",
         error: {
@@ -205,5 +236,13 @@ pub fn __agent_loop_post_dispatch(
       },
     }
   }
-  return {totals: totals, bridge_step_delivered: checkpoint.delivered, terminal: nil}
+  return {
+    totals: totals,
+    bridge_step_delivered: bridge_step_delivered,
+    delivery_occurred: delivery_occurred,
+    terminal: nil,
+    command_hold: command_hold,
+    dispatch: completed_dispatch,
+    calls: completed_calls,
+  }
 }

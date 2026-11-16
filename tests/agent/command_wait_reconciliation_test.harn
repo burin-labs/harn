@@ -1,0 +1,101 @@
+import {
+  command_ledger_has_awaited,
+  command_ledger_ingest,
+  command_ledger_ingest_handles,
+  command_ledger_new,
+  command_ledger_reconcile,
+  command_ledger_should_hold,
+  command_wait_normalize,
+} from "std/agent/command_ledger"
+import { agent_session_init } from "std/agent/state"
+
+pipeline test_native_awaited_handle_is_not_hidden_by_handler_projection(harness: Harness) {
+  if harness.system.platform().os == "windows" {
+    skip("the native process control uses a POSIX FIFO")
+  }
+  const directory = "${harness.fs.workspace_temp_dir()}/command-${harness.random.uuid()}"
+  harness.fs.mkdir(directory, true)
+  const fifo = "${directory}/command-gate"
+  const made = harness.tools.run_command({argv: ["mkfifo", fifo]})
+  assert(made.exit_code == 0)
+  const running = harness.tools.run_command(
+    {argv: ["cat", fifo], background: true, background_after_ms: 1},
+  )
+  const snapshot = harness.tools.list_handles({})
+  let ledger = []
+  try {
+    assert(running.status == "running" && running.handle_id != "")
+    assert(len(snapshot.handles) == 1 && snapshot.handles[0].lease == "awaited")
+    ledger = command_ledger_ingest_handles(
+      command_ledger_new(),
+      snapshot.handles,
+      harness.clock.monotonic_ms(),
+      command_wait_normalize(nil),
+    )
+  } finally {
+    harness.tools.cancel_handle({handle_id: running.handle_id, wait_result_ms: 1000})
+  }
+  assert(
+    command_ledger_has_awaited(ledger),
+    "an authoritative awaited handle must survive opaque handler data",
+  )
+}
+
+pipeline test_an_awaited_command_holds_after_a_tool_call() {
+  const cw = command_wait_normalize(nil)
+  const ledger = command_ledger_ingest(
+    command_ledger_new(),
+    [{status: "running", handle_id: "owned-handle", lease: "awaited"}],
+    0,
+    cw,
+  )
+  assert(
+    command_ledger_should_hold(ledger, 1),
+    "a run must not require a model turn merely to start its hold",
+  )
+}
+
+pipeline test_cancelled_native_command_is_reconciled_without_terminal_inbox(harness: Harness) {
+  if harness.system.platform().os == "windows" {
+    skip("the native cancellation handshake uses a POSIX FIFO")
+  }
+  const session = "cancel-reconcile-${harness.random.uuid()}"
+  const root = harness.fs.mkdtemp_in_workspace("cancel-reconcile")
+  const fifo = path_join(root, "gate")
+  assert_eq(harness.tools.run_command({argv: ["mkfifo", fifo]}).exit_code, 0)
+  agent_session_init(harness.agent, "Run command", nil, {provider: "mock", session_id: session})
+  const running = harness.tools.run_command({argv: ["cat", fifo], background_after_ms: 1})
+  assert_eq(running.status, "running")
+  try {
+    const owned = harness.tools.list_handles({session_id: session}).handles
+    assert_eq(len(owned), 1)
+    const cw = command_wait_normalize({completion_tool: "collect_command"})
+    const ledger = command_ledger_ingest_handles([], owned, harness.clock.monotonic_ms(), cw)
+    assert(command_ledger_has_awaited(ledger))
+    const cancelled = harness.tools.cancel_handle(
+      {handle_id: running.handle_id, wait_result_ms: 1000},
+    )
+    assert(cancelled.cancelled && cancelled.result != nil)
+    const terminal = harness.tools.list_handles(
+      {session_id: session, completed_handle_ids: [running.handle_id]},
+    )
+    assert_eq(len(terminal.handles), 0)
+    assert_eq(len(terminal.completed_handles), 1)
+    assert_eq(terminal.completed_handles[0].status, "killed")
+    const reconciled = command_ledger_reconcile(harness, session, ledger, cw)
+    assert(
+      !command_ledger_has_awaited(reconciled),
+      "cancelled command must not wait until the wall ceiling",
+    )
+    assert_eq(reconciled[0].status, "killed")
+    assert_eq(reconciled[0].lease, "awaited", "registered completion still owns terminal delivery")
+    const actual = harness.tools.wait_command({handle_id: running.handle_id, timeout_ms: 0})
+    assert_eq(
+      actual.status,
+      "killed",
+      "the normal completion handler receives the retained terminal",
+    )
+  } finally {
+    harness.tools.cancel_handle({handle_id: running.handle_id, wait_result_ms: 1000})
+  }
+}

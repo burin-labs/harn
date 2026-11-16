@@ -370,6 +370,7 @@ catalog_entries! {
     "agent/loop_internal" => "stdlib/agent/loop_internal.harn",
     "agent/loop_run" => "stdlib/agent/loop_run.harn",
     "agent/loop_post_turn" => "stdlib/agent/loop_post_turn.harn",
+    "agent/loop_command_hold_types" => "stdlib/agent/loop_command_hold_types.harn",
     "agent/loop_finalize" => "stdlib/agent/loop_finalize.harn",
     "agent/loop_terminal" => "stdlib/agent/loop_terminal.harn",
     "agent/user" => "stdlib/agent/user.harn",

@@ -62,7 +62,7 @@ pub(super) fn host_agent_session_drain_feedback_builtin(
         }
     };
     let drained = crate::orchestration::agent_inbox::drain_where(&session_id, |entry| {
-        entry.payload.is_none() && entry.kind != "tool_progress" && entry.kind != "tool_result"
+        entry.payload.is_none() && !crate::orchestration::agent_inbox::is_command_update(entry)
     })
     .into_iter()
     .map(|entry| {
@@ -113,7 +113,7 @@ pub(super) fn host_agent_session_drain_command_updates_builtin(
         }
     };
     let drained = crate::orchestration::agent_inbox::drain_where(&session_id, |entry| {
-        entry.kind == "tool_progress" || entry.kind == "tool_result"
+        crate::orchestration::agent_inbox::is_command_update(entry)
     });
     let drained = drained
         .into_iter()
