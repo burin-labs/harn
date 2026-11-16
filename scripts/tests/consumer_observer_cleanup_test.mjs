@@ -186,6 +186,8 @@ test('declaration preparation reaches a closed public file only for a measured l
     const witnessConfig = path.join(scratch,'witness.json');
     const witnessPreload = path.join(scratch,'witness-fetch.mjs');
     fs.writeFileSync(witnessPreload,`import fs from 'node:fs';
+      import {readRetry} from ${JSON.stringify(new URL('../lib/consumer-observer.mjs', import.meta.url).href)};
+      readRetry.backoffMs=0;
       const fixture=JSON.parse(fs.readFileSync(${JSON.stringify(witnessConfig)},'utf8'));
       globalThis.fetch=async url=>{
         const endpoint=new URL(url);
