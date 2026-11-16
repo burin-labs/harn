@@ -138,40 +138,45 @@ pipeline default(task) {
         assert_eq!(diag.severity, LintSeverity::Info);
     }
 
-    #[test]
-    fn does_not_trigger_on_bound_options_variable() {
-        let diags = lint(
-            r#"
+    #[rstest::rstest]
+    #[case::does_not_trigger_on_bound_options_variable(
+        r#"
 pipeline default(task) {
     const opts = {loop_until_done: true}
     agent_loop(task, "system", opts)
 }
-"#,
-        );
-        assert_eq!(count_rule(&diags), 0, "diags: {diags:?}");
-    }
-
-    #[test]
-    fn does_not_trigger_on_typed_constructor_call() {
-        let diags = lint(
-            r#"
+"#
+    )]
+    #[case::does_not_trigger_on_typed_constructor_call(
+        r#"
 pipeline default(task) {
     agent_loop(task, "system", agent_preset("repair", {tools: []}))
 }
-"#,
-        );
-        assert_eq!(count_rule(&diags), 0, "diags: {diags:?}");
-    }
-
-    #[test]
-    fn does_not_trigger_on_empty_dict_literal() {
-        let diags = lint(
-            r#"
+"#
+    )]
+    #[case::does_not_trigger_on_empty_dict_literal(
+        r#"
 pipeline default(task) {
     agent_loop(task, "system", {})
 }
-"#,
-        );
+"#
+    )]
+    #[case::does_not_trigger_on_workflow_graph_literal(
+        r#"
+pipeline default(task) {
+    workflow_execute(task, {stages: [{id: "one", kind: "stage"}]})
+}
+"#
+    )]
+    #[case::does_not_trigger_on_unrelated_callee(
+        r#"
+pipeline default(task) {
+    llm_call(task, nil, {provider: "mock"})
+}
+"#
+    )]
+    fn normalized_options_are_accepted(#[case] case_input: &str) {
+        let diags = lint(case_input);
         assert_eq!(count_rule(&diags), 0, "diags: {diags:?}");
     }
 
@@ -194,18 +199,6 @@ pipeline default(task) {
     }
 
     #[test]
-    fn does_not_trigger_on_workflow_graph_literal() {
-        let diags = lint(
-            r#"
-pipeline default(task) {
-    workflow_execute(task, {stages: [{id: "one", kind: "stage"}]})
-}
-"#,
-        );
-        assert_eq!(count_rule(&diags), 0, "diags: {diags:?}");
-    }
-
-    #[test]
     fn triggers_inside_nested_bodies() {
         let diags = lint(
             r"
@@ -218,17 +211,5 @@ fn helper(task) {
 ",
         );
         assert_eq!(count_rule(&diags), 1, "diags: {diags:?}");
-    }
-
-    #[test]
-    fn does_not_trigger_on_unrelated_callee() {
-        let diags = lint(
-            r#"
-pipeline default(task) {
-    llm_call(task, nil, {provider: "mock"})
-}
-"#,
-        );
-        assert_eq!(count_rule(&diags), 0, "diags: {diags:?}");
     }
 }

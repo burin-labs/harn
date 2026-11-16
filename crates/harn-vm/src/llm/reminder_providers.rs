@@ -20,7 +20,7 @@ const TOOL_OUTPUT_TRUNCATED_ID: &str = "tool_output_truncated";
 const POST_COMPACT_RECAP_ID: &str = "post_compact_recap";
 const RESUME_CONTINUITY_ID: &str = "resume_continuity";
 const PROJECT_FACTS_ID: &str = "project_facts";
-const WORKSPACE_ANCHOR_ID: &str = "workspace_anchor";
+use crate::workspace_anchor::WORKSPACE_ANCHOR_REMINDER_KEY as WORKSPACE_ANCHOR_ID;
 const GROUNDED_REVIEW_ID: &str = "grounded_review";
 
 const TOKEN_PRESSURE_EVENTS: &[HookEvent] = &[HookEvent::OnBudgetThreshold];
@@ -373,54 +373,8 @@ impl ReminderProvider for ProjectFactsProvider {
     }
 }
 
-impl ReminderProvider for WorkspaceAnchorProvider {
-    fn id(&self) -> &'static str {
-        WORKSPACE_ANCHOR_ID
-    }
-
-    fn subscribes_to(&self) -> &'static [HookEvent] {
-        WORKSPACE_ANCHOR_EVENTS
-    }
-
-    fn evaluate(&self, ctx: &ProviderContext) -> Option<ReminderSpec> {
-        let anchor = crate::agent_sessions::workspace_anchor(&ctx.session_id)?;
-        let mut reminder = provider_reminder(
-            format_workspace_anchor_body(&anchor),
-            WORKSPACE_ANCHOR_ID,
-            ctx,
-        );
-        reminder.tags = vec![WORKSPACE_ANCHOR_ID.to_string()];
-        reminder.dedupe_key = Some(WORKSPACE_ANCHOR_ID.to_string());
-        reminder.ttl_turns = Some(1);
-        reminder.preserve_on_compact = false;
-        reminder.propagate = ReminderPropagate::Session;
-        reminder.role_hint = ReminderRoleHint::System;
-        Some(reminder)
-    }
-}
-
-fn format_workspace_anchor_body(anchor: &crate::workspace_anchor::WorkspaceAnchor) -> String {
-    let mut body = format!(
-        "<workspace-anchor>\nprimary: {}",
-        anchor.primary.to_string_lossy()
-    );
-    if anchor.additional_roots.is_empty() {
-        body.push_str("\nadditional_roots: []");
-    } else {
-        body.push_str("\nadditional_roots:");
-        for root in &anchor.additional_roots {
-            body.push_str("\n  - ");
-            body.push_str(&root.path.to_string_lossy());
-            body.push_str(" (mount_mode: ");
-            body.push_str(root.mount_mode.as_str());
-            body.push_str(", mounted_at: ");
-            body.push_str(&root.mounted_at);
-            body.push(')');
-        }
-    }
-    body.push_str("\n</workspace-anchor>");
-    body
-}
+#[path = "reminder_providers/workspace_anchor.rs"]
+mod workspace_anchor;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct GroundedReviewFinding {
@@ -2138,7 +2092,8 @@ mod tests {
             .expect("workspace reminder");
 
         assert_eq!(reminder.dedupe_key.as_deref(), Some("workspace_anchor"));
-        assert_eq!(reminder.ttl_turns, Some(1));
+        assert_eq!(reminder.ttl_turns, None);
+        assert!(reminder.preserve_on_compact);
         assert!(reminder.body.contains("<workspace-anchor>"));
         assert!(reminder.body.contains(&primary));
         assert!(reminder.body.contains(&mounted));

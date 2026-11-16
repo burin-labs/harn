@@ -32,28 +32,25 @@ type GitForgeRawRepository = {
   ...dict,
 }
 
-fn __connector_optional_record(value: unknown) -> dict? {
-  return type_of(value) == "dict" ? value : nil
+fn __connector_is_record(value: unknown) -> bool {
+  const kind = type_of(value)
+  return kind == "dict" || kind == "struct"
 }
 
 fn __connector_raw_match(value: unknown) -> ConnectorRawMatch? {
-  const record = __connector_optional_record(value)
-  return record == nil ? nil : schema_expect(record, schema_of(ConnectorRawMatch))
+  return __connector_is_record(value) ? schema_expect(value, schema_of(ConnectorRawMatch)) : nil
 }
 
 fn __git_forge_envelope(value: unknown) -> GitForgeRawEnvelope? {
-  const record = __connector_optional_record(value)
-  return record == nil ? nil : schema_expect(record, schema_of(GitForgeRawEnvelope))
+  return __connector_is_record(value) ? schema_expect(value, schema_of(GitForgeRawEnvelope)) : nil
 }
 
 fn __git_forge_revision(value: unknown) -> GitForgeRawRevision? {
-  const record = __connector_optional_record(value)
-  return record == nil ? nil : schema_expect(record, schema_of(GitForgeRawRevision))
+  return __connector_is_record(value) ? schema_expect(value, schema_of(GitForgeRawRevision)) : nil
 }
 
 fn __git_forge_repository(value: unknown) -> GitForgeRawRepository? {
-  const record = __connector_optional_record(value)
-  return record == nil ? nil : schema_expect(record, schema_of(GitForgeRawRepository))
+  return __connector_is_record(value) ? schema_expect(value, schema_of(GitForgeRawRepository)) : nil
 }
 
 /**

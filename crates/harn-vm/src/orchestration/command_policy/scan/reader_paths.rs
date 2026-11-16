@@ -47,6 +47,14 @@ pub(crate) fn permission_reader_paths(
                 .unwrap_or_else(|| workspace.join(cwd))
         })
         .unwrap_or_else(|| workspace.to_path_buf());
+    let base = match crate::run_tape::workspace_path(base) {
+        Ok(base) => base,
+        Err(_) => {
+            return vec![PermissionReaderPath::UnresolvedWorkingDirectory {
+                operand: cwd.unwrap_or_default().to_owned(),
+            }];
+        }
+    };
     let base = base.canonicalize().unwrap_or(base);
     let physical_workspace = workspace
         .canonicalize()
@@ -104,7 +112,6 @@ pub(crate) fn permission_reader_paths(
                     &command,
                 );
                 analysis.unresolved
-                    || analysis.io_unresolved
                     || analysis
                         .stages
                         .iter()

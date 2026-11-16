@@ -522,6 +522,7 @@ catalog_entries! {
     "bump/live" => "stdlib/bump/live.harn",
     ],
     prompt_assets: [
+    "llm/prompts/workspace_anchor_cleared.harn.prompt" => "stdlib/llm/prompts/workspace_anchor_cleared.harn.prompt",
     "agent/learned/prompts/bind.harn.prompt" => "stdlib/agent/learned/prompts/bind.harn.prompt",
     "agent/learned/prompts/check_binding.harn.prompt" => "stdlib/agent/learned/prompts/check_binding.harn.prompt",
     "agent/learned/prompts/curation.harn.prompt" => "stdlib/agent/learned/prompts/curation.harn.prompt",
