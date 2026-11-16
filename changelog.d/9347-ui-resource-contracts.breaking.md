@@ -4,7 +4,7 @@ legacy app, and OpenAI app dialects once while preserving their precedence,
 scalar coercions, nominal records, and malformed-field refusals. Runtime
 payload values and extension fields remain unchanged. Refs #9347.
 
-### Migration
+Migration:
 
 Treat application-specific tool arguments, context values, and browser
 permissions as opaque until decoded. Replace direct field access such as
