@@ -130,8 +130,34 @@ fn run_case(harness: Harness, variant: string) {
         && event?.receipt?.disposition == "deferred"
     },
   )
-  require len(deferred) == (handle || advance ? 0 : variant == "multiple" ? 2 : 1),
-    "blocked verification must remain observable while a successful observation releases the edit"
+  if variant == "scope" {
+    require len(deferred) == 0, "a changed context must retire the stale process proposal"
+    const resolutions = captured.events.filter(
+      { event ->
+        event?.type == "tool_batch_proposal_resolution" && event?.resolution?.tool_name == "check"
+      },
+    )
+    require len(resolutions) == 1
+      && resolutions[0]?.resolution?.resolution == "invalidated"
+      && resolutions[0]?.resolution?.reason == "context_compacted"
+      && resolutions[0]?.resolution?.pending_count == 0,
+      "compaction must explicitly invalidate the proposal and leave no pending work"
+    const receipts = captured.events.filter(
+      { event -> event?.type == "tool_batch_disposition" && event?.receipt?.tool_name == "check" },
+    )
+    require len(receipts) == 1
+      && receipts[0]?.receipt?.disposition == "resolved"
+      && receipts[0]?.receipt?.reason == "control_changed"
+      && receipts[0]?.receipt?.call_index == 1
+      && receipts[0]?.receipt?.tool_call_id == resolutions[0]?.resolution?.source_tool_call_id
+      && receipts[0]?.receipt?.started_at_ms == nil
+      && receipts[0]?.receipt?.finished_at_ms == nil
+      && receipts[0]?.receipt?.duration_ms == nil,
+      "the retired process must preserve its original call identity without claiming execution"
+  } else {
+    require len(deferred) == (handle || advance ? 0 : variant == "multiple" ? 2 : 1),
+      "blocked verification must remain observable while a successful observation releases the edit: ${variant}"
+  }
 }
 
 pipeline main(harness: Harness) {
