@@ -133,7 +133,7 @@ fn encode(request: &LlmRequestPayload, caps: &Capabilities) -> Value {
                 capabilities: caps,
                 wire_model: &request.model,
                 prompt_cache: PromptCacheBreakpoint::resolve(request, caps),
-                tool_search_extensions: false,
+                tool_search_extensions: true,
             },
         )
         .body
@@ -144,7 +144,7 @@ fn encode(request: &LlmRequestPayload, caps: &Capabilities) -> Value {
                 capabilities: caps,
                 wire_model: &request.model,
                 may_shape_reasoning: false,
-                tool_search_extensions: false,
+                tool_search_extensions: true,
                 fast_request: None,
             },
         )
@@ -189,5 +189,71 @@ fn both_adapters_mark_the_final_native_tool_and_automatic_conversation() {
         assert_eq!(marker_count(&deferred), 1, "{provider}: {deferred}");
         assert!(deferred.get("cache_control").is_none());
         assert!(deferred["tools"][1].get("cache_control").is_none());
+    }
+}
+
+#[test]
+fn trailing_deferred_tools_never_receive_automatic_breakpoints() {
+    for provider in ["anthropic", "openrouter"] {
+        let mut request = request();
+        request.provider = provider.to_string();
+        request.model = "fixture".to_string();
+        if provider == "openrouter" {
+            request.native_tools = Some(vec![
+                json!({"type":"function","function":{"name":"first","parameters":{"type":"object"}}}),
+                json!({"type":"function","function":{"name":"last","parameters":{"type":"object"}}}),
+            ]);
+        }
+        request.native_tools.as_mut().unwrap()[1]["defer_loading"] = json!(true);
+        let caps = capabilities(CacheBreakpointStyle::TopLevel);
+        assert_eq!(
+            PromptCacheBreakpoint::resolve(&request, &caps),
+            PromptCacheBreakpoint::Placed {
+                style: BreakpointPlacement::ToolsAndTopLevel { tool_index: 0 }
+            }
+        );
+        let body = encode(&request, &caps);
+        assert_eq!(marker_count(&body), 2, "{provider}: {body}");
+        assert_eq!(body["tools"][0]["cache_control"], body["cache_control"]);
+        assert_eq!(
+            if provider == "anthropic" {
+                &body["tools"][0]["name"]
+            } else {
+                &body["tools"][0]["function"]["name"]
+            },
+            "first"
+        );
+        assert!(body["tools"][1].get("cache_control").is_none());
+        assert_eq!(body["tools"][1]["defer_loading"], true);
+        if provider == "openrouter" {
+            request.native_tools.as_mut().unwrap()[1]["defer_loading"] = json!(false);
+            request.native_tools.as_mut().unwrap()[1]["function"]["defer_loading"] = json!(true);
+            assert_eq!(
+                PromptCacheBreakpoint::resolve(&request, &caps),
+                PromptCacheBreakpoint::Placed {
+                    style: BreakpointPlacement::ToolsAndTopLevel { tool_index: 0 }
+                }
+            );
+            let nested = encode(&request, &caps);
+            assert_eq!(nested["tools"][1]["function"]["defer_loading"], true);
+            assert!(nested["tools"][1].get("cache_control").is_none());
+            assert_eq!(nested["tools"][0]["cache_control"], nested["cache_control"]);
+            assert_eq!(marker_count(&nested), 2);
+        }
+        request.native_tools.as_mut().unwrap()[0]["defer_loading"] = json!(true);
+        assert_eq!(
+            PromptCacheBreakpoint::resolve(&request, &caps),
+            PromptCacheBreakpoint::Placed {
+                style: BreakpointPlacement::TopLevel
+            }
+        );
+        let all_deferred = encode(&request, &caps);
+        assert_eq!(marker_count(&all_deferred), 1, "{provider}: {all_deferred}");
+        assert_eq!(all_deferred["cache_control"], json!({"type":"ephemeral"}));
+        assert!(all_deferred["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tool| tool.get("cache_control").is_none()));
     }
 }

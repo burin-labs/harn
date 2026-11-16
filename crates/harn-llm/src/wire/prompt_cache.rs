@@ -35,7 +35,7 @@ pub enum PromptCacheBreakpoint {
 #[serde(rename_all = "snake_case")]
 pub enum BreakpointPlacement {
     TopLevel,
-    /// The final native tool and automatic conversation caching share one TTL.
+    /// The final non-deferred native tool and conversation caching share one TTL.
     ToolsAndTopLevel {
         tool_index: usize,
     },
@@ -67,7 +67,18 @@ impl PromptCacheBreakpoint {
             CacheBreakpointStyle::TopLevel => request
                 .native_tools
                 .as_ref()
-                .and_then(|tools| tools.len().checked_sub(1))
+                .and_then(|tools| {
+                    tools.iter().rposition(|tool| {
+                        tool.get("defer_loading")
+                            .and_then(serde_json::Value::as_bool)
+                            != Some(true)
+                            && tool
+                                .get("function")
+                                .and_then(|function| function.get("defer_loading"))
+                                .and_then(serde_json::Value::as_bool)
+                                != Some(true)
+                    })
+                })
                 .map_or(BreakpointPlacement::TopLevel, |tool_index| {
                     BreakpointPlacement::ToolsAndTopLevel { tool_index }
                 }),
