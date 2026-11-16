@@ -55,8 +55,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:b9da8791110ab1f07434b20e6dfa015e79dff3a255f40b67dca69c2c2deb15f4",
-    "projection_id": "session_view:session_lineage:b9da8791110a"
+    "projection_hash": "sha256:b826d1e75070cf2c77686e49a88baea71f3afc2cd0a8f7af663673f805d9277d",
+    "projection_id": "session_view:session_lineage:b826d1e75070"
   },
   "runs": [
     {
@@ -107,8 +107,8 @@
       "projection": {
         "last_event_id": null,
         "prefix_hash": null,
-        "projection_hash": "sha256:922ceba3f8f07ed275567a77c8929e4a9c3c3f6621e169644e5810293091d9ec",
-        "projection_id": "run_view:run_lineage_root:922ceba3f8f0"
+        "projection_hash": "sha256:06647e5a24d0a25024ea704ae46bcb6ba9bcc92a5a5618c5941ad14bfc5c9760",
+        "projection_id": "run_view:run_lineage_root:06647e5a24d0"
       },
       "providers": [],
       "run": {
@@ -165,6 +165,8 @@
             "known_cost_usd": 0.0,
             "models": [],
             "output_tokens": 0,
+            "provider_call_count": null,
+            "reported_cache": null,
             "total_cost": 0.0,
             "total_duration_ms": null,
             "unpriced_calls": 0,
@@ -189,6 +191,8 @@
         "known_cost_usd": 0.0,
         "models": [],
         "output_tokens": 0,
+        "provider_call_count": null,
+        "reported_cache": null,
         "total_cost": 0.0,
         "total_duration_ms": null,
         "unpriced_calls": 0,
@@ -240,8 +244,8 @@
       "projection": {
         "last_event_id": null,
         "prefix_hash": null,
-        "projection_hash": "sha256:81eb2afe802d7d6c9b423ecf7fa8756f3c24ac3f2107e65bafa8aec1e77b9f9c",
-        "projection_id": "run_view:run_lineage_child:81eb2afe802d"
+        "projection_hash": "sha256:fc76dcde4b0786c68335f8e16d9d5050d76d55f2024367952342e8b0f77e915c",
+        "projection_id": "run_view:run_lineage_child:fc76dcde4b07"
       },
       "providers": [],
       "run": {
@@ -287,6 +291,8 @@
             "known_cost_usd": 0.0,
             "models": [],
             "output_tokens": 0,
+            "provider_call_count": null,
+            "reported_cache": null,
             "total_cost": 0.0,
             "total_duration_ms": null,
             "unpriced_calls": 0,
@@ -311,6 +317,8 @@
         "known_cost_usd": 0.0,
         "models": [],
         "output_tokens": 0,
+        "provider_call_count": null,
+        "reported_cache": null,
         "total_cost": 0.0,
         "total_duration_ms": null,
         "unpriced_calls": 0,
@@ -341,6 +349,8 @@
     "known_cost_usd": 0.0,
     "models": [],
     "output_tokens": 0,
+    "provider_call_count": null,
+    "reported_cache": null,
     "total_cost": 0.0,
     "total_duration_ms": null,
     "unpriced_calls": 0,
