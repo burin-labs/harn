@@ -1,0 +1,46 @@
+pub type GitHubMonitorReference = {
+  deployment?: unknown,
+  check_run?: unknown,
+  pull_request?: unknown,
+  raw?: unknown,
+  repository?: unknown,
+  full_name?: unknown,
+  id?: unknown,
+  number?: unknown,
+  state?: unknown,
+  status?: unknown,
+  conclusion?: unknown,
+  merged?: unknown,
+  ...dict<string, unknown>,
+}
+
+pub type GitHubDeploymentState = {
+  repo: string,
+  deployment_id: unknown,
+  deployment_status: unknown,
+  state: unknown,
+}
+
+pub type GitHubCheckRunState = {
+  repo: string,
+  check_run_id: unknown,
+  check_run: unknown,
+  status: unknown,
+  conclusion: unknown,
+}
+
+pub type GitHubPullRequestState = {
+  repo: string,
+  number: int | string,
+  pull_request: unknown,
+  merged: unknown,
+  state: unknown,
+}
+
+pub fn github_monitor_reference(value: unknown) -> GitHubMonitorReference? {
+  const kind = type_of(value)
+  return kind == "dict" || kind == "struct" ? schema_expect(
+    value,
+    schema_of(GitHubMonitorReference),
+  ) : nil
+}
