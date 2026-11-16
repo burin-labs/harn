@@ -137,6 +137,11 @@ by `harness.tools.mcp_resource`. Its `meta.ui` block carries the resource
 CSP domains, browser permissions, dedicated domain, and border preference;
 Harn's MCP server projects it as `_meta.ui` on both resource discovery and
 `resources/read` content. External domains and permissions default empty.
+The returned `UiMcpResourceRegistration.meta` is `UiMcpResourceMetadata`;
+its `ui` field is `UiMcpResourceMetadataUi`. The four `csp` domain fields are
+`list<string>`, `domain` is optional `string`, and `prefersBorder` is optional
+`bool`. Browser permissions remain an opaque value for the receiving host
+to decode. Metadata records accept additional extension fields.
 
 ## Fallbacks
 
@@ -169,6 +174,23 @@ through `window.parent.postMessage`. `ui_context_update_envelope(key,
 value, options?)` produces the stable guest→host
 `ui/update-model-context` request, storing the keyed value in
 `structuredContent` for future model turns.
+
+`UiToolCallEnvelope.params` is `UiToolCallParams`: `name` is a `string`,
+while `arguments` and optional `_meta` retain the caller's opaque values.
+`UiContextUpdateEnvelope.params` is `UiContextUpdateParams`, whose
+`structuredContent` maps normalized keys to opaque values. Decode those
+values before accessing application fields:
+
+```harn,ignore
+type RefreshArguments = {window: string}
+const call = ui_tool_call_envelope("dashboard.refresh", {window: "7d"})
+const arguments = schema_expect(call.params.arguments, schema_of(RefreshArguments))
+harness.stdio.println(arguments.window)
+```
+
+These helpers preserve extra fields, nominal records, and non-string keys
+inside opaque payloads. The declared message and metadata fields retain
+their types when read or written.
 
 ## Validation contract
 

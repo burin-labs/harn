@@ -1,0 +1,7 @@
+import { ui_tool_call_envelope } from "std/ui_resource"
+
+pipeline default(harness: Harness) {
+  const envelope = ui_tool_call_envelope("refresh")
+  const wrong: int = envelope.params.name
+  harness.stdio.println(wrong)
+}

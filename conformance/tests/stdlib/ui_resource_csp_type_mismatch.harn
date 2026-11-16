@@ -1,0 +1,8 @@
+import { ui_resource, ui_resource_to_mcp } from "std/ui_resource"
+
+pipeline default(harness: Harness) {
+  const resource = ui_resource("ui://boundary", "boundary", "<p>hello</p>")
+  const registration = ui_resource_to_mcp(resource)
+  const wrong: int = registration.meta.ui.csp.connectDomains
+  harness.stdio.println(wrong)
+}

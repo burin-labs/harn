@@ -1,5 +1,11 @@
 import "std/ui_resource"
 
+type BrowserPermissions = {clipboardWrite?: dict}
+
+type RefreshArguments = {window: string}
+
+type SelectionContext = {tile: string}
+
 pipeline default(harness: Harness) {
   const dashboard_html =
     "<!doctype html><html><head><style>.tile { padding: 12px; }</style></head><body><main><h1>KPIs</h1><pre>signups=42 churn=3</pre><script>const initial = window.openInitialData; const summary = document.getElementById('summary');</script></main></body></html>"
@@ -40,7 +46,11 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(mcp_resource.mime_type)
   harness.stdio.println(mcp_resource.meta.ui.csp.connectDomains)
-  harness.stdio.println(mcp_resource.meta.ui.permissions.clipboardWrite != nil)
+  const browser_permissions = schema_expect(
+    mcp_resource.meta.ui.permissions,
+    schema_of(BrowserPermissions),
+  )
+  harness.stdio.println(browser_permissions.clipboardWrite != nil)
   harness.stdio.println(mcp_resource.meta.ui.prefersBorder)
   const csp_header = ui_resource_csp_header(resource.csp)
   harness.stdio.println(csp_header.contains("default-src 'self'"))
@@ -97,14 +107,19 @@ pipeline default(harness: Harness) {
   harness.stdio.println(call.jsonrpc)
   harness.stdio.println(call.method)
   harness.stdio.println(call.params.name)
-  harness.stdio.println(call.params.arguments.window)
+  const arguments = schema_expect(call.params.arguments, schema_of(RefreshArguments))
+  harness.stdio.println(arguments.window)
   const ctx_update: UiContextUpdateEnvelope = ui_context_update_envelope(
     "selection",
     {tile: "signups"},
     {id: "ctx-1"},
   )
   harness.stdio.println(ctx_update.method)
-  harness.stdio.println(ctx_update.params.structuredContent.selection.tile)
+  const selection = schema_expect(
+    ctx_update.params.structuredContent.selection,
+    schema_of(SelectionContext),
+  )
+  harness.stdio.println(selection.tile)
   const bad_uri = try {
     ui_resource("http://example/widget", "Bad", "<html></html>")
   }
