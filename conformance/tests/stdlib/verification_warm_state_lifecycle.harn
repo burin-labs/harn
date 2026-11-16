@@ -34,8 +34,12 @@ pipeline test(harness: Harness, task: unknown) {
   assert_eq(started.reused, false)
   assert_eq(started.status, "starting")
   assert(started.handle_id != nil, "warm-state start should return a background command handle")
-  assert_eq(started.fact.warm, false)
-  assert_eq(started.fact.timing_kind, "cold")
+  const started_fact = started.fact
+  if started_fact == nil {
+    throw "the configured warm-state probe must produce a fact"
+  }
+  assert_eq(started_fact.warm, false)
+  assert_eq(started_fact.timing_kind, "cold")
   const reused = verification_start_warm_state(
     harness.tools,
     row,
