@@ -34,6 +34,7 @@ env:
   FLAKE_ITERATIONS_CEILING: "50"
   FLAKE_ITERATIONS_FLOOR: "10"
   FLAKE_JOB_BUDGET_MINUTES: "160"
+  FLAKE_CARGO_PROFILE: ci-cli
 
 jobs:
   flake-rerun:
@@ -141,7 +142,7 @@ jobs:
 
       - name: Build test binaries
         if: steps.touched.outputs.has_tests == 'true'
-        run: cargo test --locked --no-run --workspace
+        run: cargo test --locked --profile "$FLAKE_CARGO_PROFILE" --no-run --workspace
 
       - name: Budget-aware flake rerun
         id: repeatability
