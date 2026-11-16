@@ -1,0 +1,335 @@
+import * as github from "std/connectors/github"
+import * as linear from "std/connectors/linear"
+import * as slack from "std/connectors/slack"
+import { MonitorPollContext, MonitorSource, monitor_event, wait_for } from "std/monitors"
+import { with_scenario } from "std/testing"
+
+struct MonitorEnvelope {
+  payload: unknown
+}
+
+struct MonitorPayload {
+  event: unknown
+}
+
+struct MonitorEvent {
+  provider: unknown
+  kind: unknown
+  provider_payload: unknown
+}
+
+struct MonitorIssueState {
+  name: string
+}
+
+struct MonitorProviderRecord {
+  deployment: unknown
+  check_run: unknown
+  pull_request: unknown
+  issue: unknown
+  channel: unknown
+  user: unknown
+  text: unknown
+  reaction: unknown
+  item: unknown
+  raw: unknown
+}
+
+fn push_event(provider: string, kind: unknown, payload: unknown) -> MonitorEnvelope {
+  return MonitorEnvelope {
+    payload: MonitorPayload {
+      event: MonitorEvent {provider: provider, kind: kind, provider_payload: payload},
+    },
+  }
+}
+
+pipeline test_monitor_event_reference_preserves_partial_and_nominal_records() {
+  const raw = {extension: [false, 0, ""], [7]: "integer key"}
+  const event = monitor_event(push_event("slack", "message", raw))
+  assert(event != nil, "nominal log and payload records reach the shared decoder")
+  assert(event.provider == "slack", "provider survives decoding")
+  assert(event.provider_payload == raw, "opaque provider values retain every key")
+  assert(
+    monitor_event({payload: {event: {provider: "linear"}}})?.provider == "linear",
+    "partial callback events do not require the full trigger envelope",
+  )
+  assert(monitor_event({payload: false}) == nil, "scalar payload has no event")
+  const refused = try {
+    monitor_event(false)
+  }
+  assert(is_err(refused), "a scalar outer log remains refused")
+}
+
+pipeline test_connector_push_filters_keep_required_refusals(harness: Harness) {
+  const payload = {
+    deployment: {id: 7},
+    check_run: {id: 7},
+    pull_request: {number: 7},
+    issue: {id: "I", state: MonitorIssueState {name: "Done"}},
+    channel: "C",
+    user: "U",
+    text: ["hello"],
+    reaction: "eyes",
+    item: {channel: "C"},
+    raw: {repository: {full_name: "acme/repo"}},
+  }
+  const cases = [
+    {
+      provider: "github",
+      kind: "deployment_status",
+      source: github.deployment_status_source(harness.net, "acme/repo", 7),
+    },
+    {
+      provider: "github",
+      kind: "check_run",
+      source: github.check_run_source(harness.net, "acme/repo", 7),
+    },
+    {
+      provider: "github",
+      kind: "pull_request",
+      source: github.pull_request_merged_source(harness.net, "acme/repo", 7),
+    },
+    {
+      provider: "linear",
+      kind: "issue",
+      source: linear.issue_state_source(harness.net, "I", "Done"),
+    },
+    {
+      provider: "slack",
+      kind: "message",
+      source: slack.message_source("C", {user: "U", text_contains: "hello"}),
+    },
+    {
+      provider: "slack",
+      kind: "reaction_added",
+      source: slack.reaction_source("C", "eyes", {user: "U"}),
+    },
+  ]
+  const nominal = MonitorProviderRecord {
+    deployment: payload.deployment,
+    check_run: payload.check_run,
+    pull_request: payload.pull_request,
+    issue: payload.issue,
+    channel: payload.channel,
+    user: payload.user,
+    text: payload.text,
+    reaction: payload.reaction,
+    item: payload.item,
+    raw: payload.raw,
+  }
+  for item in cases {
+    const filter = item.source.push_filter
+    assert(
+      filter(push_event(item.provider, item.kind, payload)),
+      "each real factory reaches its positive nominal-record callback",
+    )
+    assert(
+      filter(push_event(item.provider, item.kind, nominal)),
+      "nominal provider payload roots remain accepted",
+    )
+    const refused = try {
+      filter(false)
+    }
+    assert(is_err(refused), "all callbacks retain the required outer-record guard")
+    assert(
+      !filter(push_event("other", item.kind, false)),
+      "unrelated provider short-circuits before provider-specific required decoding",
+    )
+  }
+  const linear_filter = linear.issue_state_source(harness.net, nil, nil).push_filter
+  assert(
+    is_err(
+      try {
+        linear_filter(push_event("linear", "issue", false))
+      },
+    ),
+    "matching Linear events require a payload record even without an issue selector",
+  )
+  const message_filter = slack.message_source().push_filter
+  assert(
+    is_err(
+      try {
+        message_filter(push_event("slack", "message", false))
+      },
+    ),
+    "matching Slack messages retain the required payload record",
+  )
+  assert(
+    is_err(
+      try {
+        message_filter(push_event("slack", false, {}))
+      },
+    ),
+    "non-string Slack kinds remain refused at the string operation",
+  )
+  const poll = slack.message_source("C").poll
+  const state = poll(
+    {wait_id: "nominal", poll_count: 0, last_push_event: push_event("slack", "message", nominal)},
+  )
+  assert(
+    state.message == nominal && type_of(state.message) == "struct",
+    "raw nominal payload identity survives the event and state boundaries",
+  )
+}
+
+pipeline test_connector_poll_states_preserve_raw_values_and_initial_absence(harness: Harness) {
+  const empty: MonitorPollContext = {wait_id: "initial", poll_count: 0, last_push_event: nil}
+  const message_poll = slack.message_source("C").poll
+  const reaction_poll = slack.reaction_source("C", "eyes").poll
+  assert(!message_poll(empty).matched, "Slack message initial poll waits without a push")
+  assert(!reaction_poll(empty).matched, "Slack reaction initial poll waits without a push")
+  const raw = {
+    channel: false,
+    channel_id: "fallback",
+    user: 0,
+    user_id: "fallback",
+    text: "",
+    item: {channel: "C", extra: [1, 2]},
+    issue: {id: "I", state: MonitorIssueState {name: "Done"}, extra: true},
+    extension: false,
+    [7]: "integer key",
+  }
+  const message = message_poll(empty + {last_push_event: push_event("slack", "message", raw)})
+  assert(message.matched && message.message == raw, "message retains the complete raw record")
+  assert(
+    message.channel == false && message.user == 0 && message.text == "",
+    "false, zero and empty text do not select fallback fields",
+  )
+  const reaction = reaction_poll(
+    empty + {last_push_event: push_event("slack", "reaction_added", raw)},
+  )
+  assert(reaction.event == raw && reaction.item == raw.item, "reaction retains nested extensions")
+  const issue_poll = linear.issue_state_source(harness.net, "I", "Done").poll
+  const issue = issue_poll(empty + {last_push_event: push_event("linear", "issue", raw)})
+  assert(
+    issue.matched && issue.issue == raw.issue && issue.event == raw,
+    "Linear push poll matches a nominal state and preserves raw provider data",
+  )
+  assert(len(harness.testing.http_mock_calls()) == 0, "push-backed polls make no HTTP calls")
+}
+
+pipeline test_monitor_wait_retains_state_type_and_measured_false(harness: Harness) {
+  type ReadyState = {ready: bool, extra: int}
+  const source: MonitorSource<ReadyState> = {poll: { _ -> {ready: true, extra: 7} }}
+  const matched = wait_for(
+    harness.runtime,
+    {
+      wait_id: "typed-monitor-matched",
+      timeout: 1ms,
+      source: source,
+      condition: { state -> state.ready },
+    },
+  )
+  assert(matched.status == "matched" && matched.state != nil, "native monitor actually matches")
+  const ready: bool = matched.state.ready
+  assert(ready && matched.state.extra == 7, "native result retains the inferred state contract")
+  const timed_out = wait_for(
+    harness.runtime,
+    {
+      wait_id: "typed-monitor-timeout",
+      timeout: 0ms,
+      source: {poll: { _ -> {ready: false} }},
+      condition: { state -> state.ready },
+    },
+  )
+  assert(
+    timed_out.status == "timed_out" && timed_out.poll_count == 1,
+    "a zero deadline still measures one poll before timing out",
+  )
+  assert(
+    timed_out.state != nil && !timed_out.state.ready,
+    "a measured false state survives timeout",
+  )
+  const message = slack.wait_for_message(harness.runtime, "C", {timeout: 0ms})
+  assert(
+    message.status == "timed_out" && message.state != nil,
+    "the public message wait reaches its initial native poll",
+  )
+  assert(!message.state.matched, "an initial message wait retains measured absence")
+  const reaction = slack.wait_for_reaction(harness.runtime, "C", "eyes", {timeout: 0ms})
+  assert(
+    reaction.status == "timed_out" && reaction.state != nil,
+    "the public reaction wait reaches its initial native poll",
+  )
+  assert(!reaction.state.matched, "an initial reaction wait retains measured absence")
+  const cadence = slack.wait_for_message(harness.runtime, "C", {timeout: 0ms, poll_interval: 1ms})
+  assert(
+    cadence.status == "timed_out" && cadence.poll_count == 1,
+    "an explicit duration cadence reaches the native poll",
+  )
+  for invalid in [nil, false, "1ms", 0ms] {
+    const refused = try {
+      slack.wait_for_message(harness.runtime, "C", {timeout: 0ms, poll_interval: invalid})
+    }
+    assert(is_err(refused), "explicit nil, malformed and zero intervals remain refused")
+  }
+  assert(
+    is_err(
+      try {
+        slack.wait_for_message(harness.runtime, "C", {})
+      },
+    ),
+    "missing required timeout remains refused",
+  )
+}
+
+pipeline test_linear_initial_poll_reaches_the_connector(harness: Harness) {
+  const expected_issue = {id: "I", state: {name: "Done"}, extension: [false, 0, ""]}
+  const context: MonitorPollContext = {
+    wait_id: "initial-linear",
+    poll_count: 0,
+    last_push_event: nil,
+  }
+  with_scenario(
+    harness,
+    {
+      capabilities: [
+        {capability: "net", method: "connector_call", result: {data: {issue: expected_issue}}},
+      ],
+    },
+    { _ ->
+      const poll = linear.issue_state_source(harness.net, "I", "Done").poll
+      const state = poll(context)
+      assert(
+        state.matched && state.issue == expected_issue && state.event == nil,
+        "the first poll uses the registered connector reply with every extension intact",
+      )
+    },
+  )
+  with_scenario(
+    harness,
+    {
+      capabilities: [
+        {capability: "net", method: "connector_call", error: "connector-fallback-control"},
+      ],
+    },
+    { _ ->
+      const poll = linear.issue_state_source(harness.net, "I", "Done").poll
+      const refused = try {
+        poll(context)
+      }
+      assert(
+        is_err(refused) && contains(to_string(unwrap_err(refused)), "connector-fallback-control"),
+        "connector refusal propagates after reaching the first-poll fallback",
+      )
+    },
+  )
+  for target in [nil, "Done"] {
+    with_scenario(
+      harness,
+      {capabilities: [{capability: "net", method: "connector_call", result: {data: {issue: nil}}}]},
+      { _ ->
+        const poll = linear.issue_state_source(harness.net, "I", target).poll
+        const refused = try {
+          poll(context + {last_push_event: {}})
+        }
+        assert(is_err(refused), "a missing GraphQL issue remains refused even without a target")
+        const calls = harness.testing.calls().filter(
+          { call -> call.capability == "net" && call.operation == "connector_call" },
+        )
+          .to_list()
+        assert_eq(calls.count, 1, "the missing-issue control must reach its connector reply")
+      },
+    )
+  }
+}
