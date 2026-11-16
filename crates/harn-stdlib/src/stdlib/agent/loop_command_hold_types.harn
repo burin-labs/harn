@@ -1,0 +1,33 @@
+import { CommandHoldState, CommandWaitOptions } from "std/agent/command_ledger"
+import { AgentToolDispatch } from "std/agent/loop_result_status"
+
+pub type CommandCompletionDispatch = {
+  dispatch: AgentToolDispatch,
+  calls: list,
+  turn_opts: dict,
+  audit_flushes: list,
+}
+
+pub type CommandCompletionAttempt = {
+  interrupted: bool,
+  completion: CommandCompletionDispatch?,
+}
+
+pub type AgentLoopCommandHoldInput = {
+  ledger: list,
+  command_wait: CommandWaitOptions,
+  hold_state: CommandHoldState,
+  reentry_cap: int?,
+  iteration: int,
+  tool_count: int,
+  turn_opts?: dict,
+}
+
+pub type AgentLoopCommandHoldResult = {
+  action: "continue" | "proceed",
+  ledger: list,
+  hold_state: CommandHoldState,
+  reentry_cap: int?,
+  reset_progress: bool,
+  completion_dispatch?: CommandCompletionDispatch?,
+}

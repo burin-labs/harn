@@ -100,6 +100,20 @@
   {
     "scope": "CommandWaitOptions",
     "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+    "expression": "command_ledger_after_digest(live, now2, cw, false)",
+    "owner": "command_ledger_after_digest",
+    "evidence": "The same command ledger cursor owner advances ordinary progress without a model reentry in registered-completion mode.",
+    "consumers": [
+      {
+        "scope": "CommandWaitOptions",
+        "function": "command_ledger_after_digest",
+        "parameter": "cw"
+      }
+    ]
+  },
+  {
+    "scope": "CommandWaitOptions",
+    "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
     "expression": "command_ledger_after_digest(live, now2, cw)",
     "owner": "command_ledger_after_digest",
     "evidence": "Consumer command_ledger_after_digest.cw in crates/harn-stdlib/src/stdlib/agent/command_ledger.harn is an independently required binding origin for CommandWaitOptions; its literal reads are audited under that owner.",

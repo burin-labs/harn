@@ -111,7 +111,7 @@ pipeline test_ingest_creates_awaited_row(harness: Harness, task: unknown) {
   assert(row.next_decision_at_ms == 30000)
   assert(command_ledger_has_awaited(ledger))
   assert(command_ledger_should_hold(ledger, 0))
-  assert(!command_ledger_should_hold(ledger, 1))
+  assert(command_ledger_should_hold(ledger, 1))
 }
 
 pipeline test_ingest_service_lease_does_not_hold(harness: Harness, task: unknown) {
@@ -254,7 +254,7 @@ pipeline test_after_digest_retires_terminal_and_resets_cursor(harness: Harness, 
   )
   ledger = command_ledger_after_digest(ledger, 90000, cw)
   // Terminal hto-1 retired; running hto-2 kept with cursor reset + reentry bump.
-  assert(_row_by_handle(ledger, "hto-1") == nil)
+  assert(_row_by_handle(ledger, "hto-1").lease == "retired")
   const row = _row_by_handle(ledger, "hto-2")
   assert(row.last_digest_offset == 500)
   assert(row.new_output == "")
@@ -267,9 +267,11 @@ pipeline test_terminal_replay_does_not_reopen_retired_handle(harness: Harness, t
   let ledger = command_ledger_ingest(command_ledger_new(), [_running_result("hto-1", 0)], 0, cw)
   ledger = command_ledger_apply_updates(ledger, [terminal], 1000, cw)
   ledger = command_ledger_after_digest(ledger, 1000, cw)
-  assert(len(ledger) == 0)
+  assert(!command_ledger_has_awaited(ledger))
+  assert(!command_ledger_decide(ledger, 1000, cw).fire)
   ledger = command_ledger_apply_updates(ledger, [terminal], 2000, cw)
-  assert(len(ledger) == 0, "an immutable terminal replay cannot recreate an active row")
+  assert(!command_ledger_has_awaited(ledger), "an immutable terminal replay cannot recreate an active row")
+  assert(!command_ledger_decide(ledger, 2000, cw).fire)
 }
 
 /** --- lease transitions ------------------------------------------------------ */

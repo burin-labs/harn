@@ -1,0 +1,237 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { agent_completion_prompt_bindings } from "std/agent/preflight"
+import { agent_session_await_inbox, agent_session_messages } from "std/agent/state"
+import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
+
+fn set_cell(runtime: HarnessRuntime, cell: any, value: any) {
+  const snapshot = runtime.shared_snapshot(cell)
+  runtime.shared_cas(cell, snapshot, value)
+}
+
+pub fn native_completion(
+  harness: Harness,
+  format: string,
+  finish_before_snapshot: bool = false,
+) -> dict {
+  if harness.system.platform().os == "windows" {
+    skip("the native command handshake uses a POSIX FIFO")
+  }
+  const session = "command-completion-${harness.random.uuid()}"
+  const final_text = agent_completion_prompt_bindings(
+    harness.llm,
+    {provider: "mock", tool_format: format, done_sentinel: "##DONE##"},
+  ).done_sentinel_rendered
+  const directory = harness.fs.mkdtemp_in_workspace("command-completion")
+  const fifo = path_join(directory, "gate")
+  assert_eq(harness.tools.run_command({argv: ["mkfifo", fifo]}).exit_code, 0)
+  const models = harness.runtime.atomic(0)
+  const starts = harness.runtime.atomic(0)
+  const waits = harness.runtime.atomic(0)
+  const releases = harness.runtime.atomic(0)
+  const minted = harness.runtime.shared_cell(
+    {scope: "task_group", key: "${session}/minted", initial: ""},
+  )
+  const observed = harness.runtime.shared_cell(
+    {scope: "task_group", key: "${session}/observed", initial: nil},
+  )
+  let tools = tool_define(
+    tool_registry(),
+    "start_command",
+    "Start the command handshake.",
+    {
+      parameters: {},
+      annotations: {kind: "execute", side_effect_level: "process_exec"},
+      handler: { _args ->
+        harness.runtime.atomic_add(starts, 1)
+        const argv = finish_before_snapshot ? [
+          "python3",
+          "-c",
+          "import sys; open(sys.argv[1]).read(); sys.exit(7)",
+          fifo,
+        ] : ["cat", fifo]
+        const running = harness.tools.run_command({argv: argv, background_after_ms: 1})
+        assert_eq(running.status, "running")
+        set_cell(harness.runtime, minted, running.handle_id)
+        if finish_before_snapshot {
+          assert_eq(
+            harness.tools.run_command(
+              {
+                argv: [
+                  "python3",
+                  "-c",
+                  "import sys; open(sys.argv[1], 'w').write('finish\\n')",
+                  fifo,
+                ],
+              },
+            ).exit_code,
+            0,
+          )
+          assert(
+            agent_session_await_inbox(harness.agent, session, 1000),
+            "native terminal inbox barrier reached",
+          )
+          const owned = harness.tools.list_handles({completed_handle_ids: [running.handle_id]})
+          assert_eq(len(owned.handles), 0, "terminal before first reconciliation")
+          assert_eq(len(owned.completed_handles), 1, "retained original lease measured")
+          assert_eq(owned.completed_handles[0].lease, "awaited")
+        }
+        // Deliberately opaque: command ownership must come from the native
+        // session store, not a product-specific handler-data parser.
+        return agent_tool_handler_result("started", {opaque_native_result: running})
+      },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "collect_command",
+    "Collect the completed command through its registered handler.",
+    {
+      defer_loading: true,
+      parameters: {handle_id: {type: "string"}, timeout_ms: {type: "integer"}},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+      handler: { args ->
+        assert_eq(args.handle_id, harness.runtime.shared_get(minted))
+        assert_eq(args.timeout_ms, 0)
+        harness.runtime.atomic_add(waits, 1)
+        const terminal = harness.tools.wait_command(args)
+        assert(terminal.status != "running", "completion dispatch observes a real terminal")
+        set_cell(harness.runtime, observed, terminal)
+        return agent_tool_handler_result("canonical-terminal", {run_outcome: terminal})
+      },
+    },
+  )
+  harness.agent.subscribe(
+    session,
+    { event ->
+      if event.type == "progress_reported" && event?.metadata?.producer == "harn.command_hold"
+        && !finish_before_snapshot
+        && harness.runtime.atomic_get(releases) == 0 {
+        harness.runtime.atomic_add(releases, 1)
+        const released = harness.tools.run_command(
+          {
+            argv: [
+              "python3",
+              "-c",
+              "import sys; open(sys.argv[1], 'w').write('command-proof\\n')",
+              fifo,
+            ],
+          },
+        )
+        assert_eq(released.exit_code, 0)
+      }
+    },
+  )
+  const caller = { _call ->
+    const turn = harness.runtime.atomic_add(models, 1) + 1
+    if turn == 1 {
+      const calls = [{id: "original-command", name: "start_command", arguments: {}}]
+      return {
+        ok: true,
+        value: format == "native" ? {
+          text: "",
+          native_tool_calls: calls,
+          tool_calls: calls,
+          provider: "mock",
+          model: "mock",
+        } : {
+          text: "<tool_call>\nstart_command({})\n</tool_call>",
+          provider: "mock",
+          model: "mock",
+          _effective_tool_format: format,
+        },
+      }
+    }
+    assert_eq(harness.runtime.atomic_get(waits), 1, "terminal collected before the next inference")
+    const messages = agent_session_messages(harness.agent, session)
+    const local = messages.filter(
+      { message -> message?._harn?.generation_origin?.producer == "harn.command_hold" },
+    )
+      .to_list()
+    assert_eq(len(local), 1, "one explicitly Harn-authored call")
+    assert_eq(local[0]._harn.generation_origin.kind, "local")
+    assert(!keys(local[0]._harn.generation_origin).contains("provider"))
+    assert(!keys(local[0]._harn.generation_origin).contains("usage"))
+    assert(
+      json_stringify(messages).contains("canonical-terminal"),
+      "normal paired completion result is durable",
+    )
+    return {
+      ok: true,
+      value: {text: final_text, provider: "mock", model: "mock", _effective_tool_format: format},
+    }
+  }
+  try {
+    const captured = agent_capture_events(
+      harness.agent,
+      session,
+      { ->
+        agent_loop(
+          harness,
+          "Run and collect the command.",
+          nil,
+          {
+            provider: "mock",
+            session_id: session,
+            tools: tools,
+            tool_format: format,
+            llm_caller: caller,
+            command_wait: {completion_tool: "collect_command"},
+            loop_until_done: true,
+            done_sentinel: "##DONE##",
+            final_wrapup: false,
+            turn_end_condition: false,
+            iteration_budget: {mode: "fixed", initial: 3, max: 3},
+          },
+        )
+      },
+    )
+    assert_eq(captured.result.status, "done")
+    assert_eq(harness.runtime.atomic_get(models), 2, "no polling inference")
+    assert_eq(harness.runtime.atomic_get(starts), 1, "no respawn")
+    assert_eq(harness.runtime.atomic_get(waits), 1, "one normal completion dispatch")
+    assert_eq(len(captured.result.tools.calls), 2, "both actual dispatches accounted")
+    assert(
+      captured.result.tools.successful.contains("collect_command"),
+      "completion reaches the normal success fold",
+    )
+    const terminal = harness.runtime.shared_get(observed)
+    assert(type_of(terminal) == "dict", "typed terminal observed")
+    if !finish_before_snapshot {
+      assert_eq(terminal.exit_code, 0)
+      assert(terminal.stdout.contains("command-proof"))
+      assert(
+        harness.fs.read_text(terminal.output_path).contains("command-proof"),
+        "retained output artifact",
+      )
+    } else {
+      assert_eq(terminal.exit_code, 7, "a naturally failed terminal is never a passing command")
+    }
+    return {
+      model_calls: harness.runtime.atomic_get(models),
+      starts: harness.runtime.atomic_get(starts),
+      waits: harness.runtime.atomic_get(waits),
+      accounted_calls: len(captured.result.tools.calls),
+      terminal: terminal,
+    }
+  } finally {
+    const handle = to_string(harness.runtime.shared_get(minted))
+    if handle != "" {
+      harness.tools.cancel_handle({handle_id: handle, wait_result_ms: 1000})
+    }
+  }
+}
+
+pipeline test_opaque_native_command_finishes_through_deferred_renamed_registered_tool(
+  harness: Harness,
+) {
+  native_completion(harness, "native")
+}
+
+pipeline test_terminal_before_first_snapshot_preserves_native_failure(harness: Harness) {
+  native_completion(harness, "native", true)
+}
+
+pipeline test_local_completion_preserves_text_tool_history(harness: Harness) {
+  native_completion(harness, "text")
+}

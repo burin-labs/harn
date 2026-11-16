@@ -1,0 +1,39 @@
+import {
+  command_ledger_ingest_handles,
+  command_ledger_should_hold,
+  command_wait_normalize,
+} from "std/agent/command_ledger"
+import { native_completion } from "../../../tests/agent/command_completion_dispatch_test"
+import { contract_effect, contract_negative } from "./lib/mechanism_contract"
+
+fn main(harness: Harness) {
+  const observed = native_completion(harness, "native")
+  contract_effect(
+    harness.stdio,
+    "effect_registered_completion_before_next_model",
+    observed.model_calls == 2 && observed.starts == 1 && observed.waits == 1,
+  )
+  contract_effect(
+    harness.stdio,
+    "effect_normal_dispatch_and_terminal",
+    observed.accounted_calls == 2 && observed.terminal.status == "completed"
+      && observed.terminal.exit_code == 0,
+  )
+  const cw = command_wait_normalize({completion_tool: "collect_command"})
+  const service = command_ledger_ingest_handles(
+    [],
+    [{handle_id: "service", lease: "service", status: "running"}],
+    0,
+    cw,
+  )
+  contract_negative(
+    harness.stdio,
+    "negative_service_does_not_hold",
+    command_ledger_should_hold(service, 1),
+  )
+  contract_negative(
+    harness.stdio,
+    "negative_empty_roster_does_not_hold",
+    command_ledger_should_hold([], 1),
+  )
+}

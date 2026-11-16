@@ -1,8 +1,8 @@
 import {
-  CommandHoldState,
-  CommandWaitOptions,
   command_ledger_has_awaited,
   command_ledger_hold,
+  command_ledger_after_digest,
+  command_ledger_reconcile,
   command_ledger_release,
   command_ledger_should_hold,
 } from "std/agent/command_ledger"
@@ -17,6 +17,13 @@ import { agent_daemon_step } from "std/agent/daemon"
 import { agent_feedback_emit } from "std/agent/feedback"
 import { CompletionDirectiveReceipt, agent_evaluate_completion } from "std/agent/judge"
 import { AgentToolDispatch, __tool_names_by_status } from "std/agent/loop_result_status"
+import {
+  AgentLoopCommandHoldInput,
+  AgentLoopCommandHoldResult,
+  CommandCompletionAttempt,
+} from "std/agent/loop_command_hold_types"
+import { __dispatch_tool_calls } from "std/agent/loop_resource_dispatch"
+import { __tool_registry_entry } from "std/agent/loop_tool_calls"
 import { __agent_loop_with_llm_render_context } from "std/agent/loop_support"
 import { __agent_loop_verified_completion } from "std/agent/loop_terminal"
 import {
@@ -36,6 +43,7 @@ import {
   __turn_end_judge_hit,
   __turn_made_edit,
   agent_stage,
+  agent_stage_has_delivery,
 } from "std/agent/loop_turn_options"
 import { agent_compute_post_turn } from "std/agent/postturn"
 import { agent_tool_call_paradigm } from "std/agent/preflight"
@@ -54,28 +62,59 @@ import {
   agent_emit_event,
   agent_session_inject_feedback,
   agent_session_messages,
+  agent_session_record_assistant,
 } from "std/agent/state"
 import { __agent_reopen_tool_surface } from "std/agent/tool_surface"
 
 pub type AgentLoopPostTurnAction = "break" | "continue"
 
-pub type AgentLoopCommandHoldAction = "continue" | "proceed"
-
-pub type AgentLoopCommandHoldInput = {
-  ledger: list,
-  command_wait: CommandWaitOptions,
-  hold_state: CommandHoldState,
-  reentry_cap: int?,
-  iteration: int,
-  tool_count: int,
-}
-
-pub type AgentLoopCommandHoldResult = {
-  action: AgentLoopCommandHoldAction,
-  ledger: list,
-  hold_state: CommandHoldState,
-  reentry_cap: int?,
-  reset_progress: bool,
+fn __command_hold_complete_tools(
+  harness: Harness,
+  session_id: string,
+  handles: list<string>,
+  tool_name: string,
+  options: dict,
+) -> CommandCompletionAttempt {
+  if len(handles) == 0 || tool_name == "" {
+    return {interrupted: false, completion: nil}
+  }
+  if __tool_registry_entry(options?.tools, tool_name) == nil {
+    throw "command_wait.completion_tool is not available in the current tool registry: ${tool_name}"
+  }
+  const checkpoint = agent_stage(harness.agent, session_id, "pre_tool_dispatch")
+  if agent_stage_has_delivery(checkpoint) || checkpoint.dispatch_skipped {
+    return {interrupted: true, completion: nil}
+  }
+  const receipt = "command-completion-${harness.random.uuid()}"
+  const calls = handles.map(
+    { handle ->
+      {
+        id: "${receipt}/${handle}",
+        name: tool_name,
+        arguments: {handle_id: handle, timeout_ms: 0},
+      }
+    },
+  ).to_list()
+  agent_session_record_assistant(
+    harness.agent,
+    session_id,
+    {
+      text: "",
+      native_tool_calls: calls,
+      tool_calls: calls,
+      _effective_tool_format: agent_tool_call_paradigm(harness.llm, options).kind,
+      generation_origin: {
+        kind: "local",
+        producer: "harn.command_hold",
+        receipt: receipt,
+        details: {handles: handles},
+      },
+    },
+  )
+  return {
+    interrupted: false,
+    completion: __dispatch_tool_calls(harness, session_id, calls, options),
+  }
 }
 
 pub type AgentLoopPostTurnContext = {
@@ -131,7 +170,7 @@ pub type AgentLoopPostTurnState = {
 pub type AgentLoopPostTurnResult = {action: AgentLoopPostTurnAction, state: AgentLoopPostTurnState}
 
 /**
- * Arbitrate a no-tool turn while the loop owns awaited command handles.
+ * Finish awaited commands before the next model request.
  * The result names the outer-loop action instead of leaking continue semantics
  * across the module seam.
  *
@@ -143,33 +182,51 @@ pub fn agent_loop_command_hold_transition(
   session_id: string,
   input: AgentLoopCommandHoldInput,
 ) -> AgentLoopCommandHoldResult {
-  // Command hold. A no-tool-call segment while an `awaited` handle is
-  // live does not end the turn: the loop parks on the inbox (zero
-  // inference) and re-enters the model only on its own sparse,
-  // delta-gated schedule with one coalesced `command_status` digest. A
-  // done attempt with pending awaited leases lands here too
-  // (`tool_count == 0`), so it cannot silently finish over a running
-  // build — it gets a forced-resolution re-entry.
-  if input.tool_count != 0 || !command_ledger_should_hold(input.ledger, input.tool_count) {
+  // Explicit native completion uses the process owner's session handles.
+  // Generic consumers retain their local ledger and post-tool scheduling.
+  const native_completion = (input.command_wait.completion_tool ?? "") != ""
+  const reconciled = native_completion ? command_ledger_reconcile(
+    harness,
+    session_id,
+    input.ledger,
+    input.command_wait,
+  ) : input.ledger
+  if (!native_completion && input.tool_count != 0)
+    || !command_ledger_should_hold(reconciled, input.tool_count) {
     return {
       action: "proceed",
-      ledger: input.ledger,
+      ledger: reconciled,
       hold_state: input.hold_state,
       reentry_cap: input.reentry_cap,
       reset_progress: false,
     }
   }
+  agent_stage(harness.agent, session_id, "command_hold", {iteration: input.iteration})
   const hold = command_ledger_hold(
     harness,
     session_id,
-    input.ledger,
+    reconciled,
     input.command_wait,
     input.hold_state,
   )
   let ledger = hold.ledger
   const hold_state = hold.hold_state
   let reentry_cap = input.reentry_cap
-  agent_stage(harness.agent, session_id, "command_hold", {iteration: input.iteration})
+  const controls = agent_stage(
+    harness.agent,
+    session_id,
+    "post_tool_dispatch",
+    {iteration: input.iteration},
+  )
+  if agent_stage_has_delivery(controls) {
+    return {
+      action: "continue",
+      ledger: ledger,
+      hold_state: hold_state,
+      reentry_cap: reentry_cap,
+      reset_progress: false,
+    }
+  }
   agent_emit_event(
     harness.agent,
     session_id,
@@ -184,6 +241,38 @@ pub fn agent_loop_command_hold_transition(
     },
   )
   if hold.outcome == "digest" {
+    const attempt = __command_hold_complete_tools(
+      harness,
+      session_id,
+      hold.completed_handles ?? [],
+      input.command_wait.completion_tool ?? "",
+      input.turn_opts ?? {},
+    )
+    if attempt.interrupted {
+      return {
+        action: "continue",
+        ledger: ledger,
+        hold_state: hold_state,
+        reentry_cap: reentry_cap,
+        reset_progress: false,
+      }
+    }
+    const completion_dispatch = attempt.completion
+    if completion_dispatch != nil {
+      ledger = command_ledger_after_digest(
+        ledger,
+        harness.clock.monotonic_ms(),
+        input.command_wait,
+      )
+      return {
+        action: "proceed",
+        ledger: ledger,
+        hold_state: hold_state,
+        reentry_cap: nil,
+        reset_progress: true,
+        completion_dispatch: completion_dispatch,
+      }
+    }
     // A snapshot of which background commands were running or finished at this
     // iteration. It is re-digested on every post-turn that still holds, so a
     // durable copy only preserves a stale roster beside the current one.
@@ -327,7 +416,7 @@ pub fn agent_loop_post_turn_transition(
         context.consecutive_failure_count,
       ),
   )
-  let post_turn_opts = __sync_tool_search_state(context.turn_opts, context.dispatched_turn_opts)
+  const post_turn_opts = __sync_tool_search_state(context.turn_opts, context.dispatched_turn_opts)
     + {
       _session_successful_tools: context.successful_tools_seen,
       _stall_checkpoint: context.stall_checkpoint,
@@ -347,7 +436,7 @@ pub fn agent_loop_post_turn_transition(
         render_harness,
         session,
         context.normalized
-          + {raw_text: context.raw_text, parsed_done_marker: context.parsed_done_marker},
+          + pick(context, ["raw_text", "parsed_done_marker"]),
         context.dispatch,
         post_turn_opts,
         context.iteration_index,
@@ -421,7 +510,7 @@ pub fn agent_loop_post_turn_transition(
     )
     verdict_record = reverdict
     next = next
-      + {terminal_assessment: reverdict?.receipt}
+      + {terminal_assessment: reverdict.receipt}
     next = next
       + {
         feedback_history: reverdict.feedback_history ?? next.feedback_history,
@@ -487,7 +576,7 @@ pub fn agent_loop_post_turn_transition(
       )
       verdict_record = verdict
       next = next
-        + {terminal_assessment: verdict?.receipt}
+        + {terminal_assessment: verdict.receipt}
       next = next
         + {
           feedback_history: verdict.feedback_history ?? next.feedback_history,
@@ -501,7 +590,7 @@ pub fn agent_loop_post_turn_transition(
           harness.agent,
           session.session_id,
           AGENT_LOOP_REJECTED_TURN_MARKER,
-          trim(to_string(verdict?.feedback ?? "")),
+          trim(to_string(verdict.feedback ?? "")),
         )
       }
       // Delivery, now that the transcript is in its final shape for this round.
@@ -509,7 +598,7 @@ pub fn agent_loop_post_turn_transition(
       // directive carried the history as it was BEFORE this emit, so writing it
       // after would restore the stale one and defeat the unchanged-next-step
       // suppression.
-      const judge_feedback = trim(to_string(verdict?.feedback ?? ""))
+      const judge_feedback = trim(to_string(verdict.feedback ?? ""))
       if judge_feedback != "" {
         const composed = agent_feedback_emit(
           harness.agent,
@@ -518,15 +607,15 @@ pub fn agent_loop_post_turn_transition(
             {
               kind: "verify_completion",
               content: judge_feedback,
-              source: verdict?.receipt?.trigger ?? "completion_judge",
+              source: verdict.receipt.trigger ?? "completion_judge",
               reason: "judge_veto",
               action: "continue",
-              next_step: verdict?.repair ?? "",
+              next_step: verdict.repair ?? "",
             },
           ],
           {
             history: next.feedback_history,
-            knowledge_state: to_string(verdict?.knowledge_state ?? ""),
+            knowledge_state: to_string(verdict.knowledge_state ?? ""),
           },
         )
         next = next + {feedback_history: composed.history}
@@ -714,7 +803,7 @@ pub fn agent_loop_post_turn_transition(
   if applied.stop {
     return {
       action: "break",
-      state: next + {final_status: applied.final_status, stop_reason: applied.stop_reason},
+      state: next + pick(applied, ["final_status", "stop_reason"]),
     }
   }
   return {action: "continue", state: next}

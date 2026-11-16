@@ -30,7 +30,7 @@ fn command_updates_have_one_dedicated_inbox_consumer() {
         &session_id,
         "tool_result",
         r#"{"handle_id":"verify-1","status":"completed","exit_code":0}"#,
-        "test.command",
+        crate::orchestration::agent_inbox::COMMAND_TERMINAL_SOURCE,
     );
     crate::orchestration::agent_inbox::push(
         &session_id,
@@ -60,6 +60,25 @@ fn command_updates_have_one_dedicated_inbox_consumer() {
             .display(),
         "tool_result"
     );
+}
+
+#[test]
+fn unrelated_tool_result_remains_feedback_not_command_ownership() {
+    let session_id = format!("unowned-command-inbox-{}", uuid::Uuid::new_v4());
+    crate::orchestration::agent_inbox::push(
+        &session_id,
+        "tool_result",
+        r#"{"handle_id":"not-a-command","status":"completed","exit_code":0}"#,
+        "test.peer",
+    );
+    let args = [json_to_vm(&json!(session_id))];
+    let mut output = String::new();
+    let commands = host_agent_session_drain_command_updates_builtin(&args, &mut output)
+        .expect("command drain");
+    assert!(list_items(&commands).is_empty());
+    let feedback = host_agent_session_drain_feedback_builtin(&args, &mut output)
+        .expect("unrelated feedback drain");
+    assert_eq!(list_items(&feedback).len(), 1);
 }
 
 #[test]
