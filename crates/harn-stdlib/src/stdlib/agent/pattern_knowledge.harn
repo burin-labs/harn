@@ -164,14 +164,14 @@ pub fn pattern_learning_import_session_records(harness: Harness, options: any = 
     }
     for run in runs {
       scanned_runs = scanned_runs + 1
-      const run_id = pl_text(run?.run_id)
+      const run_id = pl_text(run.run_id)
       const evidence_key = pl_session_run_key(session_id, run_id)
       if observed_evidence_keys.contains(evidence_key)
         || observed_evidence_keys.contains("legacy_session:" + session_id) {
         skipped_existing = skipped_existing + 1
         continue
       }
-      const run_events = run?.events ?? []
+      const run_events = run.events
       if !pl_run_has_eligible_natural_terminal(run_events) {
         skipped_ineligible = skipped_ineligible + 1
         continue
