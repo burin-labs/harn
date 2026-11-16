@@ -1048,6 +1048,23 @@ export function consumerPairing(text, requestedPull = '') {
   return claim.pull;
 }
 
+/** Read the current declaration only for the same open pull head under test. */
+export async function githubPullPairing(token, repository, pullNumber, headSha, fetchRecord = fetch) {
+  if(typeof token!=='string'||!token||repository!==parentRepository
+    ||typeof pullNumber!=='string'||!id.test(pullNumber)||typeof headSha!=='string'||!sha.test(headSha)){
+    refuse('pull_pairing_read_authority_missing');
+  }
+  const response=await githubRead(token,`https://api.github.com/repos/${repository}/pulls/${pullNumber}`,fetchRecord);
+  if(!response.ok)refuse('pull_pairing_read_refused',refusalDiagnostic(response));
+  const pull=await response.json();
+  if(!pull||!Number.isSafeInteger(pull.number)||String(pull.number)!==pullNumber||pull.state!=='open'
+    ||pull.head?.repo?.full_name!==repository||pull.base?.repo?.full_name!==repository||pull.head?.sha!==headSha
+    ||!Object.hasOwn(pull,'body')||(pull.body!==null&&typeof pull.body!=='string')){
+    refuse('pull_pairing_head_unproven');
+  }
+  return consumerPairing(pull.body??'');
+}
+
 export async function githubConsumerSource(token, repository, pairedPull = null, fetchRecord = fetch) {
   const read=async suffix=>{
     if (!token || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) refuse('read_authority_or_identity_missing');
