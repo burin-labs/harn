@@ -579,7 +579,7 @@ mod declaration_0057 {
 mod declaration_0058 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
-    # [harn_builtin_macros :: harn_builtin_metadata (exposure = "runtime_internal" , effects = [] , sig = "__host_agent_session_set_loop_budget(session_id: string, snapshot: dict) -> nil" , category = "agent.host" , runtime_only = true)]
+    # [harn_builtin_macros :: harn_builtin_metadata (exposure = "runtime_internal" , effects = [] , sig = "__host_agent_session_set_loop_budget(session_id: string, snapshot: @AGENT_LOOP_BUDGET_SNAPSHOT) -> nil" , category = "agent.host" , runtime_only = true)]
     #[doc = " Only the loop writes this projection; the public capability is read-only."]
     fn set_loop_budget() {}
 }
@@ -587,7 +587,7 @@ mod declaration_0058 {
 mod declaration_0059 {
     #[allow(unused_imports)]
     use harn_builtin_meta::*;
-    # [harn_builtin_macros :: harn_builtin_metadata (exposure = "runtime_internal" , effects = [] , sig = "__host_agent_session_loop_budget(session_id: string) -> {schema: string, iteration: int, remaining: int?, max_iterations: int?, reserve: {verification: int, recovery: int, terminal_report: int, total: int}, grants_remaining: {verification: int, recovery: int, terminal_report: int}}?" , category = "agent.host" , runtime_only = true)]
+    # [harn_builtin_macros :: harn_builtin_metadata (exposure = "runtime_internal" , effects = [] , sig_expr = harn_builtin_meta :: signatures :: AGENT_LOOP_BUDGET . with_name ("__host_agent_session_loop_budget") , category = "agent.host" , runtime_only = true)]
     fn loop_budget() {}
 }
 #[doc = "crates/harn-vm/src/llm/agent_session_host/message_history.rs"]

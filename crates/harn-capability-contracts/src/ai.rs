@@ -764,7 +764,7 @@ capability_method!(
     agent_session_loop_budget,
     "harness.agent.session_loop_budget",
     [],
-    "__cap_agent_session_loop_budget(session_id: string) -> {schema: string, iteration: int, remaining: int?, max_iterations: int?, reserve: {verification: int, recovery: int, terminal_report: int, total: int}, grants_remaining: {verification: int, recovery: int, terminal_report: int}}?",
+    harn_builtin_meta::signatures::AGENT_LOOP_BUDGET.with_name("__cap_agent_session_loop_budget"),
     "Read the current loop-owned budget projection, or nil before the loop has measured it."
 );
 capability_method!(

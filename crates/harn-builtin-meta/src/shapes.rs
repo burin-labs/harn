@@ -47,6 +47,31 @@ const TY_STRING_OR_DICT_OR_NIL: Ty = Ty::Union(&[TY_STRING, TY_DICT, TY_NIL]);
 const TY_STRING_OR_LIST: Ty = Ty::Union(&[TY_STRING, TY_LIST]);
 const TY_TOOL_REGISTRY_OR_LIST: Ty = Ty::Union(&[TY_LIST, TY_DICT]);
 
+/// Read-only projection supplied by the Harn agent loop's existing grant owner.
+pub const AGENT_LOOP_BUDGET_SNAPSHOT: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("schema", TY_STRING),
+    ShapeFieldDescriptor::new("iteration", TY_INT),
+    ShapeFieldDescriptor::new("remaining", TY_INT_OR_NIL),
+    ShapeFieldDescriptor::new("max_iterations", TY_INT_OR_NIL),
+    ShapeFieldDescriptor::new(
+        "reserve",
+        Ty::Shape(&[
+            ShapeFieldDescriptor::new("verification", TY_INT),
+            ShapeFieldDescriptor::new("recovery", TY_INT),
+            ShapeFieldDescriptor::new("terminal_report", TY_INT),
+            ShapeFieldDescriptor::new("total", TY_INT),
+        ]),
+    ),
+    ShapeFieldDescriptor::new(
+        "grants_remaining",
+        Ty::Shape(&[
+            ShapeFieldDescriptor::new("verification", TY_INT),
+            ShapeFieldDescriptor::new("recovery", TY_INT),
+            ShapeFieldDescriptor::new("terminal_report", TY_INT),
+        ]),
+    ),
+]);
+
 pub const SECRET_FINDING: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("detector", TY_STRING),
     ShapeFieldDescriptor::new("source", TY_STRING),

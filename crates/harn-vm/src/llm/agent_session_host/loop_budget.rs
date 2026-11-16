@@ -41,7 +41,7 @@ struct CallReserve {
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "__host_agent_session_set_loop_budget(session_id: string, snapshot: dict) -> nil",
+    sig = "__host_agent_session_set_loop_budget(session_id: string, snapshot: @AGENT_LOOP_BUDGET_SNAPSHOT) -> nil",
     category = "agent.host",
     runtime_only = true
 )]
@@ -68,7 +68,7 @@ fn set_loop_budget(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
 #[harn_builtin(
     exposure = "runtime_internal",
     effects = [],
-    sig = "__host_agent_session_loop_budget(session_id: string) -> {schema: string, iteration: int, remaining: int?, max_iterations: int?, reserve: {verification: int, recovery: int, terminal_report: int, total: int}, grants_remaining: {verification: int, recovery: int, terminal_report: int}}?",
+    sig_expr = harn_builtin_meta::signatures::AGENT_LOOP_BUDGET.with_name("__host_agent_session_loop_budget"),
     category = "agent.host",
     runtime_only = true
 )]
