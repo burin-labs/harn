@@ -63,7 +63,7 @@ pipeline test(harness: Harness, task: unknown) {
   assert(truncated.stdout_truncated == true, "the typed runner preserves stdout truncation")
   assert(
     truncated.stderr_truncated == false,
-    "the typed runner preserves measured stderr completeness",
+    "the typed runner preserves a measured false separately from missing evidence",
   )
   harness.testing.push_scope()
   harness.testing.respond(
@@ -80,7 +80,10 @@ pipeline test(harness: Harness, task: unknown) {
   )
   const stderr_truncated: GitCommandResult = forward_git_run(runner, ["--version"])
   harness.testing.pop_scope()
-  assert(stderr_truncated.stdout_truncated == false, "complete stdout stays measured")
+  assert(
+    stderr_truncated.stdout_truncated == false,
+    "measured false stdout stays distinct from nil",
+  )
   assert(stderr_truncated.stderr_truncated == true, "the typed runner preserves stderr truncation")
   harness.stdio.log("git_command_result_forward ok argv=" + to_string(len(result.argv)))
 }
