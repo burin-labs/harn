@@ -1,6 +1,6 @@
 //! The invocation paths shared by host capture and VM permission evaluation.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value as JsonValue;
 
@@ -60,9 +60,35 @@ pub(super) fn classify(
     entries.extend(
         paths
             .iter()
-            .map(|path| classify_permission_path(path, Some(workspace))),
+            .map(|path| classify_invocation_path(path, workspace)),
     );
     entries
+}
+
+fn classify_invocation_path(path: &str, workspace: &Path) -> WorkspacePathInfo {
+    if crate::run_tape::state_branch().is_none() {
+        return classify_permission_path(path, Some(workspace));
+    }
+    let absolute =
+        crate::workspace_path::expand_home_path(path, crate::user_dirs::home_dir().as_deref())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| workspace.join(path));
+    match crate::run_tape::workspace_path(absolute) {
+        Ok(mapped) => {
+            let mut entry = classify_permission_path(&mapped.to_string_lossy(), Some(workspace));
+            entry.input = path.to_owned();
+            entry
+        }
+        Err(error) => WorkspacePathInfo {
+            input: path.to_owned(),
+            kind: WorkspacePathKind::Invalid,
+            normalized: path.to_owned(),
+            workspace_path: None,
+            host_path: None,
+            recovered_root_drift: false,
+            reason: Some(error.to_string()),
+        },
+    }
 }
 
 #[cfg(test)]

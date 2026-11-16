@@ -372,8 +372,8 @@ canary_require_superset() {
   canary_say "CONSUMER_CANARY pairing pull=$2 superseded=$4 decision=superset_verified"
 }
 
-# The text whose trailers declare the pairing. A pull request description wins.
-# Otherwise an authenticated release producer reads every included commit, from
+# Pinned PR checks use the pin job's current selection. Other callers may supply
+# an explicit description; otherwise a release producer reads included commits from
 # the previous stable tag through SOURCE_REVISION, because the commit that needs a consumer
 # change is usually a feature commit, not the release commit. Any other source
 # reads its own commit message. A range it cannot measure refuses rather than
@@ -381,6 +381,18 @@ canary_require_superset() {
 canary_pairing_text() {
   local revision=$1 version=$2 scope=${3:-commit} source=${CANARY_PAIRING_SOURCE:-} base count
   case "$scope" in commit|release) ;; *) canary_fail pairing_scope_invalid ;; esac
+  if [[ -n "${CANARY_PULL_REQUEST_CLI_RUN:-}" ]]; then
+    # The pin job supplies its current authenticated selection alongside the
+    # exact consumer revision. The triggering event body may predate an edit.
+    if [[ "${CONSUMER_PULL_REQUEST:-}" == default ]]; then
+      CONSUMER_PULL_REQUEST=''
+    else
+      [[ "${CONSUMER_PULL_REQUEST:-}" =~ ^[1-9][0-9]*$ ]] \
+        || canary_fail consumer_pairing_selection_unmeasured
+    fi
+    CANARY_PAIRING_TEXT=''
+    return 0
+  fi
   CANARY_PAIRING_TEXT=${PAIRING_TEXT:-}
   [[ -z "$CANARY_PAIRING_TEXT" && -n "$source" ]] || return 0
   if [[ "$scope" == release ]] && release_version_is_canonical "$version" && ! release_version_is_prerelease "$version"; then
