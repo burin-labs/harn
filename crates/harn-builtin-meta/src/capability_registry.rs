@@ -1,0 +1,56 @@
+//! Identity projections for the closed Harness capability vocabulary.
+
+macro_rules! capability_registry {
+    ($project:ident) => {
+        $project! {
+            Stdio => ("stdio", "HarnessStdio"),
+            Term => ("term", "HarnessTerm"),
+            Clock => ("clock", "HarnessClock"),
+            Fs => ("fs", "HarnessFs"),
+            Env => ("env", "HarnessEnv"),
+            Random => ("random", "HarnessRandom"),
+            Net => ("net", "HarnessNet"),
+            Process => ("process", "HarnessProcess"),
+            Channels => ("channels", "HarnessChannels"),
+            System => ("system", "HarnessSystem"),
+            Secrets => ("secrets", "HarnessSecrets"),
+            Llm => ("llm", "HarnessLlm"),
+            Agent => ("agent", "HarnessAgent"),
+            Tenant => ("tenant", "HarnessTenant"),
+            Auth => ("auth", "HarnessAuth"),
+            Observability as Obs => ("obs", "HarnessObs"),
+            Verdict => ("verdict", "HarnessVerdict"),
+            Tools => ("tools", "HarnessTools"),
+            Ast => ("ast", "HarnessAst"),
+            CodeIndex => ("code_index", "HarnessCodeIndex"),
+            Computer => ("computer", "HarnessComputer"),
+            Embed => ("embed", "HarnessEmbed"),
+            Memory => ("memory", "HarnessMemory"),
+            Sqlite => ("sqlite", "HarnessSqlite"),
+            Postgres => ("postgres", "HarnessPostgres"),
+            FsWatch => ("fs_watch", "HarnessFsWatch"),
+            HostLease => ("host_lease", "HarnessHostLease"),
+            Scanner => ("scanner", "HarnessScanner"),
+            SecretStore => ("secret_store", "HarnessSecretStore"),
+            TerminalSession => ("terminal", "HarnessTerminalSession"),
+            Rules => ("rules", "HarnessRules"),
+            Lint => ("lint", "HarnessLint"),
+            Runtime => ("runtime", "HarnessRuntime"),
+            Interaction => ("interaction", "HarnessInteraction"),
+            Project => ("project", "HarnessProject"),
+            Dashboard => ("dashboard", "HarnessDashboard"),
+            Workspace => ("workspace", "HarnessWorkspace"),
+            MergeCaptain => ("merge_captain", "HarnessMergeCaptain"),
+            Session => ("session", "HarnessSession"),
+            Permission => ("permission", "HarnessPermission"),
+            Text => ("text", "HarnessText"),
+            Lsp => ("lsp", "HarnessLsp"),
+            Credentials => ("credentials", "HarnessCredentials"),
+            PrMonitor => ("pr_monitor", "HarnessPrMonitor"),
+            Workflow => ("workflow", "HarnessWorkflow"),
+            Testing => ("testing", "HarnessTesting"),
+        }
+    };
+}
+
+pub(crate) use capability_registry;
