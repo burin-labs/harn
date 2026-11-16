@@ -491,15 +491,9 @@ pub(super) async fn host_agent_session_finalize(
         }
     }
 
-    // A run whose every closing draft was withdrawn has no answer to return,
-    // and why it has none is the only thing left that carries the meaning.
-    // Decide it HERE, before the terminal class, the typed outcome, the
-    // durable marker, the hooks and the checkpoint are derived, so every record
-    // agrees. Deciding it later, beside the visible text, would leave the
-    // published stop reason and the returned one disagreeing about one run.
-    // A run that sealed `done` accepted its own completion, so whatever reason
-    // it carries explains a finished run and must survive. Only a run that did
-    // NOT finish can be one the withdrawal explains.
+    // A withdrawn draft explains an unfinished answer, but cannot replace the
+    // budget that actually stopped the loop. Resolve this before every terminal
+    // projection so the result, durable marker and checkpoint retain one cause.
     let finished = final_status.is_empty() || final_status == "done";
     let withdrawal_reason = (!finished)
         .then(|| crate::agent_sessions::transcript(&session_id))
@@ -510,7 +504,13 @@ pub(super) async fn host_agent_session_finalize(
             crate::agent_sessions::last_withdrawal_reason(&session_id)
                 .unwrap_or_else(|| "the completion adjudicator rejected it".to_string())
         });
-    if withdrawal_reason.is_some() {
+    let budget_ended = crate::agent_events::classify_agent_terminal_with_class(
+        &final_status,
+        &stop_reason,
+        terminal_error.is_some(),
+        None,
+    ) == crate::agent_events::AgentTerminalKind::PolicyBudget;
+    if withdrawal_reason.is_some() && !budget_ended {
         stop_reason = "turn_withdrawn".to_string();
     }
     let terminal_class = agent_terminal_class(&final_status, &stop_reason, terminal_error.as_ref());
