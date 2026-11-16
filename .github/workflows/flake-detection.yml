@@ -50,9 +50,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up the filter runtime
+        id: filter_runtime
+        uses: ./.github/actions/setup-harn
+        with:
+          version: "0.10.201"
+
       - name: Detect touched test files
         id: touched
         env:
+          HARN_BIN: ${{ steps.filter_runtime.outputs.path }}
           EVENT_NAME: ${{ github.event_name }}
           SOURCE_REF: ${{ github.ref }}
         run: |

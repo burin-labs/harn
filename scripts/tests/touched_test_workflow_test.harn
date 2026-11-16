@@ -2,7 +2,15 @@ import { read_yaml } from "std/fs"
 
 type StepEnvironment = {HARN_BIN?: string, EVENT_NAME?: string, SOURCE_REF?: string}
 
-type WorkflowStep = {id?: string, name?: string, if?: string, env?: StepEnvironment, run?: string}
+type WorkflowStep = {
+  id?: string,
+  name?: string,
+  if?: string,
+  uses?: string,
+  with?: {version?: string},
+  env?: StepEnvironment,
+  run?: string,
+}
 
 type WorkflowSteps = list<WorkflowStep>
 
@@ -12,6 +20,24 @@ fn workflow_steps(fs: HarnessFs) -> list<WorkflowStep> {
     path_join(fs.source_dir(), "../../.github/workflows/flake-detection.yml"),
   )
   return schema_expect(document.jobs.get("flake-rerun").steps, schema_of(WorkflowSteps))
+}
+
+pipeline test_filter_selection_bootstraps_without_building_the_workspace(harness: Harness) {
+  const steps = workflow_steps(harness.fs)
+  const bootstrap = steps.find({ step -> step.id == "filter_runtime" })
+  assert(bootstrap != nil, "install the released filter runtime before Rust cache preparation")
+  assert_eq(bootstrap.uses, "./.github/actions/setup-harn")
+  assert_eq(bootstrap.with?.version, "0.10.201")
+  let installed = false
+  for step in steps {
+    if step.id == "filter_runtime" {
+      installed = true
+    }
+    if step.id == "touched" {
+      assert(installed)
+      assert_eq(step.env?.HARN_BIN, "$" + "{{ steps.filter_runtime.outputs.path }}")
+    }
+  }
 }
 
 pipeline test_repeatability_uses_its_reader_before_workspace_builds(harness: Harness) {
