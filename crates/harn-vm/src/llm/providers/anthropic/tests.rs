@@ -880,6 +880,14 @@ fn native_tools_strip_harn_internal_extensions() {
         payload.native_tools.as_ref().unwrap()[0]["input_schema"],
         "non-strict tool parameters retain their authored JSON Schema constraints"
     );
+
+    payload.native_tools.as_mut().unwrap()[0]["strict"] = serde_json::json!(true);
+    let strict_body = AnthropicProvider::build_request_body(&payload);
+    let strict_schema = &strict_body["tools"][0]["input_schema"];
+    assert_eq!(strict_schema["additionalProperties"], false);
+    for keyword in ["pattern", "format", "minLength"] {
+        assert!(strict_schema["properties"]["path"].get(keyword).is_none());
+    }
 }
 
 #[test]
