@@ -421,6 +421,11 @@ canary_dispatch() {
   canary_read_pairing "$CANARY_PAIRING_TEXT"
   paired=$CANARY_PAIRED
   CANARY_DECLARED_PULL=$paired
+  if jq -e '.kind == "composition"' <<< "$CANARY_SOURCE_DECLARATION" >/dev/null \
+    && { [[ -n "${REHEARSAL_PROMOTION_RUN_ID:-}" ]] \
+      || [[ -n "$producer_run" && ( "$producer_run" != "${GITHUB_RUN_ID:-}" || "$producer_attempt" != "${GITHUB_RUN_ATTEMPT:-}" ) ]]; }; then
+    canary_fail composition_recovery_unsupported
+  fi
   if jq -e '.kind == "composition"' <<< "$CANARY_SOURCE_DECLARATION" >/dev/null; then
     selection=$(CANARY_PAIRED_PULL="$paired" CANARY_SOURCE_DECLARATION="$CANARY_SOURCE_DECLARATION" \
       node "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-source.mjs" --selected) \

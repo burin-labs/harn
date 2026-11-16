@@ -12,7 +12,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # a caller-provided declaration or the current checkout's commit messages.
 if ! pairing_text=$(bash "$root/scripts/lib/consumer_pairing_source.sh" \
     --release-source "${SOURCE_CHECKOUT:-}" "$SOURCE_SHA") \
-  || ! declaration=$(printf '%s' "$pairing_text" | node "$root/scripts/ci/consumer-pairing.mjs" --declaration) \
+  || ! declaration=$(printf '%s' "$pairing_text" | env -i PATH="$PATH" node "$root/scripts/ci/consumer-pairing.mjs" --declaration) \
   || ! kind=$(jq -er '.kind | select(. == "ordinary" or . == "composition")' <<< "$declaration"); then
   echo '::error::CONSUMER_OBSERVER reason=authorization_source_unmeasured' >&2
   exit 1
