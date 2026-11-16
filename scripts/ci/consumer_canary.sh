@@ -310,13 +310,15 @@ canary_bind() {
   head_digest=$(sha256_text_hex "$head") || head_digest=''
   [[ "$head_digest" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::CONSUMER_CANARY binding=unrecorded reason=digest_unavailable"; return 1; }
   local composition=null schema=harn.release.consumer_rehearsal_binding.v1 selection
-  if [[ -n "${CANARY_SOURCE_DECLARATION:-}" ]] && jq -e '.kind == "composition"' <<< "$CANARY_SOURCE_DECLARATION" >/dev/null; then
+  if [[ -n "${CANARY_SOURCE_DECLARATION:-}" ]]; then
     selection=$(node "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-source.mjs" --selected) || return 1
-    [[ "$(jq -er .source.headSha <<< "$selection")" == "$head" \
-      && "$(jq -er .declaration.pull <<< "$selection")" == "$paired" && "$paired" == "$declared" ]] \
-      || { echo "::error::CONSUMER_CANARY binding=unrecorded reason=composition_source_changed"; return 1; }
-    composition=$(jq -ce .source.composition <<< "$selection") || return 1
-    schema=harn.release.consumer_rehearsal_binding.v2
+    if jq -e '.declaration.kind == "composition"' <<< "$selection" >/dev/null; then
+      [[ "$(jq -er .source.headSha <<< "$selection")" == "$head" \
+        && "$(jq -er .declaration.pull <<< "$selection")" == "$paired" && "$paired" == "$declared" ]] \
+        || { echo "::error::CONSUMER_CANARY binding=unrecorded reason=composition_source_changed"; return 1; }
+      composition=$(jq -ce .source.composition <<< "$selection") || return 1
+      schema=harn.release.consumer_rehearsal_binding.v2
+    fi
   fi
   jq -n --arg source "$source" --arg producer "$producer" --argjson attempt "$attempt" \
     --arg manifest "$manifest" --arg run "$run_id" --arg head "$head_digest" \
@@ -328,7 +330,7 @@ canary_bind() {
       declared_pull:(if $declared == "" then null else $declared end),verdict:"pass"}
       + (if $composition == null then {} else {composition:$composition} end)' > "$CANARY_BINDING_FILE" || return 1
   echo "binding=$CANARY_BINDING_FILE" >> "$GITHUB_OUTPUT" || return 1
-  echo "CONSUMER_CANARY binding=recorded source=$source producer=$producer attempt=$attempt consumer=${paired:+pull-$paired}${paired:-default}"
+  echo "CONSUMER_CANARY binding=recorded source=$source producer=$producer attempt=$attempt consumer=${paired:+pull-}${paired:-default}"
 }
 
 # The shared source selector owns pairing grammar. This legacy dispatcher
@@ -364,10 +366,10 @@ canary_pairing_text() {
 
 canary_validate_composition() {
   [[ -n "${CANARY_SOURCE_DECLARATION:-}" ]] || return 0
-  jq -e '.kind == "composition"' <<< "$CANARY_SOURCE_DECLARATION" >/dev/null || return 0
   local selection tested
   selection=$(node "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-source.mjs" --selected) \
     || canary_fail composition_source_unqualified
+  jq -e '.declaration.kind == "composition"' <<< "$selection" >/dev/null || return 0
   canary_api tested consumer_source_unreadable secret:CONSUMER_CANARY_REPOSITORY \
     "repos/$CANARY_REPOSITORY/actions/runs/$CANARY_RUN_ID" --jq .head_sha
   [[ "$tested" == "$(jq -er .source.headSha <<< "$selection")" ]] \

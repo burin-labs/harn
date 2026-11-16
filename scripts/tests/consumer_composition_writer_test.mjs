@@ -12,7 +12,7 @@ import {compositionFixture,repository,head,declaration} from './fixtures/consume
 const source='e'.repeat(40);
 const manifestDigest=`sha256:${'f'.repeat(64)}`;
 
-for(const scenario of ['measured','missing-component','changed-child']){
+for(const scenario of ['measured','missing-component','changed-child','malformed-declaration','unknown-declaration-fields']){
   test(`actual canary binding writer ${scenario}`,t=>{
     const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-composition-writer-'));
     t.after(()=>fs.rmSync(scratch,{recursive:true,force:true}));
@@ -49,18 +49,20 @@ for(const scenario of ['measured','missing-component','changed-child']){
     const script=path.join(scratch,'record.sh');
     fs.writeFileSync(script,'set -euo pipefail\nsource "$1"\nCANARY_SECRET_NAME="${CANARY_REPOSITORY#*/}"\ncanary_bind "$CANARY_REPOSITORY" 77 "$ACTUAL_CHILD_HEAD"\n');
     const childHead=scenario==='changed-child'?'3'.repeat(40):head;
+    const sourceDeclaration=scenario==='malformed-declaration'?'{':scenario==='unknown-declaration-fields'
+      ? JSON.stringify({kind:'ordinary',pull:'9',unrecognized:true}) : JSON.stringify(declaration());
     const result=spawnSync('bash',[script,fileURLToPath(new URL('../ci/consumer_canary.sh',import.meta.url))],{
       encoding:'utf8',env:{PATH:`${scratch}:${process.env.PATH}`,NODE_OPTIONS:`--import=${preload}`,
         GH_TOKEN:'consumer-read',CANARY_REPOSITORY:repository,GITHUB_REPOSITORY:'burin-labs/harn',
         SOURCE_REVISION:source,CANARY_RELEASE_PRODUCER_RUN_ID:'42',CANARY_RELEASE_PRODUCER_RUN_ATTEMPT:'1',
         CANARY_VERDICT:'pass',CANARY_PAIRED_PULL:'9',CANARY_DECLARED_PULL:'9',
-        CANARY_SOURCE_DECLARATION:JSON.stringify(declaration()),CANARY_BINDING_FILE:binding,
+        CANARY_SOURCE_DECLARATION:sourceDeclaration,CANARY_BINDING_FILE:binding,
         GITHUB_OUTPUT:output,ACTUAL_CHILD_HEAD:childHead,CANARY_API_ATTEMPTS:'1',
         FIXTURE_RECORDS:records,FIXTURE_READS:reads,FIXTURE_MANIFEST_READS:manifestReads},
     });
     assert.equal(fs.readFileSync(manifestReads,'utf8'),'manifest\n');
     const observed=fs.readFileSync(reads,'utf8').trim().split('\n').filter(Boolean).map(line=>JSON.parse(line));
-    assert.ok(observed.includes('/pulls/8'),'the writer must reach the required component read');
+    if(!scenario.includes('declaration'))assert.ok(observed.includes('/pulls/8'),'the writer must reach the required component read');
     assert.doesNotMatch(result.stdout+result.stderr,/private-consumer|combined-private-branch|consumer-read/);
     if(scenario==='measured'){
       assert.equal(result.status,0,result.stderr);
@@ -79,12 +81,15 @@ for(const scenario of ['measured','missing-component','changed-child']){
       }
       assert.equal(fs.readFileSync(output,'utf8'),`binding=${binding}\n`);
       assert.match(result.stdout,/binding=recorded/);
+      assert.match(result.stdout,/consumer=pull-9\n/);
     }else{
       assert.notEqual(result.status,0,result.stdout);
       assert.equal(fs.existsSync(binding),false);
       assert.equal(fs.readFileSync(output,'utf8'),'');
       assert.doesNotMatch(result.stdout,/binding=recorded/);
-      assert.match(result.stdout+result.stderr,scenario==='missing-component'?/consumer_source_read_refused/:/composition_source_changed/);
+      const reason=scenario.includes('declaration')?/consumer_composition_declaration_invalid/
+        :scenario==='missing-component'?/consumer_source_read_refused/:/composition_source_changed/;
+      assert.match(result.stdout+result.stderr,reason);
     }
   });
 }
