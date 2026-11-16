@@ -12,7 +12,7 @@ import {compositionFixture,repository as compositionRepository,head as compositi
   declaration as compositionDeclaration} from './fixtures/consumer_composition.mjs';
 import {admitChild,archiveProducerBinding,qualifyArchiveProducer,observerRunName,
   observerDeclarationName,observerDeclarationStep,observerPublicationWitness,
-  observerDispatchActor} from '../lib/consumer-observer.mjs';
+  observerDispatchActor,githubConsumerSelection} from '../lib/consumer-observer.mjs';
 
 const source='a'.repeat(40),policy='b'.repeat(40),head='c'.repeat(40);
 
@@ -257,11 +257,87 @@ test('gh read transport preserves ZIP bytes and refuses mutation',async()=>{
   const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-gh-bytes-'));
   const previous=process.env.PATH;
   try{
-    fs.writeFileSync(path.join(scratch,'gh'),'#!/usr/bin/env node\nprocess.stdout.write(Buffer.from([0,255,128,65]));\n',{mode:0o700});
+    fs.writeFileSync(path.join(scratch,'gh'),'#!/usr/bin/env node\nif(!process.argv.includes("--include"))process.exit(2);\nprocess.stdout.write("HTTP/2.0 200 OK\\r\\nContent-Type: application/zip\\r\\n\\r\\n");\nprocess.stdout.write(Buffer.from([0,255,128,65]));\n',{mode:0o700});
     process.env.PATH=`${scratch}:${previous}`;
     const response=await ghRead('https://api.github.com/repos/acme/test/actions/artifacts/1/zip');
     assert.deepEqual(Buffer.from(await response.arrayBuffer()),Buffer.from([0,255,128,65]));
     await assert.rejects(ghRead('https://api.github.com/repos/acme/test',{method:'POST'}),/read_endpoint_invalid/);
+  }finally{process.env.PATH=previous;fs.rmSync(scratch,{recursive:true,force:true});}
+});
+test('publication gh bridge preserves a complete 101-commit composition and refuses partial pages',async()=>{
+  const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-gh-composition-pages-'));
+  const previous=process.env.PATH;
+  try{
+    const fixture=compositionFixture();
+    const base='a'.repeat(40),comparison=`/compare/${base}...${compositionHead}?per_page=100&page=`;
+    const original=fixture.records.get(`${comparison}1`);
+    const history=Array.from({length:94},(_,index)=>({sha:index.toString(16).padStart(40,'0'),parents:[{sha:base}]}));
+    const all=[...history,...original.commits];
+    assert.equal(all.length,101);
+    fixture.records.set(`${comparison}1`,{...original,total_commits:101,commits:all.slice(0,100)});
+    fixture.records.set(`${comparison}2`,{...original,total_commits:101,commits:all.slice(100)});
+    const component=`/compare/${base}...${'b'.repeat(40)}?per_page=100&page=1`;
+    fixture.records.set(component,{...fixture.records.get(component),total_commits:95,
+      commits:[...history,...fixture.records.get(component).commits]});
+    const records=path.join(scratch,'records.json'),calls=path.join(scratch,'calls.jsonl');
+    const mode=path.join(scratch,'mode');
+    fs.writeFileSync(records,JSON.stringify([...fixture.records]));
+    fs.writeFileSync(path.join(scratch,'gh'),`#!/usr/bin/env node
+const fs=require('node:fs');
+const args=process.argv.slice(2),mode=fs.readFileSync(${JSON.stringify(mode)},'utf8');
+if(args[0]!=='api'||!args.includes('--include')||process.env.GH_TOKEN!=='consumer-read'||process.env.GITHUB_TOKEN)process.exit(2);
+const suffix=args[1].slice('repos/${compositionRepository}'.length);
+fs.appendFileSync(${JSON.stringify(calls)},JSON.stringify({suffix,token:process.env.GH_TOKEN})+'\\n');
+const records=new Map(JSON.parse(fs.readFileSync(${JSON.stringify(records)},'utf8')));
+if(!records.has(suffix))process.exit(3);
+if(mode==='refused'&&suffix===${JSON.stringify(`${comparison}2`)}){
+  process.stdout.write('HTTP/2.0 403 Forbidden\\r\\nContent-Type: application/json\\r\\n\\r\\n{}');process.exit(1);
+}
+process.stdout.write('HTTP/2.0 200 OK\\r\\nContent-Type: application/json\\r\\n');
+if(mode!=='missing-link'&&suffix===${JSON.stringify(`${comparison}1`)})process.stdout.write('Link: <https://api.github.com/next>; rel="next"\\r\\n');
+process.stdout.write('\\r\\n');
+const value=records.get(suffix);
+if(mode==='partial'&&suffix===${JSON.stringify(`${comparison}2`)})value.commits=[];
+process.stdout.write(JSON.stringify(value));
+`,{mode:0o700});
+    process.env.PATH=`${scratch}:${previous}`;
+    for(const scenario of ['good','missing-link','partial','refused']){
+      fs.writeFileSync(mode,scenario);fs.writeFileSync(calls,'');
+      const result=githubConsumerSelection('consumer-read',compositionRepository,compositionDeclaration(),ghRead);
+      if(scenario==='good')assert.equal((await result).headSha,compositionHead);
+      else await assert.rejects(result,/consumer_composition_graph_unmeasured|consumer_source_read_refused/);
+      const observed=fs.readFileSync(calls,'utf8').trim().split('\n').map(line=>JSON.parse(line));
+      assert.ok(observed.some(call=>call.suffix===`${comparison}1`));
+      assert.equal(observed.some(call=>call.suffix===`${comparison}2`),scenario!=='missing-link');
+      assert.ok(observed.every(call=>call.token==='consumer-read'));
+    }
+  }finally{process.env.PATH=previous;fs.rmSync(scratch,{recursive:true,force:true});}
+});
+test('gh bridge measures HTTP status and headers and refuses malformed or failed envelopes',async()=>{
+  const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-gh-status-'));
+  const previous=process.env.PATH;
+  try{
+    const responseFile=path.join(scratch,'response'),codeFile=path.join(scratch,'exit');
+    fs.writeFileSync(path.join(scratch,'gh'),`#!/usr/bin/env node
+const fs=require('node:fs');
+process.stdout.write(fs.readFileSync(${JSON.stringify(responseFile)}));
+process.exit(Number(fs.readFileSync(${JSON.stringify(codeFile)},'utf8')));
+`,{mode:0o700});
+    process.env.PATH=`${scratch}:${previous}`;
+    const read=(bytes,code=0)=>{
+      fs.writeFileSync(responseFile,bytes);fs.writeFileSync(codeFile,String(code));
+      return ghRead('https://api.github.com/repos/fixture/consumer');
+    };
+    const refused=await read('HTTP/2.0 404 Not Found\r\nContent-Type: application/json\r\nX-RateLimit-Remaining: 19\r\n\r\n{"message":"Not Found"}',1);
+    assert.equal(refused.status,404);assert.equal(refused.ok,false);
+    assert.equal(refused.headers.get('x-ratelimit-remaining'),'19');
+    assert.deepEqual(await refused.json(),{message:'Not Found'});
+    assert.equal((await read('HTTP/2.0 204 No Content\n\n')).status,204);
+    for(const [bytes,code] of [['{}',0],['HTTP/2.0 nope\r\n\r\n{}',0],
+      ['HTTP/2.0 200 OK\r\nNot a header\r\n\r\n{}',0],['HTTP/2.0 200 OK\r\n\r\n{}',1],
+      ['HTTP/2.0 204 No Content\r\n\r\n{}',0]]){
+      await assert.rejects(read(bytes,code),/github_read_unmeasured/);
+    }
   }finally{process.env.PATH=previous;fs.rmSync(scratch,{recursive:true,force:true});}
 });
 test('unbound run and artifact CLI selectors cannot be used for release decisions',()=>{
@@ -294,6 +370,7 @@ test('actual source reuse measures run and artifact page two and refuses either 
     fs.writeFileSync(path.join(scratch,'gh'),`#!/usr/bin/env node
 import fs from 'node:fs';
 const endpoint=new URL('https://api.github.com/'+process.argv[3]);
+if(process.argv.includes('--include'))process.stdout.write('HTTP/2.0 200 OK\\r\\nContent-Type: application/json\\r\\n\\r\\n');
 const data=JSON.parse(fs.readFileSync(process.env.FIXTURE,'utf8'));
 fs.appendFileSync(process.env.CALLS,endpoint.pathname+endpoint.search+'\\n');
 if(endpoint.pathname.includes('/workflows/')){
@@ -348,6 +425,7 @@ test('source reuse binds a complete artifact census to one settled producer atte
     fs.writeFileSync(path.join(scratch,'gh'),`#!/usr/bin/env node
 import fs from 'node:fs';
 const endpoint=new URL('https://api.github.com/'+process.argv[3]);
+if(process.argv.includes('--include'))process.stdout.write('HTTP/2.0 200 OK\\r\\nContent-Type: application/json\\r\\n\\r\\n');
 const previous=fs.existsSync(process.env.CALLS)?fs.readFileSync(process.env.CALLS,'utf8'):'';
 fs.appendFileSync(process.env.CALLS,endpoint.pathname+endpoint.search+'\\n');
 const source='${source}';
@@ -474,6 +552,7 @@ else process.exit(1);
     fs.writeFileSync(path.join(scratch,'gh'),`#!/usr/bin/env node
 import fs from 'node:fs';
 const endpoint=new URL('https://api.github.com/'+process.argv[3]);
+if(process.argv.includes('--include'))process.stdout.write('HTTP/2.0 200 OK\\r\\nContent-Type: application/json\\r\\n\\r\\n');
 const previous=fs.existsSync(process.env.CALLS)?fs.readFileSync(process.env.CALLS,'utf8'):'';
 fs.appendFileSync(process.env.CALLS,endpoint.pathname+endpoint.search+'\\n');
 const source='${source}',head='${head}';

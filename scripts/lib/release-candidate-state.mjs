@@ -344,13 +344,32 @@ export async function ghRead(url,options={}){
   const token=options.headers?.Authorization?.replace(/^Bearer /,'');
   const env={...process.env};
   if(token&&token!==cliAuthority){env.GH_TOKEN=token;delete env.GITHUB_TOKEN;}
-  const bytes=await new Promise((resolve,reject)=>{
-    execFile('gh',['api',endpoint.pathname.slice(1)+endpoint.search,'--hostname','github.com'],{
+  const {bytes,failed}=await new Promise((resolve,reject)=>{
+    execFile('gh',['api',endpoint.pathname.slice(1)+endpoint.search,'--hostname','github.com','--include'],{
       maxBuffer:16*1024*1024,env,encoding:'buffer',signal:options.signal,
-    },(error,stdout)=>error?reject(new Error('CONSUMER_OBSERVER reason=github_read_unmeasured')):resolve(stdout));
+    },(error,stdout)=>{
+      if(error&&(typeof error.code!=='number'||error.killed||error.signal)){
+        reject(new Error('CONSUMER_OBSERVER reason=github_read_unmeasured'));
+      }else resolve({bytes:stdout,failed:Boolean(error)});
+    });
   });
-  return new Response(bytes,{status:200,headers:{'content-type':endpoint.pathname.endsWith('/zip')
-    ?'application/octet-stream':'application/json'}});
+  // Split only the HTTP envelope. Decoding the entire stream corrupts binary
+  // artifact archives, while discarding headers loses graph pagination proof.
+  const separator=/\r?\n\r?\n/.exec(bytes.subarray(0,64*1024).toString('latin1'));
+  if(!separator)refuse('github_read_unmeasured');
+  const lines=bytes.subarray(0,separator.index).toString('latin1').split(/\r?\n/);
+  const match=/^HTTP\/[0-9]+(?:\.[0-9]+)? ([2-5][0-9]{2})(?: .*)?$/.exec(lines.shift());
+  if(!match)refuse('github_read_unmeasured');
+  const status=Number(match[1]),headers=new Headers();
+  if(failed&&status<400)refuse('github_read_unmeasured');
+  for(const line of lines){
+    const header=/^([!#$%&'*+.^_`|~0-9A-Za-z-]+):[ \t]*(.*)$/.exec(line);
+    if(!header)refuse('github_read_unmeasured');
+    try{headers.append(header[1],header[2]);}catch{refuse('github_read_unmeasured');}
+  }
+  const body=bytes.subarray(separator.index+separator[0].length);
+  if([204,205,304].includes(status)&&body.length!==0)refuse('github_read_unmeasured');
+  return new Response([204,205,304].includes(status)?null:body,{status,headers});
 }
 
 if(process.argv[1]&&import.meta.url===pathToFileURL(realpathSync(process.argv[1])).href){
