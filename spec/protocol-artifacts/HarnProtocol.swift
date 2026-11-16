@@ -165,6 +165,7 @@ public enum HarnProtocolConstants {
     ]
     public static let promptResultExtensionFields: [String] = [
         "terminal",
+        "goal_outcome",
     ]
     public static let toolCallReceiptStatuses: [String] = [
         "ok",
@@ -2105,6 +2106,7 @@ public struct HarnAgentTerminalOutcome: Codable, Sendable, Equatable {
 
 public struct HarnACPPromptResultHarnMetadata: Codable, Sendable, Equatable {
     public var terminal: HarnAgentTerminalOutcome?
+    public var goal_outcome: HarnACPValue?
 }
 
 public struct HarnACPPromptResultMetadata: Codable, Sendable, Equatable {

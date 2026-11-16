@@ -203,6 +203,19 @@ by Harn's runtime under `result._meta.harn.terminal`, advertised through
 only `terminal.kind: "natural"` as completion; canonical ACP `stopReason:
 "end_turn"` alone is not completion evidence.
 
+The sibling `result._meta.harn.goal_outcome` preserves the completion owner's
+assessment from the terminal checkpoint. A finished turn doesn't establish
+that the task succeeded. `not_achieved` and `unknown` remain unchanged; missing
+or null assessments remain unmeasured.
+
+Rust embedders can retain both outcomes atomically with
+`HostBridge::set_prompt_terminal_receipt` and
+`HostBridge::take_prompt_terminal_receipt`. The receipt contains `stop_reason`,
+`terminal` and optional `goal_outcome`. The deprecated `set_prompt_outcome`
+and `take_prompt_outcome` methods use the same storage but only carry terminal
+authority. Migrate writers and readers together to preserve the assessment;
+the old writer leaves it unmeasured.
+
 Harn keeps its tool-rendering extensions under `tool_call._meta.harn` and
 `tool_call_update._meta.harn`, following ACP's extension convention while
 leaving canonical ACP fields at their standard locations. These Harn

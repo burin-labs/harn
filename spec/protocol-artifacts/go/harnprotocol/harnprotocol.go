@@ -237,6 +237,7 @@ type HarnPromptResultExtensionField string
 // HarnPromptResultExtensionFields enumerates every wire value Harn currently emits for HarnPromptResultExtensionField.
 var HarnPromptResultExtensionFields = []HarnPromptResultExtensionField{
 	"terminal",
+	"goal_outcome",
 }
 
 // ACPContentBlockType is the named string type for the ACPContentBlockTypes wire vocabulary.
@@ -881,7 +882,8 @@ type HarnAgentTerminalOutcome struct {
 
 // HarnACPPromptResultHarnMetadata contains Harn prompt-result extensions.
 type HarnACPPromptResultHarnMetadata struct {
-	Terminal *HarnAgentTerminalOutcome `json:"terminal,omitempty"`
+	GoalOutcome JSONValue                 `json:"goal_outcome,omitempty"`
+	Terminal    *HarnAgentTerminalOutcome `json:"terminal,omitempty"`
 }
 
 // HarnACPPromptResultMetadata is the standard ACP extension envelope.

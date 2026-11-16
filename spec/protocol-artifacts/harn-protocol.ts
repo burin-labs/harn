@@ -243,6 +243,7 @@ export type LlmErrorReason = (typeof LLM_ERROR_REASONS)[number]
 
 export const HARN_PROMPT_RESULT_EXTENSION_FIELDS = [
   "terminal",
+  "goal_outcome",
 ] as const
 export type HarnPromptResultExtensionField = (typeof HARN_PROMPT_RESULT_EXTENSION_FIELDS)[number]
 
@@ -1116,6 +1117,7 @@ export interface HarnACPPromptResult {
   _meta?: {
     harn: {
       terminal?: HarnAgentTerminalOutcome
+      goal_outcome?: ACPValue
     }
   }
 }
