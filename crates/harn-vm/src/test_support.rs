@@ -1,6 +1,19 @@
 pub(crate) use harn_clock::test_support::current_thread_runtime;
 
 #[cfg(test)]
+#[track_caller]
+pub(crate) fn decode_fixture<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> T {
+    let mut ignored = Vec::new();
+    let fixture = serde_ignored::deserialize(value, |path| ignored.push(path.to_string()))
+        .expect("typed fixture must deserialize");
+    assert!(
+        ignored.is_empty(),
+        "fixture fields were ignored: {ignored:?}"
+    );
+    fixture
+}
+
+#[cfg(test)]
 pub(crate) mod host_command_fixture;
 
 #[cfg(test)]
@@ -66,6 +79,23 @@ pub(crate) mod session_init_fixture {
 mod tests {
     use super::current_thread_runtime;
     use futures::FutureExt;
+
+    #[test]
+    #[should_panic(expected = "fixture fields were ignored: [\"context_widnow\"]")]
+    fn fixture_refuses_unknown_model_fields() {
+        super::decode_fixture::<crate::llm_config::ModelDef>(serde_json::json!({
+            "name": "Fixture", "provider": "openai", "context_window": 128_000,
+            "context_widnow": 64,
+        }));
+    }
+
+    #[test]
+    #[should_panic(expected = "missing field `name`")]
+    fn fixture_refuses_missing_required_model_fields() {
+        super::decode_fixture::<crate::llm_config::ModelDef>(serde_json::json!({
+            "provider": "openai", "context_window": 128_000,
+        }));
+    }
 
     #[test]
     fn current_thread_runtime_supports_io_and_paused_timers() {

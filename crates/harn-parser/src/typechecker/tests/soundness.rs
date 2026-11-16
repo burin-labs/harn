@@ -6,149 +6,116 @@ use super::*;
 use crate::Parser;
 use harn_lexer::Lexer;
 
-#[test]
-fn top_level_bindings_replace_forward_placeholders_with_real_types() {
-    let errs = errors(
-        r"
+#[rstest::rstest]
+#[case::top_level_bindings_replace_forward_placeholders_with_real_types(
+    r"
 const x: int = 1
 const y: string = x
 ",
-    );
-    assert_eq!(errs.len(), 1, "expected top-level mismatch, got: {errs:?}");
-    assert!(errs[0].contains("expected string, found int"), "{errs:?}");
-}
-
-#[test]
-fn unconstrained_generic_param_cannot_flow_to_concrete_return() {
-    let errs = errors(
-        r"
+    "expected string, found int"
+)]
+#[case::unconstrained_generic_param_cannot_flow_to_concrete_return(
+    r"
 fn bad<T>(x: T) -> int {
   return x
 }
 ",
-    );
-    assert_eq!(
-        errs.len(),
-        1,
-        "expected generic return mismatch, got: {errs:?}"
-    );
-    assert!(errs[0].contains("expected int, found T"), "{errs:?}");
-}
-
-#[test]
-fn concrete_value_cannot_flow_to_unconstrained_generic_return() {
-    let errs = errors(
-        r"
+    "expected int, found T"
+)]
+#[case::concrete_value_cannot_flow_to_unconstrained_generic_return(
+    r"
 fn bad<T>() -> T {
   return 1
 }
 ",
-    );
-    assert_eq!(
-        errs.len(),
-        1,
-        "expected generic return mismatch, got: {errs:?}"
-    );
-    assert!(errs[0].contains("expected T, found int"), "{errs:?}");
-}
-
-#[test]
-fn bare_return_rejects_non_nil_return_type() {
-    let errs = errors(
-        r"
+    "expected T, found int"
+)]
+#[case::bare_return_rejects_non_nil_return_type(
+    r"
 fn bad() -> int {
   return
 }
 ",
-    );
-    assert_eq!(
-        errs.len(),
-        1,
-        "expected bare-return mismatch, got: {errs:?}"
-    );
-    assert!(errs[0].contains("expected int, found nil"), "{errs:?}");
-}
-
-#[test]
-fn non_nil_return_type_rejects_fallthrough() {
-    let errs = errors(
-        r"
+    "expected int, found nil"
+)]
+#[case::non_nil_return_type_rejects_fallthrough(
+    r"
 fn bad() -> int {
   const x = 1
 }
 ",
-    );
-    assert_eq!(
-        errs.len(),
-        1,
-        "expected missing-return error, got: {errs:?}"
-    );
-    assert!(
-        errs[0].contains("can fall through without returning int"),
-        "{errs:?}"
-    );
-}
-
-#[test]
-fn partial_return_path_rejects_fallthrough() {
-    let errs = errors(
-        r"
+    "can fall through without returning int"
+)]
+#[case::partial_return_path_rejects_fallthrough(
+    r"
 fn bad(flag: bool) -> int {
   if flag {
     return 1
   }
 }
 ",
-    );
-    assert_eq!(
-        errs.len(),
-        1,
-        "expected missing-return error, got: {errs:?}"
-    );
-    assert!(
-        errs[0].contains("can fall through without returning int"),
-        "{errs:?}"
-    );
-}
-
-#[test]
-fn typed_pipeline_checks_final_expression_type() {
-    let errs = errors(
-        r#"
+    "can fall through without returning int"
+)]
+#[case::typed_pipeline_checks_final_expression_type(
+    r#"
 pipeline test(task) -> int {
   "wrong"
 }
 "#,
-    );
-    assert_eq!(
-        errs.len(),
-        1,
-        "expected pipeline result mismatch, got: {errs:?}"
-    );
-    assert!(
-        errs[0].contains("pipeline result: expected int, found string"),
-        "{errs:?}"
-    );
-}
-
-#[test]
-fn typed_pipeline_rejects_nil_fallthrough() {
-    let errs = errors(
-        r"
+    "pipeline result: expected int, found string"
+)]
+#[case::typed_pipeline_rejects_nil_fallthrough(
+    r"
 pipeline test(task) -> int {
   const x = 1
 }
 ",
-    );
-    assert_eq!(
-        errs.len(),
-        1,
-        "expected pipeline nil result mismatch, got: {errs:?}"
-    );
-    assert!(
-        errs[0].contains("pipeline result: expected int, found nil"),
-        "{errs:?}"
-    );
+    "pipeline result: expected int, found nil"
+)]
+#[case::tool_body_final_expression_type_is_checked(
+    r#"
+pipeline test(task) {
+  tool bad() -> int {
+    "wrong"
+  }
+}
+"#,
+    "tool result: expected int, found string"
+)]
+#[case::return_type_checks_recurse_into_match_arms(
+    r#"
+fn bad(value: string) -> int {
+  match value {
+    _ -> { return "wrong" }
+  }
+}
+"#,
+    "expected int, found string"
+)]
+#[case::return_type_checks_recurse_into_try_expr_body(
+    r#"
+fn bad() -> int {
+  try {
+    return "wrong"
+  }
+}
+"#,
+    "expected int, found string"
+)]
+#[case::non_exhaustive_match_return_arms_do_not_hide_fallthrough(
+    r#"
+fn classify(v: string) -> int {
+  match v {
+    "one" -> { return 1 }
+  }
+}
+"#,
+    "can fall through without returning int"
+)]
+fn single_diagnostic(#[case] source: &str, #[case] expected: &str) {
+    let diagnostics = errors(source);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert!(diagnostics[0].contains(expected), "{diagnostics:?}");
 }
 
 #[rstest::rstest]
@@ -308,88 +275,6 @@ fn f(p: Point) {
 fn diagnostics_errors(#[case] source: &str, #[case] empty: bool) {
     let diagnostics = errors(source);
     assert_eq!(diagnostics.is_empty(), empty, "{diagnostics:?}");
-}
-
-#[test]
-fn tool_body_final_expression_type_is_checked() {
-    let errs = errors(
-        r#"
-pipeline test(task) {
-  tool bad() -> int {
-    "wrong"
-  }
-}
-"#,
-    );
-    assert_eq!(
-        errs.len(),
-        1,
-        "expected tool result mismatch, got: {errs:?}"
-    );
-    assert!(
-        errs[0].contains("tool result: expected int, found string"),
-        "{errs:?}"
-    );
-}
-
-#[test]
-fn return_type_checks_recurse_into_match_arms() {
-    let errs = errors(
-        r#"
-fn bad(value: string) -> int {
-  match value {
-    _ -> { return "wrong" }
-  }
-}
-"#,
-    );
-    assert_eq!(
-        errs.len(),
-        1,
-        "expected match-arm return mismatch, got: {errs:?}"
-    );
-    assert!(errs[0].contains("expected int, found string"), "{errs:?}");
-}
-
-#[test]
-fn return_type_checks_recurse_into_try_expr_body() {
-    let errs = errors(
-        r#"
-fn bad() -> int {
-  try {
-    return "wrong"
-  }
-}
-"#,
-    );
-    assert_eq!(
-        errs.len(),
-        1,
-        "expected try-body return mismatch, got: {errs:?}"
-    );
-    assert!(errs[0].contains("expected int, found string"), "{errs:?}");
-}
-
-#[test]
-fn non_exhaustive_match_return_arms_do_not_hide_fallthrough() {
-    let errs = errors(
-        r#"
-fn classify(v: string) -> int {
-  match v {
-    "one" -> { return 1 }
-  }
-}
-"#,
-    );
-    assert_eq!(
-        errs.len(),
-        1,
-        "expected missing-return error, got: {errs:?}"
-    );
-    assert!(
-        errs[0].contains("can fall through without returning int"),
-        "{errs:?}"
-    );
 }
 
 #[test]

@@ -17,6 +17,10 @@ import {
 import { agent_session_visible_messages } from "std/agent/state"
 import { with_fs } from "std/testing"
 
+struct CanonTestSlice {
+  files: list
+}
+
 const INVARIANTS = """
 @invariant
 @deterministic
@@ -170,6 +174,13 @@ pipeline main(harness: Harness, task: unknown) {
       )
       require slice_packs.map({ pack -> pack.id }) == ["zig"],
         "slice containers preserve inferred pack selection"
+      const nominal_packs = canon_resolve_packs(
+        harness.env,
+        harness.fs,
+        {canon_root: dir, slice: CanonTestSlice {files: slice.files}},
+      )
+      require nominal_packs.map({ pack -> pack.id }) == ["zig"],
+        "nominal slice containers preserve inferred pack selection"
       for value in [nil, false, 7, "legacy", []] {
         require canon_resolve_packs(harness.env, harness.fs, {canon_root: dir, slice: value}) == [],
           "non-record slice containers preserve empty file fallback"

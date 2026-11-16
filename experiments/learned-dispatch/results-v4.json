@@ -1,0 +1,58 @@
+{
+  "contract": "harn.learned_dispatch_study_result.v4",
+  "protocol": "protocol-v4.json",
+  "corpus": "corpus-v4.json",
+  "runtime_source": "4914194ae9f56b0046210ca90ef6f927988e727e",
+  "runtime_release": "v0.10.201",
+  "consumer_source": "8ba5ce8ec1d7cb13c8f0182ea5c97327d3bc191b",
+  "cli_sha256": "8c9e31fe5a533e05469e887ed428600f70a42695f41a35f5c5ba9c8869adcf52",
+  "native_sha256": "271a81fc7af0a0ca5459bed6ced8c9089a6d3d1ff795c8a44878bba59c7f313f",
+  "candidate_freeze_sha256": "e9c372eec99bd0cf0ed8a132b9896f232987ef5a6c826d1f49c765ac2b14be59",
+  "qualification": {
+    "verdict": "refused",
+    "admitted": false,
+    "report_written": false,
+    "cases": 150,
+    "positive_cases": 120,
+    "negative_cases": 30,
+    "collected": 149,
+    "pending": 0,
+    "collection_failures": [12104],
+    "assessment_selected": 101,
+    "incompatible_assessment_selected": 12,
+    "committed": 54,
+    "verified_correct_outputs": 54,
+    "committed_errors": 0,
+    "committed_incompatible_requests": 0,
+    "collected_fallback_reasons": {
+      "binding_uncertain": 39,
+      "uncertain": 48,
+      "incomplete_arguments": 2,
+      "preflight_declined": 6
+    },
+    "failed_collection_disposition": {"kind": "abstained", "reason": "uncertain"},
+    "ordinary_fallback_not_completed": [],
+    "threshold": 0.9,
+    "known_cost_usd": 0.475037308,
+    "cost_usd": null,
+    "unknown_calls": 1,
+    "retained_unknown_reservation_usd": 0.12,
+    "physical_calls": 1228,
+    "frozen_input_readback": "All 656 recorded file hashes matched after every case settled. The deliberately incorrect native executable hash was refused by the same reader. No observed result was replaced."
+  },
+  "refusal": {
+    "attempt": 12104,
+    "reason": "incomplete provider accounting",
+    "decision": "Applicability probability 0.76 produced a measured abstention with a settled native decision receipt. Ordinary fallback completed.",
+    "accounting": "A separate ancillary classification attempt had no response, unknown usage, and unknown billing. Its known run subtotal was 0.002649117 USD; total run cost remained null. The strict collector refused the row and retained its full budget reservation."
+  },
+  "matched_ordinary_caller": {
+    "qualification_installed": false,
+    "independent_request_checks": 34,
+    "persisted_completed": true,
+    "physical_calls": 6,
+    "provider_cost_usd": 0.00310481
+  },
+  "interpretation": "This complete execution cohort did not earn admission under its prespecified strict accounting contract. Its 54 measured learned commitments passed, but that does not erase the collection refusal. Ordinary fallback completion is not independent grading of fallback output. The next study uses fresh cases and prospectively distinguishes unknown ancillary charges from missing execution evidence.",
+  "limits": "Related synthetic templates, one small application, one reviewed generator, and one observation per case. No IID deployment sample or production reliability guarantee. Qualified ordinary execution and approval, stop, and steer controls were not run for this refused report."
+}

@@ -125,19 +125,33 @@ fn const_condition_alias_does_not_narrow_a_mutable_source() {
     assert!(errs[0].contains("expected string"), "got: {errs:?}");
 }
 
-#[test]
-fn generic_type_predicate_is_rejected() {
-    let diagnostics = diagnostics_with_code(
-        r"fn is_present<T>(value: T | nil) -> implies value is T {
+#[rstest::rstest]
+#[case::generic_type_predicate_is_rejected(
+    r"fn is_present<T>(value: T | nil) -> implies value is T {
   return value != nil
 }",
+    "cannot prove every call substitution"
+)]
+#[case::two_sided_type_predicate_rejects_a_one_sided_body(
+    r#"fn is_nonempty_text(value: string | int) -> value is string {
+  return type_of(value) == "string" && len(value) > 0
+}"#,
+    "use `implies value is string`"
+)]
+#[case::type_predicate_rejects_an_unrelated_body(
+    r"fn lies(value: string | int) -> value is string {
+  return true
+}",
+    "does not prove"
+)]
+fn invalid_type_predicates_are_rejected(#[case] case_input: &str, #[case] case_expected: &str) {
+    let diagnostics = diagnostics_with_code(
+        case_input,
         Code::InvalidTypePredicate,
         DiagnosticSeverity::Error,
     );
     assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
-    assert!(diagnostics[0]
-        .message
-        .contains("cannot prove every call substitution"));
+    assert!(diagnostics[0].message.contains(case_expected));
 }
 
 #[test]
@@ -180,32 +194,4 @@ fn check(value: string | int) {
         "the false branch must keep string | int: {errs:?}"
     );
     assert!(errs[0].contains("expected int"), "got: {errs:?}");
-}
-
-#[test]
-fn two_sided_type_predicate_rejects_a_one_sided_body() {
-    let diagnostics = diagnostics_with_code(
-        r#"fn is_nonempty_text(value: string | int) -> value is string {
-  return type_of(value) == "string" && len(value) > 0
-}"#,
-        Code::InvalidTypePredicate,
-        DiagnosticSeverity::Error,
-    );
-    assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
-    assert!(diagnostics[0]
-        .message
-        .contains("use `implies value is string`"));
-}
-
-#[test]
-fn type_predicate_rejects_an_unrelated_body() {
-    let diagnostics = diagnostics_with_code(
-        r"fn lies(value: string | int) -> value is string {
-  return true
-}",
-        Code::InvalidTypePredicate,
-        DiagnosticSeverity::Error,
-    );
-    assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
-    assert!(diagnostics[0].message.contains("does not prove"));
 }

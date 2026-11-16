@@ -597,7 +597,7 @@ function readCredential(credentials, url) {
   refuse('read_authority_or_identity_missing');
 }
 
-async function githubRead(token, url, fetchRecord) {
+async function githubRead(token, url, fetchRecord, knownArtifact = false) {
   const {credential, role} = readCredential(token, url);
   for (let attempt = 1; ; attempt += 1) {
     let response = null;
@@ -612,10 +612,12 @@ async function githubRead(token, url, fetchRecord) {
     } catch { /* Transport exceptions can contain private endpoints. */ }
     cleanupReadScopes.get(fetchRecord)?.remaining();
     if (response?.ok) return response;
-    const wait = await readRetryMs(response, attempt);
+    const missingArtifact = knownArtifact && response?.status === 404;
+    const wait = missingArtifact
+      ? readRetry.backoffMs * 2 ** (attempt - 1) : await readRetryMs(response, attempt);
     if (wait === undefined || wait > readRetry.limitMs || attempt >= readRetry.attempts) {
       if (response === null) refuse('github_read_unavailable',{attempts:attempt,read_role:role,retryable:true});
-      if (wait !== undefined) retryableReadResponses.set(response, Math.ceil(wait / 1000));
+      if (wait !== undefined && !missingArtifact) retryableReadResponses.set(response, Math.ceil(wait / 1000));
       return response;
     }
     await waitForRead(fetchRecord, wait);
@@ -932,8 +934,10 @@ async function githubArtifactPayload(token, repository, artifact, expected, fetc
     || artifact.size_in_bytes > 65_536) {
     refuse('dispatch_declaration_identity_unproven');
   }
+  // A finalized archive can be listed before its download is available.
+  // Only this identity-checked read may retry a 404.
   const archive = await githubRead(token,
-    `https://api.github.com/repos/${repository}/actions/artifacts/${artifact.id}/zip`, fetchRecord);
+    `https://api.github.com/repos/${repository}/actions/artifacts/${artifact.id}/zip`, fetchRecord, true);
   if (!archive.ok) refuse('dispatch_declaration_read_refused', refusalDiagnostic(archive));
   const bytes = Buffer.from(await archive.arrayBuffer());
   if (bytes.length > 65_536
@@ -1007,25 +1011,41 @@ export async function dispatchObserverConsumer(parentToken, consumerToken, conte
 
 /** Pairing is declared in public source; private branch identity stays inside
  * the authenticated source selector and dispatcher. */
-export function consumerPairing(text, requestedPull = '') {
+/** The pull to rehearse, and the trailer-named pulls an explicit request
+ * supersedes. Superseding is only a claim: the caller must prove the requested
+ * pull's head contains each superseded pull's head before rehearsing it. */
+export function consumerPairingClaim(text, requestedPull = '') {
   const lines=String(text??'').split(/\r?\n/).filter(line=>/^\s*Pairs-with:/.test(line));
-  const pairs=new Set();
-  if(requestedPull !== '') {
-    if(typeof requestedPull !== 'string' || !id.test(requestedPull)) refuse('consumer_pairing_invalid');
-    pairs.add(requestedPull);
-  }
+  const named=new Set();
   for(const line of lines){
     const match=/^\s*Pairs-with:\s*consumer#([1-9][0-9]*)\s*$/.exec(line);
     if(!match) refuse('consumer_pairing_invalid');
-    pairs.add(match[1]);
+    named.add(match[1]);
   }
-  if(pairs.size>1){
+  const byNumber=(left,right)=>Number(left)-Number(right);
+  if(requestedPull !== '') {
+    if(typeof requestedPull !== 'string' || !id.test(requestedPull)) refuse('consumer_pairing_invalid');
+    named.delete(requestedPull);
+    return {pull:requestedPull,superseded:[...named].sort(byNumber)};
+  }
+  if(named.size>1){
     // Pull numbers are already public in the trailers; naming them says which to reconcile.
     const error=new Error('CONSUMER_OBSERVER reason=consumer_pairing_ambiguous');
-    error.pulls=[...pairs].sort((left,right)=>Number(left)-Number(right));
+    error.pulls=[...named].sort(byNumber);
     throw error;
   }
-  return pairs.size===1?[...pairs][0]:null;
+  return {pull:named.size===1?[...named][0]:null,superseded:[]};
+}
+
+/** One pairing, for callers that cannot prove containment: any second pull refuses. */
+export function consumerPairing(text, requestedPull = '') {
+  const claim=consumerPairingClaim(text, requestedPull);
+  if(claim.superseded.length){
+    const error=new Error('CONSUMER_OBSERVER reason=consumer_pairing_ambiguous');
+    error.pulls=[claim.pull,...claim.superseded].sort((left,right)=>Number(left)-Number(right));
+    throw error;
+  }
+  return claim.pull;
 }
 
 export async function githubConsumerSource(token, repository, pairedPull = null, fetchRecord = fetch) {

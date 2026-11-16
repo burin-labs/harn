@@ -2,10 +2,9 @@
 
 use super::*;
 
-#[test]
-fn test_interface_constraint_return_type_mismatch() {
-    let warns = iface_errors(
-        r#"pipeline t(task) {
+#[rstest::rstest]
+#[case::test_interface_constraint_return_type_mismatch(
+    r#"pipeline t(task) {
   interface Sizable {
 fn size(self) -> int
   }
@@ -16,19 +15,10 @@ fn size(self) -> string { return "nope" }
   fn measure<T>(item: T) where T: Sizable { log(item.size()) }
   measure(Box({width: 3}))
 }"#,
-    );
-    assert_eq!(warns.len(), 1, "expected 1 warning, got: {warns:?}");
-    assert!(
-        warns[0].contains("method 'size' returns 'string', expected 'int'"),
-        "unexpected message: {}",
-        warns[0]
-    );
-}
-
-#[test]
-fn test_interface_constraint_param_type_mismatch() {
-    let warns = iface_errors(
-        r#"pipeline t(task) {
+    "method 'size' returns 'string', expected 'int'"
+)]
+#[case::test_interface_constraint_param_type_mismatch(
+    r#"pipeline t(task) {
   interface Processor {
 fn process(self, x: int) -> string
   }
@@ -39,19 +29,10 @@ fn process(self, x: string) -> string { return x }
   fn run_proc<T>(p: T) where T: Processor { log(p.process(42)) }
   run_proc(MyProc({name: "a"}))
 }"#,
-    );
-    assert_eq!(warns.len(), 1, "expected 1 warning, got: {warns:?}");
-    assert!(
-        warns[0].contains("method 'process' parameter 1 has type 'string', expected 'int'"),
-        "unexpected message: {}",
-        warns[0]
-    );
-}
-
-#[test]
-fn test_interface_constraint_missing_method() {
-    let warns = iface_errors(
-        r"pipeline t(task) {
+    "method 'process' parameter 1 has type 'string', expected 'int'"
+)]
+#[case::test_interface_constraint_missing_method(
+    r"pipeline t(task) {
   interface Sizable {
 fn size(self) -> int
   }
@@ -62,19 +43,10 @@ fn area(self) -> int { return self.width }
   fn measure<T>(item: T) where T: Sizable { log(item.size()) }
   measure(Box({width: 3}))
 }",
-    );
-    assert_eq!(warns.len(), 1, "expected 1 warning, got: {warns:?}");
-    assert!(
-        warns[0].contains("missing method 'size'"),
-        "unexpected message: {}",
-        warns[0]
-    );
-}
-
-#[test]
-fn test_interface_constraint_param_count_mismatch() {
-    let warns = iface_errors(
-        r"pipeline t(task) {
+    "missing method 'size'"
+)]
+#[case::test_interface_constraint_param_count_mismatch(
+    r"pipeline t(task) {
   interface Doubler {
 fn double(self, x: int) -> int
   }
@@ -85,10 +57,30 @@ fn double(self) -> int { return self.v * 2 }
   fn run_double<T>(d: T) where T: Doubler { log(d.double(3)) }
   run_double(Bad({v: 5}))
 }",
-    );
+    "method 'double' has 0 parameter(s), expected 1"
+)]
+#[case::test_interface_associated_type_default_mismatch(
+    r#"pipeline t(task) {
+  interface IntCollection {
+type Item = int
+fn get(self, index: int) -> Item
+  }
+  struct Labels {}
+  impl Labels {
+fn get(self, index: int) -> string { return "oops" }
+  }
+  fn first<C>(collection: C) where C: IntCollection {
+log(collection.get(0))
+  }
+  first(Labels {})
+}"#,
+    "associated type 'Item' resolves to 'string', expected 'int'"
+)]
+fn single_interface_diagnostic(#[case] case_input: &str, #[case] case_expected: &str) {
+    let warns = iface_errors(case_input);
     assert_eq!(warns.len(), 1, "expected 1 warning, got: {warns:?}");
     assert!(
-        warns[0].contains("method 'double' has 0 parameter(s), expected 1"),
+        warns[0].contains(case_expected),
         "unexpected message: {}",
         warns[0]
     );
@@ -159,32 +151,6 @@ log(collection.get(0))
 fn diagnostics_iface_errors(#[case] source: &str, #[case] empty: bool) {
     let diagnostics = iface_errors(source);
     assert_eq!(diagnostics.is_empty(), empty, "{diagnostics:?}");
-}
-
-#[test]
-fn test_interface_associated_type_default_mismatch() {
-    let warns = iface_errors(
-        r#"pipeline t(task) {
-  interface IntCollection {
-type Item = int
-fn get(self, index: int) -> Item
-  }
-  struct Labels {}
-  impl Labels {
-fn get(self, index: int) -> string { return "oops" }
-  }
-  fn first<C>(collection: C) where C: IntCollection {
-log(collection.get(0))
-  }
-  first(Labels {})
-}"#,
-    );
-    assert_eq!(warns.len(), 1, "expected 1 warning, got: {warns:?}");
-    assert!(
-        warns[0].contains("associated type 'Item' resolves to 'string', expected 'int'"),
-        "unexpected message: {}",
-        warns[0]
-    );
 }
 
 #[rstest::rstest]
