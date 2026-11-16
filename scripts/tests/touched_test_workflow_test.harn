@@ -14,16 +14,23 @@ type WorkflowStep = {
 
 type WorkflowSteps = list<WorkflowStep>
 
-fn workflow_steps(fs: HarnessFs) -> list<WorkflowStep> {
+type RepeatabilityEnvironment = {FLAKE_CARGO_PROFILE?: string}
+
+type Workflow = {environment: RepeatabilityEnvironment, steps: WorkflowSteps}
+
+fn workflow(fs: HarnessFs) -> Workflow {
   const document = read_yaml(
     fs,
     path_join(fs.source_dir(), "../../.github/workflows/flake-detection.yml"),
   )
-  return schema_expect(document.jobs.get("flake-rerun").steps, schema_of(WorkflowSteps))
+  return {
+    environment: schema_expect(document.env, schema_of(RepeatabilityEnvironment)),
+    steps: schema_expect(document.jobs.get("flake-rerun").steps, schema_of(WorkflowSteps)),
+  }
 }
 
 pipeline test_filter_selection_bootstraps_without_building_the_workspace(harness: Harness) {
-  const steps = workflow_steps(harness.fs)
+  const steps = workflow(harness.fs).steps
   const bootstrap = steps.find({ step -> step.id == "filter_runtime" })
   assert(bootstrap != nil, "install the released filter runtime before Rust cache preparation")
   assert_eq(bootstrap.uses, "./.github/actions/setup-harn")
@@ -41,7 +48,7 @@ pipeline test_filter_selection_bootstraps_without_building_the_workspace(harness
 }
 
 pipeline test_repeatability_uses_its_reader_before_workspace_builds(harness: Harness) {
-  const steps = workflow_steps(harness.fs)
+  const steps = workflow(harness.fs).steps
   let reader: WorkflowStep? = nil
   let prepared_before_build = false
   for step in steps {
@@ -57,6 +64,16 @@ pipeline test_repeatability_uses_its_reader_before_workspace_builds(harness: Har
   const repeat = steps.find({ step -> step.id == "repeatability" })
   assert_eq(repeat?.env?.HARN_BIN, "$" + "{{ steps.inventory_reader.outputs.path }}")
   assert_eq(repeat?.run, "scripts/ci/run_touched_test_repeats.sh")
+}
+
+pipeline test_repeatability_builds_the_same_checked_interpreter_profile(harness: Harness) {
+  const configuration = workflow(harness.fs)
+  assert_eq(configuration.environment.FLAKE_CARGO_PROFILE, "ci-cli")
+  const build = configuration.steps.find({ step -> step.name == "Build test binaries" })
+  assert_eq(
+    build?.run,
+    "cargo test --locked --profile \"$FLAKE_CARGO_PROFILE\" --no-run --workspace",
+  )
 }
 
 fn scope_probe(
@@ -135,7 +152,7 @@ echo 'package(harn-cli)'
 pipeline test_manual_main_measures_the_nightly_window_and_branches_keep_their_diff(
   harness: Harness,
 ) {
-  const steps = workflow_steps(harness.fs)
+  const steps = workflow(harness.fs).steps
   const detect = steps.find({ step -> step.id == "touched" })
   assert_eq(detect.env.EVENT_NAME, "$" + "{{ github.event_name }}")
   assert_eq(detect.env.SOURCE_REF, "$" + "{{ github.ref }}")

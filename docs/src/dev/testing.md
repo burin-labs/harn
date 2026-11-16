@@ -72,6 +72,18 @@ complete-count summary. Missing named cases, unfinished iterations and duplicate
 terminal events fail qualification. A clean cohort qualifies that measured source
 and runner workload; it does not establish stability under every possible load.
 
+The **Touched-test repeatability** workflow builds, discovers and reruns tests
+with the `ci-cli` Cargo profile. That profile optimizes the interpreter while
+keeping assertions and overflow checks enabled. The `flake-detection` nextest
+profile owns the test deadlines and zero-retry policy. The job summary names
+both profiles.
+
+To validate a repeatability repair, dispatch that workflow from `main`. Require
+a nonzero selected-test census and at least ten completed iterations. The job
+targets fifty iterations within its 160-minute budget; a shorter passing run
+reports degraded coverage. Discovery failures, test failures and an unreachable
+ten-iteration floor remain failures.
+
 ## Share repeated test steps
 
 Use named `rstest` cases when tests differ only in inputs and expected results.
