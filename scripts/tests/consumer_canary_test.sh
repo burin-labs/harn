@@ -6,6 +6,8 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 bash "$root/scripts/tests/consumer_observation_policy_test.sh"
 node --test "$root/scripts/tests/consumer_observer_test.mjs" "$root/scripts/tests/consumer_observer_cleanup_test.mjs" "$root/scripts/tests/consumer_observer_terminal_test.mjs" "$root/scripts/tests/consumer_observer_dispatch_test.mjs" "$root/scripts/tests/consumer_observer_window_test.mjs" "$root/scripts/tests/consumer_observer_retirement_test.mjs" "$root/scripts/tests/consumer_observation_budget_test.mjs" "$root/scripts/tests/consumer_observer_budget_entry_test.mjs" "$root/scripts/tests/release_producer_readiness_test.mjs"
 node --test "$root/scripts/tests/consumer_pin_test.mjs"
+node --test "$root/scripts/tests/consumer_composition_test.mjs" "$root/scripts/tests/consumer_composition_auth_test.mjs" "$root/scripts/tests/consumer_composition_writer_test.mjs"
+node --test "$root/scripts/tests/consumer_composition_dispatch_test.mjs"
 node --test "$root/scripts/tests/consumer_repair_reuse_workflow_test.mjs"
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/harn-consumer-canary.XXXXXX")
 export RUNNER_TEMP="$scratch"
@@ -1033,7 +1035,7 @@ const cleanupToken = steps.find(step => step.id === 'cleanup-token');
 assert.equal(cleanupToken.if, "always() && steps.observer.outputs.context != ''");
 const [mint, observe] = action.runs.steps;
 assert.equal(mint.uses, 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1');
-assert.deepEqual(Object.fromEntries(Object.entries(mint.with).filter(([key]) => key.startsWith('permission-'))), { 'permission-actions': 'read', 'permission-pull-requests': 'read' });
+assert.deepEqual(Object.fromEntries(Object.entries(mint.with).filter(([key]) => key.startsWith('permission-'))), { 'permission-actions': 'read', 'permission-pull-requests': 'read', 'permission-contents': 'read' });
 assert.equal(mint.with.repositories.trim(), '${{ inputs.repository }}');
 assert.equal(observe.env.GH_TOKEN, '${{ steps.token.outputs.token }}');
 assert.equal(observe.env.GITHUB_TOKEN, '${{ github.token }}');

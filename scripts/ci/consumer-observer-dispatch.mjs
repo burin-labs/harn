@@ -1,4 +1,5 @@
-import {admitObserver,admitObserverDispatch,dispatchObserverConsumer,githubArchiveProducer,githubConsumerSource,githubRecord,observerContext,parentHeadSha, observerRefusal } from '../lib/consumer-observer.mjs';
+import {admitObserver,admitObserverDispatch,dispatchObserverConsumer,githubArchiveProducer,githubConsumerSelection,githubRecord,observerContext,parentHeadSha, observerRefusal } from '../lib/consumer-observer.mjs';
+import {consumerSourceEnvironment} from '../lib/consumer-source.mjs';
 
 async function main() {
   const env=process.env;
@@ -24,8 +25,10 @@ async function main() {
   }
   const admissionOnly=process.argv.length===3 && process.argv[2]==='--admit';
   if(process.argv.length!==2 && !admissionOnly) throw new Error('CONSUMER_OBSERVER reason=dispatch_arguments_invalid');
-  const source=admissionOnly ? {branch:env.CANARY_REF}
-    : await githubConsumerSource(env.GH_TOKEN,env.CANARY_REPOSITORY,env.CANARY_PAIRED_PULL||null);
+  const declaration=consumerSourceEnvironment(env);
+  const source=admissionOnly && declaration.kind==='ordinary' ? {branch:env.CANARY_REF}
+    : await githubConsumerSelection(env.GH_TOKEN,env.CANARY_REPOSITORY,declaration);
+  if(admissionOnly && source.branch!==env.CANARY_REF) throw new Error('CONSUMER_OBSERVER reason=child_source_no_longer_eligible');
   const target={
     repository:env.CANARY_REPOSITORY, workflow:env.CANARY_WORKFLOW,
     ref:source.branch, target:env.CANARY_TARGET,

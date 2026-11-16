@@ -82,6 +82,8 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/consumer_canary_pol
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/green_checkpoint.sh"
 # shellcheck source=scripts/lib/sha256.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/sha256.sh"
+# shellcheck source=scripts/lib/consumer_pairing_source.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/consumer_pairing_source.sh"
 
 # The consumer's repository name, which no output line may contain.
 CANARY_SECRET_NAME=
@@ -307,16 +309,28 @@ canary_bind() {
   fi
   head_digest=$(sha256_text_hex "$head") || head_digest=''
   [[ "$head_digest" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::CONSUMER_CANARY binding=unrecorded reason=digest_unavailable"; return 1; }
+  local composition=null schema=harn.release.consumer_rehearsal_binding.v1 selection
+  if [[ -n "${CANARY_SOURCE_DECLARATION:-}" ]]; then
+    selection=$(node "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-source.mjs" --selected) || return 1
+    if jq -e '.declaration.kind == "composition"' <<< "$selection" >/dev/null; then
+      [[ "$(jq -er .source.headSha <<< "$selection")" == "$head" \
+        && "$(jq -er .declaration.pull <<< "$selection")" == "$paired" && "$paired" == "$declared" ]] \
+        || { echo "::error::CONSUMER_CANARY binding=unrecorded reason=composition_source_changed"; return 1; }
+      composition=$(jq -ce .source.composition <<< "$selection") || return 1
+      schema=harn.release.consumer_rehearsal_binding.v2
+    fi
+  fi
   jq -n --arg source "$source" --arg producer "$producer" --argjson attempt "$attempt" \
     --arg manifest "$manifest" --arg run "$run_id" --arg head "$head_digest" \
-    --arg paired "$paired" --arg declared "$declared" \
-    '{schema:"harn.release.consumer_rehearsal_binding.v1",source_sha:$source,
+    --arg paired "$paired" --arg declared "$declared" --arg schema "$schema" --argjson composition "$composition" \
+    '{schema:$schema,source_sha:$source,
       producer_run:$producer,producer_attempt:$attempt,manifest_digest:$manifest,
       consumer_run:$run,consumer_head_sha256:$head,
       consumer_pull:(if $paired == "" then null else $paired end),
-      declared_pull:(if $declared == "" then null else $declared end),verdict:"pass"}' > "$CANARY_BINDING_FILE" || return 1
+      declared_pull:(if $declared == "" then null else $declared end),verdict:"pass"}
+      + (if $composition == null then {} else {composition:$composition} end)' > "$CANARY_BINDING_FILE" || return 1
   echo "binding=$CANARY_BINDING_FILE" >> "$GITHUB_OUTPUT" || return 1
-  echo "CONSUMER_CANARY binding=recorded source=$source producer=$producer attempt=$attempt consumer=${paired:+pull-$paired}${paired:-default}"
+  echo "CONSUMER_CANARY binding=recorded source=$source producer=$producer attempt=$attempt consumer=${paired:+pull-}${paired:-default}"
 }
 
 # The shared source selector owns pairing grammar. This legacy dispatcher
@@ -324,7 +338,8 @@ canary_bind() {
 canary_read_pairing() {
   local text=$1 reader
   reader="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-pairing.mjs"
-  CANARY_PAIRED=$(printf '%s' "$text" | env -i PATH="$PATH" node "$reader" "${CONSUMER_PULL_REQUEST:-}") || exit 1
+  CANARY_SOURCE_DECLARATION=$(printf '%s' "$text" | env -i PATH="$PATH" node "$reader" --declaration "${CONSUMER_PULL_REQUEST:-}") || exit 1
+  CANARY_PAIRED=$(jq -er '.pull // ""' <<< "$CANARY_SOURCE_DECLARATION") || exit 1
 }
 
 # The text whose trailers declare the pairing. A pull request description wins.
@@ -334,22 +349,31 @@ canary_read_pairing() {
 # reads its own commit message. A range it cannot measure refuses rather than
 # reading less.
 canary_pairing_text() {
-  local revision=$1 version=$2 scope=${3:-commit} source=${CANARY_PAIRING_SOURCE:-} base count
+  local revision=$1 version=$2 scope=${3:-commit} source=${CANARY_PAIRING_SOURCE:-}
   case "$scope" in commit|release) ;; *) canary_fail pairing_scope_invalid ;; esac
   CANARY_PAIRING_TEXT=${PAIRING_TEXT:-}
   [[ -z "$CANARY_PAIRING_TEXT" && -n "$source" ]] || return 0
   if [[ "$scope" == release ]] && release_version_is_canonical "$version" && ! release_version_is_prerelease "$version"; then
-    base=$(release_previous_stable_tag "$version" "$source") \
-      || canary_fail pairing_range_unmeasured "version=$version read=previous_stable_tag"
-    count=$(git -C "$source" rev-list --count "$base..$revision" 2> /dev/null) \
-      || canary_fail pairing_range_unmeasured "base=$base"
-    CANARY_PAIRING_TEXT=$(git -C "$source" log --format='%B' "$base..$revision") \
-      || canary_fail pairing_range_unmeasured "base=$base"
-    canary_say "CONSUMER_CANARY pairing range=$base..$revision commits=$count"
+    consumer_release_pairing_source "$source" "$revision" "$version" \
+      || canary_fail pairing_range_unmeasured "version=$version"
+    CANARY_PAIRING_TEXT=$CONSUMER_PAIRING_TEXT
+    canary_say "CONSUMER_CANARY pairing range=$CONSUMER_PAIRING_BASE..$revision commits=$CONSUMER_PAIRING_COUNT"
   else
     CANARY_PAIRING_TEXT=$(git -C "$source" log -1 --format='%B' "$revision" 2> /dev/null) \
       || canary_fail pairing_source_unreadable
   fi
+}
+
+canary_validate_composition() {
+  [[ -n "${CANARY_SOURCE_DECLARATION:-}" ]] || return 0
+  local selection tested
+  selection=$(node "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-source.mjs" --selected) \
+    || canary_fail composition_source_unqualified
+  jq -e '.declaration.kind == "composition"' <<< "$selection" >/dev/null || return 0
+  canary_api tested consumer_source_unreadable secret:CONSUMER_CANARY_REPOSITORY \
+    "repos/$CANARY_REPOSITORY/actions/runs/$CANARY_RUN_ID" --jq .head_sha
+  [[ "$tested" == "$(jq -er .source.headSha <<< "$selection")" ]] \
+    || canary_fail composition_source_changed
 }
 
 canary_dispatch() {
@@ -392,12 +416,24 @@ canary_dispatch() {
     || canary_fail workspace_version_unpublished "version=$workspace_version"
   target_version="v$published_version"
 
-  local paired ref label=default
+  local paired ref label=default selection
   canary_pairing_text "$revision" "$workspace_version" "$pairing_scope"
   canary_read_pairing "$CANARY_PAIRING_TEXT"
   paired=$CANARY_PAIRED
   CANARY_DECLARED_PULL=$paired
-  if [[ -n "$paired" ]]; then
+  if jq -e '.kind == "composition"' <<< "$CANARY_SOURCE_DECLARATION" >/dev/null \
+    && { [[ -n "${REHEARSAL_PROMOTION_RUN_ID:-}" ]] \
+      || [[ -n "$producer_run" && ( "$producer_run" != "${GITHUB_RUN_ID:-}" || "$producer_attempt" != "${GITHUB_RUN_ATTEMPT:-}" ) ]]; }; then
+    canary_fail composition_recovery_unsupported
+  fi
+  if jq -e '.kind == "composition"' <<< "$CANARY_SOURCE_DECLARATION" >/dev/null; then
+    selection=$(CANARY_PAIRED_PULL="$paired" CANARY_SOURCE_DECLARATION="$CANARY_SOURCE_DECLARATION" \
+      node "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-source.mjs" --selected) \
+      || canary_fail composition_source_unqualified
+    ref=$(jq -er .source.branch <<< "$selection") || canary_fail composition_source_unqualified
+    label=pull-$paired
+    canary_say "CONSUMER_CANARY composition pull=$paired adaptations=$(jq -r '.declaration.requiredPulls | length' <<< "$selection") decision=rehearse_composition"
+  elif [[ -n "$paired" ]]; then
     local pull state head_repo merged base default_branch
     label=pull-$paired
     canary_api --detail "pull=$paired" pull paired_pull_unreadable \
@@ -421,6 +457,10 @@ canary_dispatch() {
     [[ -n "$ref" ]] || canary_fail consumer_unreadable "read=consumer_default_branch"
   fi
   CANARY_PAIRED_PULL=$paired
+  if ! jq -e '.kind == "composition"' <<< "$CANARY_SOURCE_DECLARATION" >/dev/null; then
+    CANARY_SOURCE_DECLARATION=$(jq -cn --arg pull "$paired" '{kind:"ordinary",pull:(if $pull == "" then null else $pull end)}')
+  fi
+  export CANARY_PAIRED_PULL CANARY_SOURCE_DECLARATION
 
   if [[ -n "${REHEARSAL_PROMOTION_RUN_ID:-}" ]]; then
     [[ -z "$paired" ]] || canary_fail recovered_pairing_unsupported
@@ -437,7 +477,8 @@ canary_dispatch() {
   fi
 
   local observer started dispatched run_id
-  observer=$(CANARY_REF="$ref" CANARY_TARGET="$target_version" \
+  observer=$(CANARY_REF="$ref" CANARY_TARGET="$target_version" CANARY_PAIRED_PULL="$paired" \
+    CANARY_SOURCE_DECLARATION="$CANARY_SOURCE_DECLARATION" \
     node "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer-observer-dispatch.mjs" --admit) \
     || canary_fail dispatch_custody_unproven
   started=$(jq -er .started_at <<< "$observer") || canary_fail dispatch_custody_unproven
@@ -528,6 +569,7 @@ canary_observe() {
   fi
   CANARY_TIMING_RECEIPT=
   canary_observation_checkpoint pending none observe_same_run
+  canary_validate_composition
 
   local status conclusion now record timing reason read_error retry_count=0 retry_wait remaining advice
   local read_status read_retryable read_final read_token read_repository read_attempts read_remaining read_detail
@@ -669,6 +711,7 @@ canary_observe() {
   done
 
   local verdict=fail
+  canary_validate_composition
   if [[ -n "$CANARY_TIMING_RECEIPT" ]]; then
     canary_say "CONSUMER_CANARY timing=$CANARY_TIMING_RECEIPT"
   fi
@@ -742,6 +785,9 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
       [[ -n "${GITHUB_OUTPUT:-}" ]] || canary_fail observation_output_unset
       printf 'run_id=%s\nstarted_at=%s\npaired_pull=%s\ndeclared_pull=%s\n' "$CANARY_RUN_ID" "$CANARY_STARTED_AT" \
         "${CANARY_PAIRED_PULL:-}" "${CANARY_DECLARED_PULL:-}" >> "$GITHUB_OUTPUT"
+      if jq -e '.kind == "composition"' <<< "$CANARY_SOURCE_DECLARATION" >/dev/null; then
+        printf 'source_declaration=%s\n' "$CANARY_SOURCE_DECLARATION" >> "$GITHUB_OUTPUT"
+      fi
       ;;
     --observe) canary_observe ;;
     --record) canary_record ;;

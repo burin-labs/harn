@@ -1,12 +1,16 @@
 import fs from 'node:fs';
-import {consumerPairing,readConsumerParentProduct, observerRefusal } from '../lib/consumer-observer.mjs';
+import {githubConsumerSelection,readConsumerParentProduct, observerRefusal } from '../lib/consumer-observer.mjs';
+import {consumerSourceDeclaration} from '../lib/consumer-source.mjs';
 
 async function main(){
   const env=process.env;
-  const paired=consumerPairing(env.PAIRING_TEXT, env.CONSUMER_PULL_REQUEST);
+  const declaration=consumerSourceDeclaration(env.PAIRING_TEXT, env.CONSUMER_PULL_REQUEST);
+  const paired=declaration.pull;
   if(!/^[0-9a-f]{40}$/.test(env.SOURCE_REVISION??'')) throw new Error('CONSUMER_OBSERVER reason=source_identity_invalid');
   if(!env.REHEARSAL_PROMOTION_RUN_ID){
-    fs.appendFileSync(env.GITHUB_OUTPUT,`reused=false\npaired_pull=${paired??''}\n`);
+    if(declaration.kind==='composition') await githubConsumerSelection(env.GH_TOKEN,env.CANARY_REPOSITORY,declaration);
+    const composition=declaration.kind==='composition'?`source_declaration=${JSON.stringify(declaration)}\n`:'';
+    fs.appendFileSync(env.GITHUB_OUTPUT,`reused=false\npaired_pull=${paired??''}\n${composition}`);
     console.log('CONSUMER_OBSERVER selection=fresh');
     return;
   }

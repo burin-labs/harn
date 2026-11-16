@@ -234,7 +234,7 @@ jobs:
                 exit 1
               fi
               release_require_consumer_verdict "$GITHUB_REPOSITORY" "$candidate_run" "$HEAD_SHA"
-              release_require_rehearsal_binding "$GITHUB_REPOSITORY" "$candidate_run" "$HEAD_SHA"
+              release_require_rehearsal_binding "$GITHUB_REPOSITORY" "$candidate_run" "$HEAD_SHA" "$source_directory"
             fi
           fi
           # Capture the exact settled producer before launching a fresh
@@ -305,6 +305,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.source_sha }}
+          path: release-source
+          fetch-depth: 0
           persist-credentials: false
       - name: Require full-suite CI at the release source
         timeout-minutes: 90
@@ -419,13 +425,14 @@ jobs:
           set -euo pipefail
           # shellcheck source=scripts/lib/release_consumer_verdict.sh
           source scripts/lib/release_consumer_verdict.sh
-          identity="$(release_require_rehearsal_binding "$GITHUB_REPOSITORY" "$CANDIDATE_RUN_ID" "$SOURCE_SHA")"
+          identity="$(release_require_rehearsal_binding "$GITHUB_REPOSITORY" "$CANDIDATE_RUN_ID" "$SOURCE_SHA" "$GITHUB_WORKSPACE/release-source")"
           release_write_producer_identity "$identity"
       - name: Require the owning rehearsal result
         if: needs.plan.outputs.standalone_harn != 'true'
         id: authorize
         env:
           SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+          SOURCE_CHECKOUT: ${{ github.workspace }}/release-source
           REQUIRES_REHEARSAL: ${{ needs.plan.outputs.requires_rehearsal }}
           REHEARSAL_RESULT: ${{ needs.consumer-rehearsal.result }}
           REHEARSAL_VERDICT: ${{ needs.consumer-rehearsal.outputs.verdict }}

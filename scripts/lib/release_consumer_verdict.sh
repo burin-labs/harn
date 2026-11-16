@@ -124,12 +124,14 @@ release_write_producer_identity() {
 release_require_rehearsal_binding() (
   set -euo pipefail
   repository="${1:?repository required}" run_id="${2:?candidate run required}" sha="${3:?candidate commit required}"
+  source_checkout="${4:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
   consumer=${CANARY_REPOSITORY:-} consumer_token=${CONSUMER_READ_TOKEN:-}
   reader="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/release-candidate-state.mjs"
-  binding="$(node "$reader" rehearsal-binding "$repository" "$run_id" "$sha")" ||
+  binding="$(node "$reader" rehearsal-binding "$repository" "$run_id" "$sha" --source-checkout "$source_checkout")" ||
     release_binding_refusal rehearsal_binding_unmeasured "run=$run_id" || exit 1
   jq -e '
-    .schema == "harn.release.consumer_rehearsal_binding.v1" and .verdict == "pass" and
+    (.schema == "harn.release.consumer_rehearsal_binding.v1" or
+      .schema == "harn.release.consumer_rehearsal_binding.v2") and .verdict == "pass" and
     (.source_sha | type == "string" and test("^[0-9a-f]{40}$")) and
     (.producer_run | type == "string" and test("^[1-9][0-9]*$")) and
     (.producer_attempt | type == "number" and . >= 1 and . == floor) and
@@ -178,7 +180,7 @@ release_require_rehearsal_binding() (
       *) release_binding_refusal consumer_default_diverged "status=${status:-unreported}" || exit 1 ;;
     esac
   fi
-  binding_after="$(node "$reader" rehearsal-binding "$repository" "$run_id" "$sha")" &&
+  binding_after="$(node "$reader" rehearsal-binding "$repository" "$run_id" "$sha" --source-checkout "$source_checkout")" &&
     [[ "$binding_after" == "$binding" ]] ||
     release_binding_refusal rehearsal_binding_changed "run=$run_id" || exit 1
   jq -ce '.evidence | {producer_attempt,manifest_id:.manifest.id,manifest_digest:.manifest.digest}' <<< "$binding"

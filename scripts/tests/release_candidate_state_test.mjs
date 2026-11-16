@@ -6,13 +6,75 @@ import path from 'node:path';
 import {execFileSync,spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
-import {activePromotions,successfulCandidate,ghRead} from '../lib/release-candidate-state.mjs';
+import {activePromotions,successfulCandidate,ghRead,rehearsalBinding,publicationRehearsalBinding} from '../lib/release-candidate-state.mjs';
 import {archiveJson} from './fixtures/artifact_archive.mjs';
+import {compositionFixture,repository as compositionRepository,head as compositionHead,
+  declaration as compositionDeclaration} from './fixtures/consumer_composition.mjs';
 import {admitChild,archiveProducerBinding,qualifyArchiveProducer,observerRunName,
   observerDeclarationName,observerDeclarationStep,observerPublicationWitness,
-  observerDispatchActor} from '../lib/consumer-observer.mjs';
+  observerDispatchActor,githubConsumerSelection} from '../lib/consumer-observer.mjs';
 
 const source='a'.repeat(40),policy='b'.repeat(40),head='c'.repeat(40);
+
+test('release pairing reads the complete exact source range without ambient overrides', () => {
+  const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-pairing-source-'));
+  try {
+    const git=(...args)=>execFileSync('git',['-C',scratch,...args],{encoding:'utf8',
+      env:{...process.env,GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_SYSTEM:'/dev/null'}}).trim();
+    git('init','-q');
+    git('config','user.name','Fixture');
+    git('config','user.email','fixture@example.invalid');
+    const commit=message=>{git('-c','commit.gpgsign=false','commit','-q','--allow-empty','-m',message);return git('rev-parse','HEAD');};
+    fs.writeFileSync(path.join(scratch,'Cargo.toml'),'[workspace.package]\nversion = "0.10.1"\n');
+    git('add','Cargo.toml');
+    commit('Prior release\n\nPairs-with: consumer#1');
+    git('tag','v0.10.0');
+    commit('First adaptation\n\nPairs-with: consumer#7');
+    git('tag','v0.10.1-rc.1');
+    const selected=commit('Second adaptation\n\nPairs-with: consumer#8\nConsumer-composition: consumer#9');
+    commit('Later unrelated work\n\nPairs-with: consumer#10');
+    const script=path.join(scratch,'read.sh');
+    fs.writeFileSync(script,'set -euo pipefail\nsource "$1"\nconsumer_release_pairing_source "$2" "$3" "$4"\nprintf "%s\\0%s\\0%s" "$CONSUMER_PAIRING_BASE" "$CONSUMER_PAIRING_COUNT" "$CONSUMER_PAIRING_TEXT"\n');
+    const helper=fileURLToPath(new URL('../lib/consumer_pairing_source.sh',import.meta.url));
+    const read=(revision=selected,version='0.10.1',directory=scratch)=>spawnSync('bash',[script,helper,directory,revision,version],
+      {encoding:'utf8',env:{...process.env,PAIRING_TEXT:'Pairs-with: consumer#99',CANARY_PAIRING_SOURCE:'/missing'}});
+    const result=read();
+    assert.equal(result.status,0,result.stderr);
+    const [base,count,text]=result.stdout.split('\0');
+    assert.equal(base,'v0.10.0');
+    assert.equal(count,'2');
+    assert.match(text,/Pairs-with: consumer#7/);
+    assert.match(text,/Pairs-with: consumer#8/);
+    assert.match(text,/Consumer-composition: consumer#9/);
+    assert.doesNotMatch(text,/consumer#(?:1|10|99)(?:\D|$)/);
+    assert.equal(result.stderr,'');
+    const cli=spawnSync('bash',[helper,'--release-source',scratch,selected],{encoding:'utf8',
+      env:{...process.env,PAIRING_TEXT:'Pairs-with: consumer#99',WORKSPACE_VERSION:'invalid'}});
+    assert.equal(cli.status,0,cli.stderr);
+    assert.equal(cli.stdout,text);
+    assert.equal(cli.stderr,'');
+    for(const [revision,version,directory] of [['bad','0.10.1',scratch],['f'.repeat(40),'0.10.1',scratch],
+      [selected,'0.10.1-rc.1',scratch],[selected,'0.10.1','/missing']]) {
+      const refused=read(revision,version,directory);
+      assert.notEqual(refused.status,0);
+      assert.equal(refused.stdout,'');
+      assert.match(refused.stderr,/reason=pairing_range_unmeasured/);
+    }
+    fs.writeFileSync(path.join(scratch,'Cargo.toml'),'[workspace.package]\nversion = "invalid"\n');
+    git('add','Cargo.toml');
+    const invalidVersion=commit('Invalid workspace version');
+    const refusedCli=spawnSync('bash',[helper,'--release-source',scratch,invalidVersion],{encoding:'utf8'});
+    assert.notEqual(refusedCli.status,0);
+    assert.equal(refusedCli.stdout,'');
+    assert.match(refusedCli.stderr,/reason=pairing_range_unmeasured/);
+    git('tag','-d','v0.10.0');
+    const tagless=read();
+    assert.notEqual(tagless.status,0);
+    assert.equal(tagless.stdout,'');
+    assert.match(tagless.stderr,/reason=pairing_range_unmeasured/);
+  } finally {fs.rmSync(scratch,{recursive:true,force:true});}
+});
+
 const repository='burin-labs/harn';
 const consumer={repository:'acme/widget-host',workflow:'.github/workflows/rehearsal.yml'};
 const context={schema:'harn.consumer_observer.v2',parent_repository:repository,parent_run_id:'900',
@@ -195,11 +257,87 @@ test('gh read transport preserves ZIP bytes and refuses mutation',async()=>{
   const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-gh-bytes-'));
   const previous=process.env.PATH;
   try{
-    fs.writeFileSync(path.join(scratch,'gh'),'#!/usr/bin/env node\nprocess.stdout.write(Buffer.from([0,255,128,65]));\n',{mode:0o700});
+    fs.writeFileSync(path.join(scratch,'gh'),'#!/usr/bin/env node\nif(!process.argv.includes("--include"))process.exit(2);\nprocess.stdout.write("HTTP/2.0 200 OK\\r\\nContent-Type: application/zip\\r\\n\\r\\n");\nprocess.stdout.write(Buffer.from([0,255,128,65]));\n',{mode:0o700});
     process.env.PATH=`${scratch}:${previous}`;
     const response=await ghRead('https://api.github.com/repos/acme/test/actions/artifacts/1/zip');
     assert.deepEqual(Buffer.from(await response.arrayBuffer()),Buffer.from([0,255,128,65]));
     await assert.rejects(ghRead('https://api.github.com/repos/acme/test',{method:'POST'}),/read_endpoint_invalid/);
+  }finally{process.env.PATH=previous;fs.rmSync(scratch,{recursive:true,force:true});}
+});
+test('publication gh bridge preserves a complete 101-commit composition and refuses partial pages',async()=>{
+  const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-gh-composition-pages-'));
+  const previous=process.env.PATH;
+  try{
+    const fixture=compositionFixture();
+    const base='a'.repeat(40),comparison=`/compare/${base}...${compositionHead}?per_page=100&page=`;
+    const original=fixture.records.get(`${comparison}1`);
+    const history=Array.from({length:94},(_,index)=>({sha:index.toString(16).padStart(40,'0'),parents:[{sha:base}]}));
+    const all=[...history,...original.commits];
+    assert.equal(all.length,101);
+    fixture.records.set(`${comparison}1`,{...original,total_commits:101,commits:all.slice(0,100)});
+    fixture.records.set(`${comparison}2`,{...original,total_commits:101,commits:all.slice(100)});
+    const component=`/compare/${base}...${'b'.repeat(40)}?per_page=100&page=1`;
+    fixture.records.set(component,{...fixture.records.get(component),total_commits:95,
+      commits:[...history,...fixture.records.get(component).commits]});
+    const records=path.join(scratch,'records.json'),calls=path.join(scratch,'calls.jsonl');
+    const mode=path.join(scratch,'mode');
+    fs.writeFileSync(records,JSON.stringify([...fixture.records]));
+    fs.writeFileSync(path.join(scratch,'gh'),`#!/usr/bin/env node
+const fs=require('node:fs');
+const args=process.argv.slice(2),mode=fs.readFileSync(${JSON.stringify(mode)},'utf8');
+if(args[0]!=='api'||!args.includes('--include')||process.env.GH_TOKEN!=='consumer-read'||process.env.GITHUB_TOKEN)process.exit(2);
+const suffix=args[1].slice('repos/${compositionRepository}'.length);
+fs.appendFileSync(${JSON.stringify(calls)},JSON.stringify({suffix,token:process.env.GH_TOKEN})+'\\n');
+const records=new Map(JSON.parse(fs.readFileSync(${JSON.stringify(records)},'utf8')));
+if(!records.has(suffix))process.exit(3);
+if(mode==='refused'&&suffix===${JSON.stringify(`${comparison}2`)}){
+  process.stdout.write('HTTP/2.0 403 Forbidden\\r\\nContent-Type: application/json\\r\\n\\r\\n{}');process.exit(1);
+}
+process.stdout.write('HTTP/2.0 200 OK\\r\\nContent-Type: application/json\\r\\n');
+if(mode!=='missing-link'&&suffix===${JSON.stringify(`${comparison}1`)})process.stdout.write('Link: <https://api.github.com/next>; rel="next"\\r\\n');
+process.stdout.write('\\r\\n');
+const value=records.get(suffix);
+if(mode==='partial'&&suffix===${JSON.stringify(`${comparison}2`)})value.commits=[];
+process.stdout.write(JSON.stringify(value));
+`,{mode:0o700});
+    process.env.PATH=`${scratch}:${previous}`;
+    for(const scenario of ['good','missing-link','partial','refused']){
+      fs.writeFileSync(mode,scenario);fs.writeFileSync(calls,'');
+      const result=githubConsumerSelection('consumer-read',compositionRepository,compositionDeclaration(),ghRead);
+      if(scenario==='good')assert.equal((await result).headSha,compositionHead);
+      else await assert.rejects(result,/consumer_composition_graph_unmeasured|consumer_source_read_refused/);
+      const observed=fs.readFileSync(calls,'utf8').trim().split('\n').map(line=>JSON.parse(line));
+      assert.ok(observed.some(call=>call.suffix===`${comparison}1`));
+      assert.equal(observed.some(call=>call.suffix===`${comparison}2`),scenario!=='missing-link');
+      assert.ok(observed.every(call=>call.token==='consumer-read'));
+    }
+  }finally{process.env.PATH=previous;fs.rmSync(scratch,{recursive:true,force:true});}
+});
+test('gh bridge measures HTTP status and headers and refuses malformed or failed envelopes',async()=>{
+  const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-gh-status-'));
+  const previous=process.env.PATH;
+  try{
+    const responseFile=path.join(scratch,'response'),codeFile=path.join(scratch,'exit');
+    fs.writeFileSync(path.join(scratch,'gh'),`#!/usr/bin/env node
+const fs=require('node:fs');
+process.stdout.write(fs.readFileSync(${JSON.stringify(responseFile)}));
+process.exit(Number(fs.readFileSync(${JSON.stringify(codeFile)},'utf8')));
+`,{mode:0o700});
+    process.env.PATH=`${scratch}:${previous}`;
+    const read=(bytes,code=0)=>{
+      fs.writeFileSync(responseFile,bytes);fs.writeFileSync(codeFile,String(code));
+      return ghRead('https://api.github.com/repos/fixture/consumer');
+    };
+    const refused=await read('HTTP/2.0 404 Not Found\r\nContent-Type: application/json\r\nX-RateLimit-Remaining: 19\r\n\r\n{"message":"Not Found"}',1);
+    assert.equal(refused.status,404);assert.equal(refused.ok,false);
+    assert.equal(refused.headers.get('x-ratelimit-remaining'),'19');
+    assert.deepEqual(await refused.json(),{message:'Not Found'});
+    assert.equal((await read('HTTP/2.0 204 No Content\n\n')).status,204);
+    for(const [bytes,code] of [['{}',0],['HTTP/2.0 nope\r\n\r\n{}',0],
+      ['HTTP/2.0 200 OK\r\nNot a header\r\n\r\n{}',0],['HTTP/2.0 200 OK\r\n\r\n{}',1],
+      ['HTTP/2.0 204 No Content\r\n\r\n{}',0]]){
+      await assert.rejects(read(bytes,code),/github_read_unmeasured/);
+    }
   }finally{process.env.PATH=previous;fs.rmSync(scratch,{recursive:true,force:true});}
 });
 test('unbound run and artifact CLI selectors cannot be used for release decisions',()=>{
@@ -232,6 +370,7 @@ test('actual source reuse measures run and artifact page two and refuses either 
     fs.writeFileSync(path.join(scratch,'gh'),`#!/usr/bin/env node
 import fs from 'node:fs';
 const endpoint=new URL('https://api.github.com/'+process.argv[3]);
+if(process.argv.includes('--include'))process.stdout.write('HTTP/2.0 200 OK\\r\\nContent-Type: application/json\\r\\n\\r\\n');
 const data=JSON.parse(fs.readFileSync(process.env.FIXTURE,'utf8'));
 fs.appendFileSync(process.env.CALLS,endpoint.pathname+endpoint.search+'\\n');
 if(endpoint.pathname.includes('/workflows/')){
@@ -286,6 +425,7 @@ test('source reuse binds a complete artifact census to one settled producer atte
     fs.writeFileSync(path.join(scratch,'gh'),`#!/usr/bin/env node
 import fs from 'node:fs';
 const endpoint=new URL('https://api.github.com/'+process.argv[3]);
+if(process.argv.includes('--include'))process.stdout.write('HTTP/2.0 200 OK\\r\\nContent-Type: application/json\\r\\n\\r\\n');
 const previous=fs.existsSync(process.env.CALLS)?fs.readFileSync(process.env.CALLS,'utf8'):'';
 fs.appendFileSync(process.env.CALLS,endpoint.pathname+endpoint.search+'\\n');
 const source='${source}';
@@ -394,19 +534,49 @@ test('promotion binds rehearsal and manifest to the same settled attempt',()=>{
   const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-rehearsal-attempt-'));
   try{
     const calls=path.join(scratch,'calls');
+    fs.writeFileSync(path.join(scratch,'git'),`#!/usr/bin/env node
+import fs from 'node:fs';
+const args=process.argv.slice(2);
+if(args[0]==='-C')args.splice(0,2);
+const source='${source}';
+if(process.env.GIT_CALLS)fs.appendFileSync(process.env.GIT_CALLS,'git:'+args.join(' ')+'\\n');
+if(args[0]==='fetch'&&args.slice(1).join(' ')==='--no-tags origin '+source)process.exit(0);
+else if(args[0]==='show'&&args[1]===source+':Cargo.toml')console.log('[workspace.package]\\nversion = "0.10.200"');
+else if(args[0]==='rev-parse'&&args[2]===source+'^{commit}')console.log(source);
+else if(args[0]==='tag'&&args[1]==='--list')console.log('v0.10.199');
+else if(args[0]==='rev-list'&&args[1]==='--count')console.log('1');
+else if(args[0]==='log'&&args[1]==='--format=%B')console.log(process.env.SCENARIO.startsWith('composition_')?
+  'Pairs-with: consumer#7\\nPairs-with: consumer#8\\nConsumer-composition: consumer#9':'Ordinary release');
+else process.exit(1);
+`,{mode:0o700});
     fs.writeFileSync(path.join(scratch,'gh'),`#!/usr/bin/env node
 import fs from 'node:fs';
 const endpoint=new URL('https://api.github.com/'+process.argv[3]);
+if(process.argv.includes('--include'))process.stdout.write('HTTP/2.0 200 OK\\r\\nContent-Type: application/json\\r\\n\\r\\n');
 const previous=fs.existsSync(process.env.CALLS)?fs.readFileSync(process.env.CALLS,'utf8'):'';
 fs.appendFileSync(process.env.CALLS,endpoint.pathname+endpoint.search+'\\n');
 const source='${source}',head='${head}';
 const run={id:42,run_attempt:1,head_sha:source,status:'completed',conclusion:'success',event:'push',
   path:'.github/workflows/build-release-binaries.yml',repository:{full_name:'burin-labs/harn'},
   head_repository:{full_name:'burin-labs/harn'}};
-if(endpoint.pathname.includes('/acme/widget-host')){
-  if(endpoint.pathname.endsWith('/actions/runs/77'))console.log(head);
-  else if(endpoint.pathname.includes('/compare/'))console.log('identical 0');
-  else console.log('main');
+if(endpoint.pathname.startsWith('/repos/'+process.env.CONSUMER_NAME)){
+  const suffix=endpoint.pathname.replace('/repos/'+process.env.CONSUMER_NAME,'')+endpoint.search;
+  const records=new Map(JSON.parse(fs.readFileSync(process.env.CONSUMER_RECORDS,'utf8')));
+  if(process.argv.includes('--jq')){
+    if(endpoint.pathname.endsWith('/actions/runs/77'))console.log(process.env.SCENARIO==='composition_child_moved'?'4'.repeat(40):process.env.CONSUMER_HEAD);
+    else if(endpoint.pathname.includes('/pulls/')){
+      const pull=records.get(suffix);
+      console.log(pull.state+' '+pull.merged+' '+pull.head.repo.full_name+' '+pull.head.sha);
+    }else if(endpoint.pathname.includes('/compare/'))console.log('identical 0');
+    else console.log('main');
+  }else{
+    if(process.env.GH_TOKEN!=='fixture-consumer')process.exit(2);
+    const record=records.get(suffix);
+    if(!record){console.log('null');process.exit(0);}
+    const seen=previous.split(endpoint.pathname+endpoint.search+'\\n').length-1;
+    if(process.env.SCENARIO==='composition_late_component'&&suffix==='/pulls/7'&&seen>=2)record.head.sha='4'.repeat(40);
+    console.log(JSON.stringify(record));
+  }
 }else if(endpoint.pathname.endsWith('/runs/42/attempts/1'))console.log(JSON.stringify(run));
 else if(endpoint.pathname.endsWith('/runs/42/attempts/1/jobs')){
   const job={id:600,name:'Consumer release rehearsal / Consumer canary',run_id:42,run_attempt:1,
@@ -433,7 +603,8 @@ else process.exit(1);
     const script=path.join(scratch,'binding.sh');
     fs.writeFileSync(script,`#!/usr/bin/env bash\nset -euo pipefail\nsource '${fileURLToPath(new URL('../lib/release_consumer_verdict.sh',import.meta.url))}'\nrelease_require_rehearsal_binding burin-labs/harn 42 '${source}'\n`);
     for(const scenario of ['good','partial','duplicate','wrong_name','wrong_attempt','manifest_attempt',
-      'wrong_manifest','changed','changed_after_consumer','job_failure','bad_digest']){
+      'wrong_manifest','changed','changed_after_consumer','job_failure','bad_digest','composition_v1',
+      'composition_good','composition_missing_component','composition_child_moved','composition_late_component','composition_wrong_manifest']){
       fs.writeFileSync(calls,'');
       const manifest={schemaVersion:'burin-labs.candidate_manifest.v1',repository,sourceCommit:source,
         runId:'42',runAttempt:scenario==='manifest_attempt'?'2':'1',artifacts:[]};
@@ -441,37 +612,173 @@ else process.exit(1);
       fs.writeFileSync(manifestFile,JSON.stringify(manifest));fs.rmSync(manifestZip,{force:true});
       execFileSync('zip',['-q','-X',manifestZip,'candidate-manifest.json'],{cwd:scratch});
       const manifestBytes=fs.readFileSync(manifestZip),manifestDigest=`sha256:${createHash('sha256').update(manifestBytes).digest('hex')}`;
-      const binding={schema:'harn.release.consumer_rehearsal_binding.v1',verdict:'pass',source_sha:source,
+      const composed=scenario.startsWith('composition_')&&scenario!=='composition_v1';
+      const composition=composed?compositionFixture():null;
+      const consumerName=composed?compositionRepository:'acme/widget-host';
+      const consumerHead=composed?compositionHead:head;
+      if(scenario==='composition_missing_component')composition.records.delete('/pulls/8');
+      const consumerRecords=path.join(scratch,'consumer-records.json');
+      fs.writeFileSync(consumerRecords,JSON.stringify(composition?[...composition.records]:[]));
+      const binding={schema:`harn.release.consumer_rehearsal_binding.v${composed?'2':'1'}`,verdict:'pass',source_sha:source,
         producer_run:'42',producer_attempt:scenario==='wrong_attempt'?2:1,
         manifest_digest:scenario==='wrong_manifest'?`sha256:${'f'.repeat(64)}`:manifestDigest,
-        consumer_run:'77',consumer_head_sha256:createHash('sha256').update(head).digest('hex'),consumer_pull:null};
+        consumer_run:'77',consumer_head_sha256:createHash('sha256').update(consumerHead).digest('hex'),consumer_pull:composed?'9':null,
+        ...(composed?{declared_pull:'9',composition:{schema:'harn.consumer_composition_identity.v1',pull:'9',requiredPulls:['7','8'],
+          manifestSha256:scenario==='composition_wrong_manifest'?'f'.repeat(64):
+            createHash('sha256').update('harn.consumer_composition_manifest.v1\0').update(composition.bytes).digest('hex')}}:{})};
       const bindingFile=path.join(scratch,'consumer-rehearsal-binding.json'),bindingZip=path.join(scratch,'binding.zip');
       fs.writeFileSync(bindingFile,JSON.stringify(binding));fs.rmSync(bindingZip,{force:true});
       execFileSync('zip',['-q','-X',bindingZip,'consumer-rehearsal-binding.json'],{cwd:scratch});
       const bindingBytes=fs.readFileSync(bindingZip);
       const env={...process.env,PATH:`${scratch}:${process.env.PATH}`,
-        CALLS:calls,SCENARIO:scenario,GH_TOKEN:'fixture-read',CANARY_REPOSITORY:'acme/widget-host',
+        CALLS:calls,SCENARIO:scenario,GH_TOKEN:'fixture-read',CANARY_REPOSITORY:consumerName,
+        CONSUMER_NAME:consumerName,CONSUMER_HEAD:consumerHead,CONSUMER_RECORDS:consumerRecords,
         CONSUMER_READ_TOKEN:'fixture-consumer',MANIFEST_ZIP:manifestZip,MANIFEST_SIZE:String(manifestBytes.length),
         MANIFEST_DIGEST:manifestDigest,BINDING_ZIP:bindingZip,BINDING_SIZE:String(bindingBytes.length),
         BINDING_DIGEST:`sha256:${createHash('sha256').update(bindingBytes).digest('hex')}`};
       const result=spawnSync('bash',[script],{encoding:'utf8',env});
-      if(scenario==='good'){
+      if(scenario==='good'||scenario==='composition_good'){
         assert.equal(result.status,0,result.stderr);
         assert.deepEqual(JSON.parse(result.stdout),{producer_attempt:1,manifest_id:100,manifest_digest:manifestDigest});
+        if(composed){
+          const observed=fs.readFileSync(calls,'utf8');
+          assert.ok(observed.includes('/pulls/8\n'));
+          assert.ok(observed.includes('/contents/.github/harn-consumer-composition.json?ref='));
+          assert.doesNotMatch(result.stdout+result.stderr,/private-consumer|combined-private-branch|fixture-consumer/);
+        }
         const root=fileURLToPath(new URL('../..',import.meta.url));
         const workflow=fs.readFileSync(path.join(root,'.github/workflows/promote-release.yml'),'utf8');
         const match=/name: Re-read the producer rehearsal binding[\s\S]*?\n        run: \|\n((?:          .*\n)+)/.exec(workflow);
         assert.ok(match,'the owning workflow step must be reached');
         const step=path.join(scratch,'step.sh'),output=path.join(scratch,'step.outputs');
         fs.writeFileSync(step,match[1].replace(/^          /gm,''));fs.writeFileSync(output,'');fs.writeFileSync(calls,'');
-        const stepResult=spawnSync('bash',[step],{encoding:'utf8',cwd:root,env:{...env,GITHUB_REPOSITORY:repository,
+        const stepResult=spawnSync('bash',[step],{encoding:'utf8',cwd:root,env:{...env,GITHUB_REPOSITORY:repository,GITHUB_WORKSPACE:root,
           SOURCE_SHA:source,CANDIDATE_RUN_ID:'42',GITHUB_OUTPUT:output}});
         assert.equal(stepResult.status,0,stepResult.stderr);
         assert.equal(fs.readFileSync(output,'utf8'),`expected_attempt=1\nexpected_manifest_id=100\nexpected_manifest_digest=${manifestDigest}\n`);
+        if(composed){
+          const scheduler=path.join(scratch,'scheduler.mjs');
+          fs.writeFileSync(scheduler,`import {releaseApi} from '${new URL('../release-on-demand.mjs',import.meta.url).href}';
+            const binding=await releaseApi('${repository}').qualify('42','${source}');
+            console.log(JSON.stringify({schema:binding.schema,pull:binding.composition.pull}));`);
+          fs.writeFileSync(calls,'');
+          const scheduled=spawnSync(process.execPath,[scheduler],{encoding:'utf8',cwd:root,
+            env:{...env,CONSUMER_READ_TOKEN:'',GIT_CALLS:calls,PAIRING_TEXT:'Pairs-with: consumer#99'}});
+          assert.equal(scheduled.status,0,scheduled.stderr);
+          assert.deepEqual(JSON.parse(scheduled.stdout),{schema:'harn.release.consumer_rehearsal_binding.v2',pull:'9'});
+          const scheduledReads=fs.readFileSync(calls,'utf8');
+          assert.ok(scheduledReads.includes(`git:fetch --no-tags origin ${source}\n`));
+          assert.ok(scheduledReads.includes(`git:show ${source}:Cargo.toml\n`));
+          assert.equal(scheduledReads.includes(`/repos/${compositionRepository}`),false);
+        }
       }else{
         assert.notEqual(result.status,0,`${scenario} accepted: ${result.stderr}`);
         assert.equal(result.stdout,'');
       }
     }
   }finally{fs.rmSync(scratch,{recursive:true,force:true});}
+});
+
+function composedRehearsal(t,change=()=>{}){
+  const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-composition-binding-'));
+  t.after(()=>fs.rmSync(scratch,{recursive:true,force:true}));
+  const consumer=compositionFixture();
+  const identity={schema:'harn.consumer_composition_identity.v1',pull:'9',requiredPulls:['7','8'],
+    manifestSha256:createHash('sha256').update('harn.consumer_composition_manifest.v1\0').update(consumer.bytes).digest('hex')};
+  const manifest=archiveJson(scratch,'candidate-manifest.json',{schemaVersion:'burin-labs.candidate_manifest.v1',
+    repository,sourceCommit:source,runId:'42',runAttempt:'1',artifacts:[]},
+  {id:100,name:`candidate-manifest-${source}`,workflow_run:{id:42,head_sha:source}});
+  const value={schema:'harn.release.consumer_rehearsal_binding.v2',verdict:'pass',source_sha:source,
+    producer_run:'42',producer_attempt:1,manifest_digest:manifest.metadata.digest,
+    consumer_run:'77',consumer_head_sha256:createHash('sha256').update(compositionHead).digest('hex'),
+    consumer_pull:'9',declared_pull:'9',composition:identity};
+  change(value,consumer);
+  const binding=archiveJson(scratch,'consumer-rehearsal-binding.json',value,
+    {id:101,name:'consumer-rehearsal-binding-1',workflow_run:{id:42,head_sha:source}});
+  const run={...producer,status:'completed',conclusion:'success'};
+  const parentCalls=[];
+  const fetchRecord=async(url,options)=>{
+    const endpoint=new URL(url);
+    if(endpoint.pathname.startsWith(`/repos/${compositionRepository}`))return consumer.fetchRecord(url,options);
+    assert.equal(options.headers.Authorization,'Bearer parent-read');
+    parentCalls.push(endpoint.pathname);
+    let result;
+    if(endpoint.pathname.endsWith('/artifacts/100/zip'))return new Response(fs.readFileSync(manifest.archive));
+    if(endpoint.pathname.endsWith('/artifacts/101/zip'))return new Response(fs.readFileSync(binding.archive));
+    if(endpoint.pathname.endsWith('/runs/42/artifacts'))result={total_count:2,artifacts:[manifest.metadata,binding.metadata]};
+    else if(endpoint.pathname.endsWith('/attempts/1/jobs'))result={total_count:1,jobs:[{id:600,
+      name:'Consumer release rehearsal / Consumer canary',run_id:42,run_attempt:1,head_sha:source,
+      status:'completed',conclusion:'success'}]};
+    else if(endpoint.pathname.endsWith('/runs/42')||endpoint.pathname.endsWith('/runs/42/attempts/1'))result=run;
+    else assert.fail(`unexpected parent endpoint ${endpoint.pathname}`);
+    return new Response(JSON.stringify(result));
+  };
+  const options={declaration:compositionDeclaration()};
+  const authority={token:'consumer-read',repository:compositionRepository};
+  return {consumer,value,parentCalls,run,options,
+    schedule:(overrides=options)=>rehearsalBinding('parent-read',repository,'42',source,fetchRecord,overrides),
+    publish:(consumerAuthority=authority,overrides=options)=>publicationRehearsalBinding('parent-read',repository,
+      '42',source,consumerAuthority,fetchRecord,overrides)};
+}
+
+test('scheduler qualifies exact v2 artifacts and source intent without claiming private eligibility',async t=>{
+  const fixture=composedRehearsal(t);
+  const result=await fixture.schedule();
+  assert.deepEqual(result.composition,fixture.value.composition);
+  assert.equal(result.evidence.producer_attempt,1);
+  assert.equal(fixture.consumer.calls.length,0);
+});
+
+test('publication authenticates the same v2 graph and preserves closed public evidence',async t=>{
+  const fixture=composedRehearsal(t);
+  const result=await fixture.publish();
+  for(const pull of [7,8,12,9])assert.equal(fixture.consumer.calls.filter(call=>call===`/pulls/${pull}`).length,2);
+  assert.equal(fixture.parentCalls.at(-1),'/repos/burin-labs/harn/actions/runs/42');
+  assert.deepEqual(result.composition,fixture.value.composition);
+  for(const privateValue of [compositionRepository,compositionHead,'combined-private-branch','consumer-read']){
+    assert.equal(JSON.stringify(result).includes(privateValue),false);
+  }
+});
+
+for(const [name,change] of [
+  ['missing required adaptation',value=>{value.composition.requiredPulls=['7'];}],
+  ['wrong selected pull',value=>{value.consumer_pull='8';}],
+  ['wrong declared pull',value=>{value.declared_pull='8';}],
+  ['unmeasured consumer head',value=>{value.consumer_head_sha256='';}],
+  ['private identity field',value=>{value.composition.privateHead=compositionHead;}],
+  ['private binding field',value=>{value.privateRepository=compositionRepository;}],
+])test(`v2 artifact qualification refuses ${name}`,async t=>{
+  const fixture=composedRehearsal(t,change);
+  await assert.rejects(fixture.schedule());
+  assert.equal(fixture.consumer.calls.length,0);
+});
+
+test('v2 requires a measured composition declaration rather than an omitted or ordinary source',async t=>{
+  const fixture=composedRehearsal(t);
+  await assert.rejects(fixture.schedule({}),/rehearsal_source_declaration_unmeasured/);
+  await assert.rejects(fixture.schedule({declaration:{kind:'ordinary',pull:null}}),
+    /rehearsal_source_declaration_unmeasured/);
+});
+
+for(const [name,change] of [
+  ['manifest digest changed',value=>{value.composition.manifestSha256='f'.repeat(64);}],
+  ['rehearsed head changed',value=>{value.consumer_head_sha256='f'.repeat(64);}],
+  ['component moved',(_value,consumer)=>{consumer.records.get('/pulls/7').head.sha='4'.repeat(40);}],
+  ['required component unreadable',(_value,consumer)=>{consumer.records.set('/pulls/8',null);}],
+])test(`publication refuses ${name} after authenticating private source`,async t=>{
+  const fixture=composedRehearsal(t,change);
+  await fixture.schedule();
+  await assert.rejects(fixture.publish());
+  assert.ok(fixture.consumer.calls.length>0);
+});
+
+test('publication rechecks the producer after graph reads and refuses missing consumer authority',async t=>{
+  const fixture=composedRehearsal(t);
+  await assert.rejects(fixture.publish(null),/consumer_read_authority_missing/);
+  fixture.consumer.records.set('/pulls/9',count=>{
+    if(count===2)fixture.run.run_attempt=2;
+    return {number:9,state:'open',merged:false,base:{repo:{full_name:compositionRepository},ref:'main'},
+      head:{repo:{full_name:compositionRepository},ref:'combined-private-branch',sha:compositionHead}};
+  });
+  await assert.rejects(fixture.publish(),/source_candidate_attempt_changed/);
 });

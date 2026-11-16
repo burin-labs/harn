@@ -26,9 +26,9 @@ mkdir -p "$repo/scripts/lib" "$repo/scripts/ci" "$tmp/bin"
 cp "$root/scripts/lib/release_version.sh" "$root/scripts/lib/release_candidate_run.sh" \
   "$root/scripts/lib/release_consumer_verdict.sh" "$root/scripts/lib/consumer_canary_policy.sh" \
   "$root/scripts/lib/candidate_archive_contract.sh" "$root/scripts/lib/sha256.sh" \
-  "$root/scripts/lib/green_checkpoint.sh" "$repo/scripts/lib/"
+  "$root/scripts/lib/green_checkpoint.sh" "$root/scripts/lib/consumer_pairing_source.sh" "$repo/scripts/lib/"
 cp "$root/scripts/lib/release-candidate-state.mjs" "$root/scripts/lib/consumer-observer.mjs" \
-  "$root/scripts/lib/consumer-observation-budget.mjs" "$repo/scripts/lib/"
+  "$root/scripts/lib/consumer-observation-budget.mjs" "$root/scripts/lib/consumer-source.mjs" "$repo/scripts/lib/"
 cp "$root/scripts/ci/consumer_observation_budget.json" "$repo/scripts/ci/"
 cp "$root/scripts/ci/consumer_canary_policy.json" "$repo/scripts/ci/"
 cp "$root/scripts/release_contract.env" "$repo/scripts/"
@@ -46,6 +46,9 @@ printf '# Changelog\n\n## v0.10.141\n\n- Earlier.\n' > "$repo/CHANGELOG.md"
 cat > "$tmp/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$GH_CALLS"
+if [[ " $* " == *' --include '* ]]; then
+  printf 'HTTP/2.0 200 OK\r\nContent-Type: application/octet-stream\r\n\r\n'
+fi
 # shellcheck source=scripts/lib/sha256.sh
 source "$FAKE_LIB/sha256.sh"
 case "$2" in
@@ -170,6 +173,8 @@ output() {
   sed -n "s/^$2=//p" "$tmp/$1.outputs"
 }
 
+commit_version 0.10.141 "Previous release"
+git -C "$repo" tag v0.10.141
 commit_version 0.10.142-dev "Start 0.10.142 development"
 # A prerelease is refused by name, never passed as a no-op.
 plan development
