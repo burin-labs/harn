@@ -39,6 +39,8 @@ test('the terminal entrypoint records only an authenticated reached product deci
     const fixture = path.join(scratch,'fixture.json');
     const preload = path.join(scratch,'fetch.mjs');
     fs.writeFileSync(preload,`import fs from 'node:fs';
+      import {readRetry} from ${JSON.stringify(new URL('../lib/consumer-observer.mjs', import.meta.url).href)};
+      readRetry.backoffMs=0;
       const fixture=JSON.parse(fs.readFileSync(${JSON.stringify(fixture)},'utf8'));
       globalThis.fetch=async(url,options={})=>{
         if(options.method==='POST')throw new Error('unexpected-private-post');
@@ -121,12 +123,15 @@ test('the terminal entrypoint records only an authenticated reached product deci
     const observerPreload=path.join(scratch,'observe-fetch.mjs');
     const lastRead=path.join(scratch,'last-read.json');
     fs.writeFileSync(observerPreload,`import fs from 'node:fs';
+      import {readRetry} from ${JSON.stringify(new URL('../lib/consumer-observer.mjs', import.meta.url).href)};
       const fixture=JSON.parse(fs.readFileSync(${JSON.stringify(fixture)},'utf8'));
       let censusReads=0,childReads=0,parentReads=0,sourceReads=0,pullReads=0;
       if(fixture.recordedClock){
         let seconds=fixture.clockStart??1000;
         Date.now=()=>seconds*1000;
         globalThis.setTimeout=(callback,milliseconds)=>{seconds+=milliseconds/1000;queueMicrotask(callback);};
+      }else{
+        readRetry.backoffMs=0;
       }
       globalThis.fetch=async(url,options={})=>{
         if(options.method==='POST')throw new Error('unexpected-private-post');
