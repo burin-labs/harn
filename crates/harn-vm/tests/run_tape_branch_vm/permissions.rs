@@ -1,6 +1,39 @@
 use super::*;
 
 #[test]
+fn dynamic_redirects_keep_approval_risk_without_losing_execution_syntax() {
+    for (command, uncertain_redirect) in [
+        ("target=$OUTPUT && printf verifier-ok > \"$target\"", true),
+        ("printf verifier-ok > proof.txt", false),
+        ("printf '%s' \"$VALUE\"", false),
+    ] {
+        let scan = harn_vm::orchestration::command_risk_scan_json(
+            &serde_json::json!({
+                "request": {
+                    "mode": "shell", "command": command, "cwd": "/tmp/work",
+                    "shell": {"id": "sh", "platform": "unix"},
+                },
+                "workspace_roots": ["/tmp/work"],
+            }),
+            None,
+        );
+        assert_eq!(scan["execution_syntax_complete"], true, "{scan}");
+        assert_eq!(
+            scan["risk_labels"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("execution_semantics_unresolved")),
+            uncertain_redirect,
+            "{scan}"
+        );
+        if uncertain_redirect {
+            assert_eq!(scan["shell_io_complete"], false, "{scan}");
+            assert_eq!(scan["recommended_action"], "require_approval", "{scan}");
+        }
+    }
+}
+
+#[test]
 fn dynamic_redirects_preserve_reader_cwd_without_allowing_directory_changes() {
     let _serial = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
     let root = dirs();
