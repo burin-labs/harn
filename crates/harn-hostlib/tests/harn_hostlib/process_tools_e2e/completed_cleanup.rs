@@ -177,6 +177,108 @@ print('SCRUBBED_PID=' + str(pid), flush=True)
     );
 }
 
+/// A finished foreground command is cleaned up from the guardian's kernel
+/// custody, with no host-wide census. Negative control: a grandchild that
+/// called `setsid` and was orphaned by a double fork must still be retired,
+/// and the record must say custody, not a census, proved it.
+#[cfg(target_os = "linux")]
+#[test]
+fn foreground_completion_retires_a_double_forked_setsid_grandchild() {
+    foreground_double_fork_cleanup(false);
+}
+
+/// Without confirmed subreaper custody the guardian falls back to the host
+/// census: the grandchild still carries the command's token, so the census
+/// finds and kills it, and the record claims the census, not custody.
+#[cfg(target_os = "linux")]
+#[test]
+fn foreground_completion_without_subreaper_custody_records_the_census() {
+    foreground_double_fork_cleanup(true);
+}
+
+#[cfg(target_os = "linux")]
+fn foreground_double_fork_cleanup(deny_subreaper: bool) {
+    let _session = harn_vm::agent_sessions::enter_current_session(format!(
+        "foreground-double-fork-{}-{deny_subreaper}",
+        std::process::id()
+    ));
+    let _denial =
+        deny_subreaper.then(harn_hostlib::process::owner_death::deny_guardian_subreaper_for_test);
+    let python = python3().expect("the process fixture requires Python 3");
+    let script = r#"
+import os, signal
+r, w = os.pipe()
+if os.fork() == 0:
+    os.setsid()
+    if os.fork() == 0:
+        os.close(r)
+        os.write(w, str(os.getpid()).encode() + b'\n')
+        os.close(w)
+        for fd in (0, 1, 2):
+            os.close(fd)
+        while True: signal.pause()
+    os._exit(0)
+os.close(w)
+grandchild = os.read(r, 32).decode().strip()
+os.close(r)
+os.wait()
+print('GRANDCHILD_PID=' + grandchild, flush=True)
+"#;
+    let mut request = dict_map();
+    request.insert("argv".into(), vlist_str(&[&python, "-c", script]));
+    request.put_int("timeout_ms", 15_000);
+    let result = call("hostlib_tools_run_command", request).unwrap();
+    assert_response_matches_schema("run_command", &result);
+    let result = require_dict(result);
+    assert_eq!(require_int(&result, "exit_code"), 0);
+    let stdout = require_str(&result, "stdout");
+    let pid: i32 = stdout
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("GRANDCHILD_PID=")?.parse().ok())
+        .unwrap_or_else(|| panic!("grandchild did not report its PID: {stdout:?}"));
+    assert!(pid > 1);
+    let pid_path = tempfile::NamedTempFile::new().unwrap().into_temp_path();
+    std::fs::write(&pid_path, pid.to_string()).unwrap();
+    let _cleanup = PidFileCleanup {
+        path: pid_path.to_path_buf(),
+    };
+    let cleanup = require_nested_dict(&result, "process_cleanup");
+    if deny_subreaper {
+        assert!(!require_bool(&cleanup, "guardian_custody_complete"));
+        assert!(require_bool(&cleanup, "census_control_read"));
+        assert!(require_int(&cleanup, "census_scanned_processes") > 0);
+        // A host with another user's processes leaves the census incomplete,
+        // so zero survivors is then unproved rather than claimed.
+        if !require_bool(&cleanup, "census_complete") {
+            assert!(matches!(cleanup.get("survivor_count"), Some(VmValue::Nil)));
+        } else {
+            assert_eq!(require_int(&cleanup, "survivor_count"), 0);
+        }
+    } else {
+        assert!(require_bool(&cleanup, "guardian_custody_complete"));
+        assert!(!require_bool(&cleanup, "census_complete"));
+        assert_eq!(require_int(&cleanup, "census_scanned_processes"), 0);
+        assert_eq!(require_int(&cleanup, "survivor_count"), 0);
+    }
+    let retired = require_list(&cleanup, "observed_children");
+    assert!(
+        retired.iter().any(|child| match child {
+            VmValue::Dict(child) => require_int(child, "pid") == i64::from(pid),
+            _ => false,
+        }),
+        "the record must name the retired grandchild {pid}: {retired:?}"
+    );
+    assert_eq!(
+        unsafe { libc::kill(pid, 0) },
+        -1,
+        "setsid grandchild survived"
+    );
+    assert_eq!(
+        std::io::Error::last_os_error().raw_os_error(),
+        Some(libc::ESRCH)
+    );
+}
+
 #[test]
 fn real_completed_background_cancel_replays_guardian_cleanup_receipt() {
     let _session = harn_vm::agent_sessions::enter_current_session(format!(

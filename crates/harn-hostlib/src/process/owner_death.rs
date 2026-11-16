@@ -99,6 +99,30 @@ const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 #[cfg(unix)]
 thread_local! {
     static REEXEC_ARGS: RefCell<Option<Vec<OsString>>> = const { RefCell::new(None) };
+    static TEST_DENY_SUBREAPER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Restores this thread's subreaper test override on drop.
+#[cfg(unix)]
+#[doc(hidden)]
+pub struct GuardianSubreaperDenialGuard {
+    previous: bool,
+}
+
+#[cfg(unix)]
+impl Drop for GuardianSubreaperDenialGuard {
+    fn drop(&mut self) {
+        TEST_DENY_SUBREAPER.with(|slot| slot.set(self.previous));
+    }
+}
+
+/// Make guardians started from this thread behave as if the kernel refused
+/// subreaper custody. Honored only by a libtest re-exec guardian.
+#[cfg(unix)]
+#[doc(hidden)]
+pub fn deny_guardian_subreaper_for_test() -> GuardianSubreaperDenialGuard {
+    let previous = TEST_DENY_SUBREAPER.with(|slot| slot.replace(true));
+    GuardianSubreaperDenialGuard { previous }
 }
 
 /// Restores the previous thread-local guardian re-exec arguments on drop.
@@ -177,6 +201,9 @@ enum GuardianOutputCapture {
 struct GuardianCommandRequest {
     #[serde(default)]
     test_reexec: bool,
+    /// Test re-exec only: behave as if the kernel refused subreaper custody.
+    #[serde(default)]
+    test_deny_subreaper: bool,
     #[serde(default)]
     output_capture: GuardianOutputCapture,
     #[serde(default)]
@@ -361,6 +388,8 @@ pub(crate) fn prepare_guardian(
     }
     request.stage_output_command = stage_command;
     request.test_reexec = reexec_args.is_some();
+    request.test_deny_subreaper =
+        request.test_reexec && TEST_DENY_SUBREAPER.with(std::cell::Cell::get);
     #[cfg(target_os = "linux")]
     if let Some(pinned) = pinned.as_ref() {
         if payload.get_program() != std::ffi::OsStr::new(&pinned.program) {
@@ -599,6 +628,7 @@ impl GuardianCommandRequest {
     ) -> Self {
         Self {
             test_reexec: false,
+            test_deny_subreaper: false,
             output_capture: GuardianOutputCapture::Pipe,
             cleanup_receipt_fd: None,
             #[cfg(target_os = "linux")]
@@ -794,6 +824,7 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
     let request: GuardianCommandRequest = serde_json::from_slice(&raw)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     let separate_test_output = request.test_reexec;
+    let test_deny_subreaper = request.test_deny_subreaper;
     let receipt_fd = request.cleanup_receipt_fd;
     #[cfg(target_os = "linux")]
     let cancel_fd = request.cancel_request_fd;
@@ -823,7 +854,8 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
     #[cfg(target_os = "linux")]
     let cancellation = cancel_request::inherited_reader(cancel_fd)?;
     let _journal_cleanup = OwnerJournalCleanup(cleanup_token.clone());
-    configure_child_reaper()?;
+    let subreaper_custody =
+        !(separate_test_output && test_deny_subreaper) && configure_child_reaper();
     let mut payload = match payload_command.spawn() {
         Ok(payload) => payload,
         Err(error) => {
@@ -974,25 +1006,16 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
             }
             GuardianEvent::PayloadExited(status) => {
                 payload_status = Some(status?);
-                let mut cleanup =
-                    harn_vm::op_interrupt::signal_pid_tree_and_token_preserving_group_with_report(
-                        payload_pid,
-                        Some(&cleanup_token),
-                        unsafe { libc::getpgrp() as u32 },
-                        libc::SIGKILL,
-                    );
                 #[cfg(target_os = "linux")]
-                if let Some(cancelled) = cancellation_cleanup.take() {
-                    cleanup.merge(cancelled);
-                }
-                reap_adopted_children()?;
-                harn_vm::op_interrupt::finish_process_owner_cleanup(&mut cleanup, &cleanup_token);
-                // Only Linux actually establishes subreaper custody and observes
-                // ECHILD in reap_adopted_children. Keep the host census unchanged.
-                #[cfg(target_os = "linux")]
-                {
-                    cleanup.guardian_custody_complete = true;
-                }
+                let cancelled = cancellation_cleanup.take();
+                #[cfg(not(target_os = "linux"))]
+                let cancelled = None;
+                let cleanup = finished_payload_cleanup(
+                    payload_pid,
+                    &cleanup_token,
+                    subreaper_custody,
+                    cancelled,
+                )?;
                 if let Err(error) = completion_receipt::refuse_survivors(&cleanup) {
                     completion_receipt::write(&mut cleanup_receipt, &cleanup, false)?;
                     return Err(error);
@@ -1299,18 +1322,31 @@ fn write_relay_while_owner_alive(
     Ok(true)
 }
 
+/// Become the subreaper of every descendant, and report whether the kernel
+/// confirms it: the set succeeded and reads back as set. A guardian without
+/// confirmed custody (a sandbox may deny the call) falls back to the host
+/// census when its payload finishes, and its record says so.
 #[cfg(target_os = "linux")]
-fn configure_child_reaper() -> io::Result<()> {
-    if unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) } == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
+fn configure_child_reaper() -> bool {
+    if unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) } != 0 {
+        return false;
     }
+    let mut subreaper: libc::c_int = 0;
+    let read = unsafe {
+        libc::prctl(
+            libc::PR_GET_CHILD_SUBREAPER,
+            &raw mut subreaper as libc::c_ulong,
+            0,
+            0,
+            0,
+        )
+    };
+    read == 0 && subreaper != 0
 }
 
 #[cfg(all(unix, not(target_os = "linux")))]
-fn configure_child_reaper() -> io::Result<()> {
-    Ok(())
+fn configure_child_reaper() -> bool {
+    false
 }
 
 #[cfg(unix)]
@@ -1365,14 +1401,92 @@ fn wait_for_payload_exit(
 
 #[cfg(target_os = "linux")]
 fn reap_adopted_children() -> io::Result<()> {
+    retire_adopted_children().map(drop)
+}
+
+#[cfg(target_os = "linux")]
+fn retire_adopted_children() -> io::Result<Vec<adopted_children::RetiredChild>> {
     // The payload waiter has returned before either caller reaches this
     // point. Only this thread now reaps children adopted by the subreaper.
     let error =
         match adopted_children::terminate_and_reap(harn_vm::op_interrupt::SUBPROCESS_TERM_GRACE) {
-            Ok(()) => return Ok(()),
+            Ok(retired) => return Ok(retired),
             Err(error) => error,
         };
-    retain_adopted_children(error)
+    retain_adopted_children(error).map(|()| Vec::new())
+}
+
+/// Kill and account for everything a finished payload left behind.
+///
+/// With confirmed subreaper custody the record covers the guardian's kernel
+/// child custody, proved by ECHILD, and its census fields stay unmeasured.
+/// Without it, only a host census can find a descendant that outlived its
+/// parent, so the record carries that census and claims no custody.
+#[cfg(unix)]
+fn finished_payload_cleanup(
+    payload_pid: u32,
+    cleanup_token: &str,
+    subreaper_custody: bool,
+    cancelled: Option<harn_vm::op_interrupt::ProcessCleanupReport>,
+) -> io::Result<harn_vm::op_interrupt::ProcessCleanupReport> {
+    #[cfg(target_os = "linux")]
+    if subreaper_custody {
+        let mut cleanup = retire_finished_payload_descendants(payload_pid, cleanup_token)?;
+        if let Some(cancelled) = cancelled {
+            cleanup.merge(cancelled);
+        }
+        cleanup.refresh_survivor_status();
+        cleanup.guardian_custody_complete = true;
+        return Ok(cleanup);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = subreaper_custody;
+    let mut cleanup = harn_vm::op_interrupt::signal_pid_tree_and_token_preserving_group_with_report(
+        payload_pid,
+        Some(cleanup_token),
+        unsafe { libc::getpgrp() as u32 },
+        libc::SIGKILL,
+    );
+    if let Some(cancelled) = cancelled {
+        cleanup.merge(cancelled);
+    }
+    reap_adopted_children()?;
+    harn_vm::op_interrupt::finish_process_owner_cleanup(&mut cleanup, cleanup_token);
+    Ok(cleanup)
+}
+
+/// Retire everything a finished payload left behind, without a host scan.
+///
+/// The payload has exited and been reaped, so the kernel has reparented every
+/// descendant still alive to this subreaper, including one that called
+/// `setsid` or double-forked. Retiring adopted children until ECHILD therefore
+/// reaches all of them. A host-wide census could add only a process outside
+/// this subtree that still carries the command's token in its environment:
+/// one another process started on the command's behalf. That process was
+/// never in the command's lifetime, and one that scrubbed its environment was
+/// never findable either, so the census is not part of this guarantee.
+#[cfg(target_os = "linux")]
+fn retire_finished_payload_descendants(
+    payload_pid: u32,
+    cleanup_token: &str,
+) -> io::Result<harn_vm::op_interrupt::ProcessCleanupReport> {
+    let guardian_pid = std::process::id();
+    harn_vm::op_interrupt::signal_owner_process_groups(
+        cleanup_token,
+        unsafe { libc::getpgrp() as u32 },
+        libc::SIGKILL,
+    );
+    let mut report =
+        harn_vm::op_interrupt::ProcessCleanupReport::for_signal(Some(payload_pid), libc::SIGKILL);
+    for child in retire_adopted_children()? {
+        report.record_retired_child(
+            child.pid,
+            Some(guardian_pid),
+            child.command_name,
+            libc::SIGKILL,
+        );
+    }
+    Ok(report)
 }
 
 #[cfg(target_os = "linux")]

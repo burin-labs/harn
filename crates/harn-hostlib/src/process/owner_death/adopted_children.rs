@@ -4,10 +4,20 @@ use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::time::{Duration, Instant};
 
+/// A child the guardian adopted and then killed and reaped.
+#[derive(Debug)]
+pub(super) struct RetiredChild {
+    pub(super) pid: u32,
+    /// `comm` read before the kill; nil when it had already exited.
+    pub(super) command_name: Option<String>,
+}
+
 /// Called only after the payload waiter has returned. No other thread may
 /// reap children while these WNOWAIT witnesses reserve their identities.
-pub(super) fn terminate_and_reap(timeout: Duration) -> io::Result<()> {
+/// Returns every adopted child it retired, in the order it reached them.
+pub(super) fn terminate_and_reap(timeout: Duration) -> io::Result<Vec<RetiredChild>> {
     let deadline = Instant::now() + timeout;
+    let mut retired = Vec::new();
     loop {
         let children = adopted_children()?;
         if children.is_empty() {
@@ -26,7 +36,7 @@ pub(super) fn terminate_and_reap(timeout: Duration) -> io::Result<()> {
                 }
                 let error = io::Error::last_os_error();
                 if error.raw_os_error() == Some(libc::ECHILD) {
-                    return Ok(());
+                    return Ok(retired);
                 }
                 if error.kind() != io::ErrorKind::Interrupted {
                     return Err(error);
@@ -43,7 +53,17 @@ pub(super) fn terminate_and_reap(timeout: Duration) -> io::Result<()> {
             ));
         }
         for pid in children {
+            // Read before the kill: an unreaped child keeps its pid, so this
+            // names the process about to be retired, never a reused pid.
+            let command_name = std::fs::read_to_string(format!("/proc/{pid}/comm"))
+                .ok()
+                .map(|name| name.trim_end().to_string())
+                .filter(|name| !name.is_empty());
             terminate_child(pid, deadline)?;
+            retired.push(RetiredChild {
+                pid: pid as u32,
+                command_name,
+            });
         }
         // Killing a direct child can adopt its children. Repeat from the
         // guardian's kernel list, never a dead payload PID or a host census.

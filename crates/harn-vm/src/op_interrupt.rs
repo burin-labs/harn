@@ -273,6 +273,19 @@ impl ProcessCleanupReport {
         }
     }
 
+    /// Record a child that a subreaper killed with `signal` and then reaped.
+    pub fn record_retired_child(
+        &mut self,
+        pid: u32,
+        parent_pid: Option<u32>,
+        command_name: Option<String>,
+        signal: i32,
+    ) {
+        let mut child = ProcessCleanupChild::new(pid, parent_pid, 1, command_name);
+        push_unique(&mut child.signals, signal);
+        self.merge_child(child);
+    }
+
     fn merge_child(&mut self, child: ProcessCleanupChild) {
         if let Some(existing) = self
             .children
@@ -718,15 +731,22 @@ pub fn signal_pid_tree_and_token_preserving_group_with_report(
         report.merge_child(child.with_signal(signal));
     }
     if let Some(cleanup_token) = cleanup_token.filter(|token| !token.is_empty()) {
-        for pgid in owner_process_groups(cleanup_token) {
-            if pgid != preserved_pgid as u32 {
-                unsafe {
-                    libc::kill(-(pgid as i32), signal);
-                }
+        signal_owner_process_groups(cleanup_token, preserved_pgid as u32, signal);
+    }
+    report
+}
+
+/// Signal every process group the owner journal for `cleanup_token` recorded,
+/// except `preserved_pgid`.
+#[cfg(unix)]
+pub fn signal_owner_process_groups(cleanup_token: &str, preserved_pgid: u32, signal: i32) {
+    for pgid in owner_process_groups(cleanup_token) {
+        if pgid != preserved_pgid {
+            unsafe {
+                libc::kill(-(pgid as i32), signal);
             }
         }
     }
-    report
 }
 
 #[cfg(unix)]
