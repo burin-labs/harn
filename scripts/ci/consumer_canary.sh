@@ -82,6 +82,8 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/consumer_canary_pol
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/green_checkpoint.sh"
 # shellcheck source=scripts/lib/sha256.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/sha256.sh"
+# shellcheck source=scripts/lib/consumer_pairing_superset.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/consumer_pairing_superset.sh"
 
 # The consumer's repository name, which no output line may contain.
 CANARY_SECRET_NAME=
@@ -346,25 +348,18 @@ canary_read_pairing() {
 # rehearses contains every one of their heads, so the rehearsal still measures
 # each pairing. On refusal CANARY_SUPERSET_REASON and CANARY_SUPERSET_DETAIL
 # name the first pull that is missing or unmeasured.
+canary_superset_read() {
+  local destination=$1 repository=$2 endpoint=$3 query=$4
+  canary_api --optional "$destination" pairing_superset_unmeasured secret:CONSUMER_CANARY_REPOSITORY \
+    "repos/$repository$endpoint" --jq "$query"
+}
+
 canary_check_superset() {
-  local repo=$1 paired=$2 rehearsed=$3 superseded=$4 pull head comparison status base
-  CANARY_SUPERSET_REASON=pairing_superset_unmeasured CANARY_SUPERSET_DETAIL="pull=$paired"
-  [[ "$rehearsed" =~ ^[0-9a-f]{40}$ ]] || return 1
-  for pull in ${superseded//,/ }; do
-    CANARY_SUPERSET_REASON=pairing_superset_unmeasured CANARY_SUPERSET_DETAIL="pull=$paired superseded=$pull"
-    head=''
-    canary_api --optional head pairing_superset_unmeasured secret:CONSUMER_CANARY_REPOSITORY \
-      "repos/$repo/pulls/$pull" --jq .head.sha || return 1
-    [[ "$head" =~ ^[0-9a-f]{40}$ ]] || return 1
-    comparison=''
-    canary_api --optional comparison pairing_superset_unmeasured secret:CONSUMER_CANARY_REPOSITORY \
-      "repos/$repo/compare/$head...$rehearsed" --jq '"\(.status) \(.merge_base_commit.sha)"' || return 1
-    read -r status base <<< "$comparison"
-    if [[ ! ( "$status" == identical || "$status" == ahead ) || "$base" != "$head" ]]; then
-      CANARY_SUPERSET_REASON=pairing_superset_missing CANARY_SUPERSET_DETAIL="pull=$paired missing=$pull"
-      return 1
-    fi
-  done
+  local result=0
+  consumer_pairing_superset_check "$@" canary_superset_read || result=$?
+  CANARY_SUPERSET_REASON=$CONSUMER_SUPERSET_REASON
+  CANARY_SUPERSET_DETAIL=$CONSUMER_SUPERSET_DETAIL
+  return "$result"
 }
 
 canary_require_superset() {
@@ -372,8 +367,8 @@ canary_require_superset() {
   canary_say "CONSUMER_CANARY pairing pull=$2 superseded=$4 decision=superset_verified"
 }
 
-# The text whose trailers declare the pairing. A pull request description wins.
-# Otherwise an authenticated release producer reads every included commit, from
+# Pinned PR checks use the pin job's current selection. Other callers may supply
+# an explicit description; otherwise a release producer reads included commits from
 # the previous stable tag through SOURCE_REVISION, because the commit that needs a consumer
 # change is usually a feature commit, not the release commit. Any other source
 # reads its own commit message. A range it cannot measure refuses rather than
@@ -381,6 +376,18 @@ canary_require_superset() {
 canary_pairing_text() {
   local revision=$1 version=$2 scope=${3:-commit} source=${CANARY_PAIRING_SOURCE:-} base count
   case "$scope" in commit|release) ;; *) canary_fail pairing_scope_invalid ;; esac
+  if [[ -n "${CANARY_PULL_REQUEST_CLI_RUN:-}" ]]; then
+    # The pin job supplies its current authenticated selection alongside the
+    # exact consumer revision. The triggering event body may predate an edit.
+    if [[ "${CONSUMER_PULL_REQUEST:-}" == default ]]; then
+      CONSUMER_PULL_REQUEST=''
+    else
+      [[ "${CONSUMER_PULL_REQUEST:-}" =~ ^[1-9][0-9]*$ ]] \
+        || canary_fail consumer_pairing_selection_unmeasured
+    fi
+    CANARY_PAIRING_TEXT=''
+    return 0
+  fi
   CANARY_PAIRING_TEXT=${PAIRING_TEXT:-}
   [[ -z "$CANARY_PAIRING_TEXT" && -n "$source" ]] || return 0
   if [[ "$scope" == release ]] && release_version_is_canonical "$version" && ! release_version_is_prerelease "$version"; then
