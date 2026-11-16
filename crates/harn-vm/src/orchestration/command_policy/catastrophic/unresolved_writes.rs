@@ -4,8 +4,19 @@ pub(super) fn truncate_catastrophe(args: &[String], active_cwd: Option<&Path>) -
     let mut size_zero = false;
     let mut targets: Vec<&str> = Vec::new();
     let mut index = 0;
+    let mut options_ended = false;
     while index < args.len() {
         let arg = &args[index];
+        if options_ended {
+            targets.push(arg);
+            index += 1;
+            continue;
+        }
+        if arg == "--" {
+            options_ended = true;
+            index += 1;
+            continue;
+        }
         if arg == "-s" || arg == "--size" {
             if args
                 .get(index + 1)
@@ -83,5 +94,23 @@ mod tests {
     fn dynamic_targets_do_not_gain_a_speculative_static_denial() {
         assert!(redirect_target_reason("$OUTPUT", None).is_none());
         assert!(redirect_target_reason("$OUTPUT", Some(Path::new("/workspace"))).is_none());
+    }
+
+    #[test]
+    fn truncate_end_of_options_preserves_literal_root_checks() {
+        let args: Vec<String> = ["-s", "0", "--", "-draft"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        assert!(truncate_catastrophe(&args, None)
+            .unwrap()
+            .contains("no execution root"));
+        assert!(truncate_catastrophe(&args, Some(Path::new("/workspace"))).is_none());
+
+        let filenames_only: Vec<String> = ["--", "-s0", "target"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        assert!(truncate_catastrophe(&filenames_only, None).is_none());
     }
 }
