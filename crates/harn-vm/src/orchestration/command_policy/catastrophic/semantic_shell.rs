@@ -14,8 +14,12 @@ use tree_sitter::Node;
 use wait_timeout::ChildExt;
 
 use super::{
-    command_basename, parse_env_invocation, unwrapped_command, ShellCommandStage, MAX_DEPTH,
+    command_basename, parse_env_invocation, unwrapped_command, ShellCommandStage,
+    ShellWordExpansion, MAX_DEPTH,
 };
+
+mod word;
+use word::{shell_word, WordPosition};
 
 /// Commands and argument words that a policy classifier can reason about.
 ///
@@ -88,14 +92,22 @@ pub(crate) fn analyze_argv(argv: &[String]) -> ShellAnalysis {
 /// Parse a POSIX/bash program and collect every potentially executed command.
 pub(crate) fn analyze_shell(command: &str) -> ShellAnalysis {
     let mut analysis = ShellAnalysis::default();
-    collect_shell(command, 0, &mut analysis);
+    collect_shell(command, None, 0, &mut analysis);
     analysis
 }
 
 /// Parse shell text through the single dialect registry.
-pub(crate) fn analyze_shell_dialect(dialect: ShellDialect, command: &str) -> ShellAnalysis {
+pub(crate) fn analyze_shell_dialect(
+    dialect: ShellDialect,
+    command: &str,
+    shell_id: Option<&str>,
+) -> ShellAnalysis {
     match dialect {
-        ShellDialect::Posix => analyze_shell(command),
+        ShellDialect::Posix => {
+            let mut analysis = ShellAnalysis::default();
+            collect_shell(command, shell_id, 0, &mut analysis);
+            analysis
+        }
         ShellDialect::PowerShell => analyze_powershell(command),
         ShellDialect::Cmd => analyze_cmd(command),
     }
@@ -119,7 +131,7 @@ fn collect_argv(argv: &[String], depth: usize, analysis: &mut ShellAnalysis) {
                 text: argv.join(" "),
                 argv: argv.to_vec(),
                 source_argv: argv.to_vec(),
-                dynamic: vec![false; argv.len()],
+                expansions: vec![ShellWordExpansion::Literal; argv.len()],
             });
         }
         return;
@@ -131,7 +143,7 @@ fn collect_argv(argv: &[String], depth: usize, analysis: &mut ShellAnalysis) {
             analysis.io_unresolved |= index > 0;
             collect_path_words(&effective[script_index + 2..], analysis);
             let script = &effective[script_index + 1];
-            collect_shell(script, depth + 1, analysis);
+            collect_shell(script, Some(executable), depth + 1, analysis);
             return;
         }
         if !shell_is_introspection_only(&effective[1..]) {
@@ -159,12 +171,18 @@ fn collect_argv(argv: &[String], depth: usize, analysis: &mut ShellAnalysis) {
         }
         return;
     }
-    collect_argument_execution(effective, &vec![false; effective.len()], depth, analysis);
+    collect_argument_execution(
+        effective,
+        &vec![false; effective.len()],
+        None,
+        depth,
+        analysis,
+    );
     analysis.stages.push(ShellCommandStage {
         text: effective.join(" "),
         argv: effective.to_vec(),
         source_argv: argv.to_vec(),
-        dynamic: vec![false; effective.len()],
+        expansions: vec![ShellWordExpansion::Literal; effective.len()],
     });
 }
 
@@ -279,12 +297,15 @@ fn visit_powershell_command(
         }
         return;
     }
-    collect_argument_execution(effective, &word_dynamic[index..], depth, analysis);
+    collect_argument_execution(effective, &word_dynamic[index..], None, depth, analysis);
     analysis.stages.push(ShellCommandStage {
         text: node_text(command, source).unwrap_or_default().to_string(),
         argv: effective.to_vec(),
         source_argv: argv.clone(),
-        dynamic: word_dynamic[index..].to_vec(),
+        expansions: word_dynamic[index..]
+            .iter()
+            .map(|value| ShellWordExpansion::from_dynamic(*value))
+            .collect(),
     });
 }
 
@@ -384,12 +405,18 @@ fn collect_cmd(command: &str, depth: usize, analysis: &mut ShellAnalysis) {
             }
             continue;
         }
-        collect_argument_execution(effective, &vec![false; effective.len()], depth, analysis);
+        collect_argument_execution(
+            effective,
+            &vec![false; effective.len()],
+            None,
+            depth,
+            analysis,
+        );
         analysis.stages.push(ShellCommandStage {
             text: effective.join(" "),
             argv: effective.to_vec(),
             source_argv: stage.clone(),
-            dynamic: vec![false; effective.len()],
+            expansions: vec![ShellWordExpansion::Literal; effective.len()],
         });
     }
 }
@@ -612,7 +639,12 @@ fn native_powershell_candidates() -> Vec<PathBuf> {
     vec![PathBuf::from("pwsh")]
 }
 
-fn collect_shell(command: &str, depth: usize, analysis: &mut ShellAnalysis) {
+fn collect_shell(
+    command: &str,
+    shell_id: Option<&str>,
+    depth: usize,
+    analysis: &mut ShellAnalysis,
+) {
     if depth > MAX_DEPTH {
         analysis.unresolved = true;
         return;
@@ -629,7 +661,14 @@ fn collect_shell(command: &str, depth: usize, analysis: &mut ShellAnalysis) {
     let root = tree.root_node();
     analysis.unresolved |= root.has_error();
     analysis.fork_bomb |= structural_fork_bomb(root, command.as_bytes());
-    visit_tree(root, command.as_bytes(), depth, analysis);
+    let shell_id = shell_id.map(crate::shells::shell_id_from_path);
+    visit_tree(
+        root,
+        command.as_bytes(),
+        shell_id.as_deref(),
+        depth,
+        analysis,
+    );
 }
 
 /// Recognize the canonical shell fork-bomb family from executable structure,
@@ -691,7 +730,13 @@ fn command_name<'a>(command: Node<'_>, source: &'a [u8]) -> Option<&'a str> {
         .and_then(|name| node_text(name, source))
 }
 
-fn visit_tree(root: Node<'_>, source: &[u8], depth: usize, analysis: &mut ShellAnalysis) {
+fn visit_tree(
+    root: Node<'_>,
+    source: &[u8],
+    shell_id: Option<&str>,
+    depth: usize,
+    analysis: &mut ShellAnalysis,
+) {
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
         match node.kind() {
@@ -702,10 +747,10 @@ fn visit_tree(root: Node<'_>, source: &[u8], depth: usize, analysis: &mut ShellA
                 analysis.unresolved = true;
                 continue;
             }
-            "command" => visit_command(node, source, depth, analysis),
+            "command" => visit_command(node, source, shell_id, depth, analysis),
             "file_redirect" => {
                 analysis.unresolved |= names_redirect_descriptor(node, source);
-                collect_redirect(node, source, analysis);
+                collect_redirect(node, source, shell_id, analysis);
             }
             "heredoc_redirect" | "herestring_redirect" => {
                 analysis.unresolved |= names_redirect_descriptor(node, source);
@@ -719,17 +764,24 @@ fn visit_tree(root: Node<'_>, source: &[u8], depth: usize, analysis: &mut ShellA
     }
 }
 
-fn visit_command(command: Node<'_>, source: &[u8], depth: usize, analysis: &mut ShellAnalysis) {
+fn visit_command(
+    command: Node<'_>,
+    source: &[u8],
+    shell_id: Option<&str>,
+    depth: usize,
+    analysis: &mut ShellAnalysis,
+) {
     let Some(name_node) = command.child_by_field_name("name") else {
         analysis.unresolved = true;
         return;
     };
-    let (command_name, command_dynamic) = shell_word(name_node, source);
+    let (command_name, command_dynamic) =
+        shell_word(name_node, source, shell_id, WordPosition::Argument);
     let Some(command_name) = command_name else {
         analysis.unresolved = true;
         return;
     };
-    analysis.unresolved |= command_dynamic;
+    analysis.unresolved |= command_dynamic.requires_expansion();
     record_argument_word(analysis, &command_name, false);
 
     let mut source_prefix = Vec::new();
@@ -745,7 +797,7 @@ fn visit_command(command: Node<'_>, source: &[u8], depth: usize, analysis: &mut 
     let mut word_dynamic = vec![command_dynamic];
     let mut cursor = command.walk();
     for argument in command.children_by_field_name("argument", &mut cursor) {
-        let (value, dynamic) = shell_word(argument, source);
+        let (value, dynamic) = shell_word(argument, source, shell_id, WordPosition::Argument);
         let Some(value) = value else {
             // Argument expansion does not obscure the executable identity, but
             // retaining a lossy word would create false path classifications.
@@ -756,7 +808,11 @@ fn visit_command(command: Node<'_>, source: &[u8], depth: usize, analysis: &mut 
         argv.push(value);
         word_dynamic.push(dynamic);
     }
-    collect_env_split_execution(&argv, &word_dynamic, depth, analysis);
+    let execution_dynamic = word_dynamic
+        .iter()
+        .map(|value| value.requires_expansion())
+        .collect::<Vec<_>>();
+    collect_env_split_execution(&argv, &execution_dynamic, depth, analysis);
 
     let invocation = unwrapped_command(&argv, 0, argv.len());
     collect_path_words(&invocation.path_operands, analysis);
@@ -768,12 +824,12 @@ fn visit_command(command: Node<'_>, source: &[u8], depth: usize, analysis: &mut 
                 text: node_text(command, source).unwrap_or_default().to_string(),
                 argv: argv.clone(),
                 source_argv: source_prefix,
-                dynamic: word_dynamic,
+                expansions: word_dynamic,
             });
         }
         return;
     }
-    if index > 0 && word_dynamic.get(index).copied().unwrap_or(true) {
+    if index > 0 && execution_dynamic.get(index).copied().unwrap_or(true) {
         analysis.unresolved = true;
     }
     let effective = &argv[index..];
@@ -783,10 +839,14 @@ fn visit_command(command: Node<'_>, source: &[u8], depth: usize, analysis: &mut 
             let argument_index = index + 1 + script_index;
             analysis.io_unresolved |= index > 0 || !source_prefix.is_empty();
             collect_path_words(&argv[argument_index + 1..], analysis);
-            if word_dynamic.get(argument_index).copied().unwrap_or(true) {
+            if execution_dynamic
+                .get(argument_index)
+                .copied()
+                .unwrap_or(true)
+            {
                 analysis.unresolved = true;
             } else if let Some(script) = argv.get(argument_index) {
-                collect_shell(script, depth + 1, analysis);
+                collect_shell(script, Some(executable), depth + 1, analysis);
             }
             return;
         }
@@ -814,13 +874,19 @@ fn visit_command(command: Node<'_>, source: &[u8], depth: usize, analysis: &mut 
         }
         return;
     }
-    collect_argument_execution(effective, &word_dynamic[index..], depth, analysis);
+    collect_argument_execution(
+        effective,
+        &execution_dynamic[index..],
+        shell_id,
+        depth,
+        analysis,
+    );
     source_prefix.extend(argv.iter().cloned());
     analysis.stages.push(ShellCommandStage {
         text: node_text(command, source).unwrap_or_default().to_string(),
         argv: effective.to_vec(),
         source_argv: source_prefix,
-        dynamic: word_dynamic[index..].to_vec(),
+        expansions: word_dynamic[index..].to_vec(),
     });
 }
 
@@ -845,7 +911,12 @@ fn names_redirect_descriptor(redirect: Node<'_>, source: &[u8]) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
 }
 
-fn collect_redirect(redirect: Node<'_>, source: &[u8], analysis: &mut ShellAnalysis) {
+fn collect_redirect(
+    redirect: Node<'_>,
+    source: &[u8],
+    shell_id: Option<&str>,
+    analysis: &mut ShellAnalysis,
+) {
     let operator = redirect
         .child_by_field_name("operator")
         .and_then(|node| node_text(node, source))
@@ -860,7 +931,9 @@ fn collect_redirect(redirect: Node<'_>, source: &[u8], analysis: &mut ShellAnaly
         analysis.unresolved |= !matches!(operator.as_str(), ">&-" | "<&-");
         return;
     };
-    let (destination, dynamic) = shell_word(destination_node, source);
+    let (destination, expansion) =
+        shell_word(destination_node, source, shell_id, WordPosition::Redirect);
+    let dynamic = expansion.requires_expansion();
     analysis.unresolved |= dynamic;
     if !dynamic && matches!(operator.as_str(), ">&" | "<&" | ">&-" | "<&-") {
         match destination.as_deref() {
@@ -908,37 +981,6 @@ fn redirect_operator_from_children(redirect: Node<'_>, source: &[u8]) -> Option<
         )
         .then(|| text.to_string())
     })
-}
-
-fn shell_word(node: Node<'_>, source: &[u8]) -> (Option<String>, bool) {
-    let Some(raw) = node_text(node, source) else {
-        return (None, true);
-    };
-    let dynamic =
-        !(raw.starts_with('\'') && raw.ends_with('\'')) && contains_dynamic_expansion(node);
-    match shell_words::split(raw) {
-        Ok(words) if words.len() == 1 => (words.into_iter().next(), dynamic),
-        _ => (None, dynamic),
-    }
-}
-
-fn contains_dynamic_expansion(root: Node<'_>) -> bool {
-    let mut stack = vec![root];
-    while let Some(node) = stack.pop() {
-        if matches!(
-            node.kind(),
-            "arithmetic_expansion"
-                | "command_substitution"
-                | "expansion"
-                | "process_substitution"
-                | "simple_expansion"
-        ) {
-            return true;
-        }
-        let mut cursor = node.walk();
-        stack.extend(node.named_children(&mut cursor));
-    }
-    false
 }
 
 pub(super) enum PosixShellInput {
@@ -1069,6 +1111,7 @@ fn collect_path_words(words: &[String], analysis: &mut ShellAnalysis) {
 fn collect_argument_execution(
     argv: &[String],
     dynamic: &[bool],
+    shell_id: Option<&str>,
     depth: usize,
     analysis: &mut ShellAnalysis,
 ) {
@@ -1090,7 +1133,7 @@ fn collect_argument_execution(
                 {
                     return;
                 }
-                collect_shell(&argv[1..].join(" "), depth + 1, analysis);
+                collect_shell(&argv[1..].join(" "), shell_id, depth + 1, analysis);
             }
         }
         Some(ArgumentExecution::InputArgv) => {
@@ -1131,7 +1174,7 @@ fn collect_argument_execution(
                 return;
             }
             let command = argv[start..end].join(" ");
-            collect_shell(&command, depth + 1, analysis);
+            collect_shell(&command, None, depth + 1, analysis);
         }
         Some(ArgumentExecution::ShellLiteral) => {
             let Some(script_index) = trap_script_index(&argv[1..]).map(|index| index + 1) else {
@@ -1143,7 +1186,7 @@ fn collect_argument_execution(
             if dynamic.get(script_index).copied().unwrap_or(true) {
                 analysis.unresolved = true;
             } else {
-                collect_shell(&argv[script_index], depth + 1, analysis);
+                collect_shell(&argv[script_index], shell_id, depth + 1, analysis);
             }
         }
         Some(ArgumentExecution::FindExec) => {

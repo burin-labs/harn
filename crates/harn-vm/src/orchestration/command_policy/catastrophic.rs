@@ -31,8 +31,32 @@ pub(super) struct ShellCommandStage {
     pub(super) text: String,
     pub(super) argv: Vec<String>,
     pub(super) source_argv: Vec<String>,
-    /// Expansion marker for each argv element.
-    pub(super) dynamic: Vec<bool>,
+    pub(super) expansions: Vec<ShellWordExpansion>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ShellWordExpansion {
+    Literal,
+    Pathname,
+    RuntimeValue,
+}
+
+impl ShellWordExpansion {
+    pub(super) fn is_dynamic(self) -> bool {
+        self == Self::RuntimeValue
+    }
+
+    pub(super) fn requires_expansion(self) -> bool {
+        self != Self::Literal
+    }
+
+    fn from_dynamic(dynamic: bool) -> Self {
+        if dynamic {
+            Self::RuntimeValue
+        } else {
+            Self::Literal
+        }
+    }
 }
 
 /// Maximum `bash -c` recursion depth. Each level strips a shell wrapper, so
@@ -88,7 +112,7 @@ pub(super) fn shell_source_groups(command: &str) -> Vec<Vec<ShellCommandStage>> 
                         text: text.trim().to_string(),
                         argv: tokens[index..].to_vec(),
                         source_argv: tokens.clone(),
-                        dynamic: vec![false; tokens.len() - index],
+                        expansions: vec![ShellWordExpansion::Literal; tokens.len() - index],
                     })
                 })
                 .collect::<Vec<_>>();
@@ -140,8 +164,10 @@ fn reason_inner(
     roots: &[String],
     active_cwd: Option<&Path>,
     depth: usize,
+    shell_id: &str,
 ) -> Option<String> {
-    let analysis = analyze_shell(command);
+    let analysis =
+        analyze_shell_dialect(crate::shells::ShellDialect::Posix, command, Some(shell_id));
     reason_from_analysis(&analysis, roots, active_cwd, depth)
 }
 
@@ -174,9 +200,7 @@ fn reason_from_analysis(
         if argv_deletes_project(&stage.argv) {
             return Some(PROJECT_DELETE_REASON.to_string());
         }
-        if let Some(hit) =
-            invocation_catastrophe(&stage.argv, 0, stage.argv.len(), roots, active_cwd, depth)
-        {
+        if let Some(hit) = invocation_catastrophe(stage, roots, active_cwd, depth) {
             return Some(hit);
         }
     }
@@ -184,14 +208,14 @@ fn reason_from_analysis(
 }
 
 fn invocation_catastrophe(
-    tokens: &[String],
-    start: usize,
-    end: usize,
+    stage: &ShellCommandStage,
     roots: &[String],
     active_cwd: Option<&Path>,
     depth: usize,
 ) -> Option<String> {
-    let command_index = unwrapped_command_index(tokens, start, end);
+    let tokens = &stage.argv;
+    let end = tokens.len();
+    let command_index = unwrapped_command_index(tokens, 0, end);
     if command_index >= end {
         return None;
     }
@@ -203,7 +227,7 @@ fn invocation_catastrophe(
     // inherited from the inner classification).
     if matches!(command, "bash" | "sh" | "zsh") {
         if let Some(script) = shell_c_script(args) {
-            if let Some(hit) = reason_inner(script, roots, active_cwd, depth + 1) {
+            if let Some(hit) = reason_inner(script, roots, active_cwd, depth + 1, command) {
                 return Some(hit);
             }
         }
@@ -221,7 +245,18 @@ fn invocation_catastrophe(
             "`{command}` (filesystem format) is blocked: it would destroy a device"
         )),
         "chmod" => chmod_catastrophe(args),
-        "truncate" => unresolved_writes::truncate_catastrophe(args, active_cwd),
+        "truncate" => unresolved_writes::truncate_catastrophe(
+            args,
+            stage
+                .expansions
+                .get(command_index + 1..end)
+                .unwrap_or_default()
+                .iter()
+                .map(|expansion| expansion.requires_expansion())
+                .collect::<Vec<_>>()
+                .as_slice(),
+            active_cwd,
+        ),
         _ => None,
     }
 }

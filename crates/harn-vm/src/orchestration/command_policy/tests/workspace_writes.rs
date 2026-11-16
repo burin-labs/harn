@@ -151,3 +151,164 @@ async fn tracked_writes_remain_approval_eligible_and_destructive_commands_do_not
     }
     clear_command_policies();
 }
+
+fn without_execution_root(mut context: JsonValue) -> JsonValue {
+    context["request"]["cwd"] = JsonValue::Null;
+    context["workspace_roots"] = serde_json::json!([]);
+    context
+}
+
+#[test]
+fn unresolved_literal_writes_use_shell_facts_and_normalized_zero_sizes() {
+    for command in [
+        "printf x > '$OUTPUT'",
+        "printf x > '*'",
+        "printf x > '[draft]'",
+        "printf x > *.txt",
+        "truncate -s 00 source.rs",
+        "truncate -s 0KB source.rs",
+        "truncate -s 0KiB '$OUTPUT'",
+        "truncate -s 0 -- '*'",
+    ] {
+        let unresolved = command_risk_scan_json(&without_execution_root(shell_ctx(command)), None);
+        assert!(
+            unresolved["catastrophic_reason"]
+                .as_str()
+                .unwrap()
+                .contains("no execution root"),
+            "{command}: {unresolved}"
+        );
+        let resolved = command_risk_scan_json(&shell_ctx(command), None);
+        assert!(
+            resolved.get("catastrophic_reason").is_none(),
+            "{command}: {resolved}"
+        );
+        assert!(
+            labels(&resolved).contains(&"write_intent".to_string()),
+            "{command}: {resolved}"
+        );
+    }
+    let argv = without_execution_root(ctx(&["truncate", "-s", "0", "$OUTPUT"]));
+    let scan = command_risk_scan_json(&argv, None);
+    assert!(scan["catastrophic_reason"]
+        .as_str()
+        .unwrap()
+        .contains("no execution root"));
+}
+
+#[test]
+fn unresolved_expansions_stay_distinct_from_literal_filenames() {
+    for command in [
+        "printf x > \"$OUTPUT\"",
+        "truncate -s 0 \"$OUTPUT\"",
+        "truncate -s 0 *.txt",
+        "truncate -s 0b source.rs",
+        "truncate -s 1 source.rs",
+    ] {
+        let scan = command_risk_scan_json(&without_execution_root(shell_ctx(command)), None);
+        assert!(
+            scan.get("catastrophic_reason").is_none(),
+            "{command}: {scan}"
+        );
+        assert!(
+            labels(&scan).contains(&"write_intent".to_string()),
+            "{command}: {scan}"
+        );
+    }
+}
+
+#[test]
+fn shell_identity_controls_redirect_patterns_but_all_shells_expand_argument_patterns() {
+    for shell in ["sh", "bash", "zsh"] {
+        let mut context = without_execution_root(shell_ctx("printf x > *.txt"));
+        context["request"]["shell"]["id"] = serde_json::json!(shell);
+        let wrapped = without_execution_root(ctx(&[shell, "-c", "printf x > *.txt"]));
+        for context in [context, wrapped] {
+            let scan = command_risk_scan_json(&context, None);
+            assert_eq!(
+                scan["shell_redirects"][0]["dynamic"],
+                shell != "sh",
+                "{shell}: {scan}"
+            );
+            assert_eq!(
+                scan.get("catastrophic_reason").is_some(),
+                shell == "sh",
+                "{shell}: {scan}"
+            );
+        }
+        for (command, dynamic) in [
+            ("truncate -s 0 *.txt", false),
+            ("truncate -s 0 '$OUTPUT'/*.txt", false),
+            ("truncate -s 0 $DIR/*.txt", true),
+            ("truncate -s 0 *.txt/$FILE", true),
+            ("truncate -s 0 ~/draft", true),
+        ] {
+            let mut context = without_execution_root(shell_ctx(command));
+            context["request"]["shell"]["id"] = serde_json::json!(shell);
+            let wrapped = without_execution_root(ctx(&[shell, "-c", command]));
+            for context in [context, wrapped] {
+                let scan = command_risk_scan_json(&context, None);
+                assert_eq!(
+                    scan["execution_stages"][0]["dynamic"][3], dynamic,
+                    "{shell}: {scan}"
+                );
+                assert!(scan.get("catastrophic_reason").is_none(), "{shell}: {scan}");
+            }
+        }
+        for command in [
+            "truncate -s 0 {1..2}",
+            "truncate -s 0 {a,b}",
+            "truncate -s 0 {a,\"b\"}",
+        ] {
+            let mut context = without_execution_root(shell_ctx(command));
+            context["request"]["shell"]["id"] = serde_json::json!(shell);
+            let scan = command_risk_scan_json(&context, None);
+            assert_eq!(
+                scan["execution_stages"][0]["dynamic"][3],
+                shell != "sh",
+                "{shell}: {scan}"
+            );
+            assert_eq!(
+                scan.get("catastrophic_reason").is_some(),
+                shell == "sh",
+                "{shell}: {scan}"
+            );
+        }
+    }
+}
+
+#[test]
+fn quoted_escaped_and_resolved_argv_patterns_remain_literal() {
+    for command in [
+        "truncate -s 0 '*.txt'",
+        "truncate -s 0 \"*.txt\"",
+        "truncate -s 0 \\*.txt",
+        "truncate -s 0 '~draft'",
+        "truncate -s 0 \\~draft",
+        "truncate -s 0 draft~",
+        "truncate -s 0 '{1..2}'",
+        "truncate -s 0 '{draft}'",
+        "truncate -s 0 {draft}",
+        "truncate -s 0 '{a,b}'",
+    ] {
+        for shell in ["sh", "bash", "zsh"] {
+            let mut context = without_execution_root(shell_ctx(command));
+            context["request"]["shell"]["id"] = serde_json::json!(shell);
+            let scan = command_risk_scan_json(&context, None);
+            assert_eq!(
+                scan["execution_stages"][0]["dynamic"][3], false,
+                "{command}: {scan}"
+            );
+            assert!(
+                scan.get("catastrophic_reason").is_some(),
+                "{command}: {scan}"
+            );
+        }
+    }
+    let scan = command_risk_scan_json(
+        &without_execution_root(ctx(&["truncate", "-s", "0", "*.txt"])),
+        None,
+    );
+    assert_eq!(scan["execution_stages"][0]["dynamic"][3], false);
+    assert!(scan.get("catastrophic_reason").is_some());
+}

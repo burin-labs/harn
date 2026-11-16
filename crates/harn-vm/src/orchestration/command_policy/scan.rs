@@ -30,7 +30,7 @@ pub(super) fn scan_command_risk_scan_json(
     let execution_stages = command_analysis
         .stages
         .iter()
-        .map(|stage| serde_json::json!({ "argv": stage.argv, "source_argv": stage.source_argv, "dynamic": stage.dynamic, "cwd": JsonValue::Null }))
+        .map(|stage| serde_json::json!({ "argv": stage.argv, "source_argv": stage.source_argv, "dynamic": stage.expansions.iter().map(|value| value.is_dynamic()).collect::<Vec<_>>(), "cwd": JsonValue::Null }))
         .collect::<Vec<_>>();
     let shell_redirects = command_analysis
         .redirects
@@ -481,6 +481,7 @@ fn security_command_analysis_with_metadata(
         ctx.pointer("/request/command")
             .and_then(|value| value.as_str())
             .unwrap_or_default(),
+        resolution.shell_id.as_deref(),
     );
     let unresolved_reason = analysis
         .unresolved
@@ -620,7 +621,10 @@ pub(super) fn analysis_has_destructive_command(
             .enumerate()
             .map(|(index, text)| AnalyzedArg {
                 text,
-                dynamic: stage.dynamic.get(index + 1).copied().unwrap_or(true),
+                dynamic: stage
+                    .expansions
+                    .get(index + 1)
+                    .is_none_or(|value| value.is_dynamic()),
             })
             .collect::<Vec<_>>();
         match command
