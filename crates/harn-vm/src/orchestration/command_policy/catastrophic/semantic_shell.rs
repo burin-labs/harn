@@ -19,8 +19,8 @@ use super::{
 
 /// Commands and argument words that a policy classifier can reason about.
 ///
-/// `unresolved` is set whenever syntax recovery or dynamic execution prevents
-/// the parser from naming an executable. Callers must not interpret an empty
+/// `unresolved` is set when syntax recovery, dynamic execution, or unknown
+/// descriptor routing prevents complete execution analysis. Do not interpret an empty
 /// `stages` list as evidence of safety when this bit is set.
 #[derive(Debug, Default)]
 pub(crate) struct ShellAnalysis {
@@ -30,7 +30,7 @@ pub(crate) struct ShellAnalysis {
     /// substitutions and quoted words. The catastrophic floor consumes these
     /// rather than trying to rediscover AST nesting from flattened text.
     pub(crate) redirects: Vec<ShellRedirect>,
-    /// I/O syntax not represented by redirects and executed argv.
+    /// I/O targets or syntax that are not fully resolved.
     pub(crate) io_unresolved: bool,
     /// An invoked self-recursive colon function was identified structurally.
     pub(crate) fork_bomb: bool,
@@ -866,7 +866,9 @@ fn collect_redirect(redirect: Node<'_>, source: &[u8], analysis: &mut ShellAnaly
     };
     let (destination, dynamic) = shell_word(destination_node, source);
     analysis.io_unresolved |= dynamic;
-    if !dynamic && matches!(operator.as_str(), ">&" | "<&" | ">&-" | "<&-") {
+    let descriptor = matches!(operator.as_str(), ">&" | "<&" | ">&-" | "<&-");
+    analysis.unresolved |= dynamic && descriptor;
+    if !dynamic && descriptor {
         match destination.as_deref() {
             // Duplicating or closing a literal descriptor touches no file.
             Some(fd) if fd == "-" || (!fd.is_empty() && fd.bytes().all(|b| b.is_ascii_digit())) => {

@@ -106,8 +106,8 @@ directories into the current working copy. Command-reader checks use that
 resolved directory. The original argument remains in the audit record; the
 original directory receives no additional authority. Unrelated roots, sensitive
 paths, and symlink escapes retain their normal refusals.
-An unknown shell redirection target alone does not change the directory used to
-check a literal reader operand. Unresolved commands and directory changes still
+An unknown file path in a shell redirection alone does not change the directory
+used to check a literal reader operand. Unresolved commands and directory changes still
 prevent that directory from being assumed. The unknown redirection destination
 retains its command-approval risk independently of the reader-path check.
 
