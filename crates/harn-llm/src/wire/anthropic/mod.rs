@@ -174,13 +174,18 @@ fn sanitize_tool(
         }
         object.remove("namespace");
         object.remove("namespaces");
+        let profile = if object.get("strict").and_then(Value::as_bool) == Some(true) {
+            SchemaCompatProfile::AnthropicStrict
+        } else {
+            SchemaCompatProfile::AnthropicLenient
+        };
         if let Some(schema) = object.get("input_schema").cloned() {
             object.insert(
                 "input_schema".to_owned(),
                 super::sanitize_schema_for_provider(
                     &opts.provider,
                     &opts.model,
-                    SchemaCompatProfile::AnthropicStrict,
+                    profile,
                     SchemaSurface::ToolParameters,
                     &schema,
                     audits,
