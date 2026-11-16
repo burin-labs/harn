@@ -23,7 +23,7 @@ function fixture(options={}) {
   const api={token:'fixture',
     async read(endpoint) {
       if(endpoint.endsWith('/pulls/17'))return {number:17,state:'closed',merged:true,merge_commit_sha:merge,
-        base:{ref:'main',repo:{full_name:repository}},labels:[{name:'release-needed'}],...options.pull};
+        base:{ref:'main',repo:{full_name:repository}},labels:[{name:'release-needed'}],body:'',...options.pull};
       if(endpoint.endsWith('/git/ref/heads/main'))return {object:{sha:source}};
       if(endpoint.includes('/compare/'))return {status:'ahead',base_commit:{sha:merge},merge_base_commit:{sha:merge},...options.comparison};
       throw new Error(`unexpected fixture read ${endpoint}`);
@@ -65,6 +65,36 @@ test('merged labeled request dispatches exact fresh candidate then exact-source 
   assert(f.progress.some(row=>row.phase==='promotion'&&row.promotion_run_id===43));
   assert.equal(result.observed_jobs,1);assert.deepEqual(result.pending_jobs,[]);assert.deepEqual(result.failing_jobs,[]);
 });
+
+test('explicit consumer selection reaches candidate planning and dispatch',async()=>{
+  const f=fixture({pull:{body:'Pairs-with: consumer#99'}});
+  const admitted=await releaseRequest(f.api,repository,17,false,'77');
+  assert.equal(admitted.consumer_pull_request,'77');
+  const planned=await runRequestedRelease(f.api,admitted,{...f.execution,dryRun:true});
+  assert.deepEqual(planned.dispatch_plan[0].inputs,{source_candidate:true,consumer_pull_request:'77'});
+  assert.equal(f.dispatches.length,0);
+  const result=await runRequestedRelease(f.api,admitted,f.execution);
+  assert.equal(result.verdict,'complete');
+  assert.deepEqual(f.dispatches,[
+    {workflow:'build-release-binaries.yml',inputs:{source_candidate:true,consumer_pull_request:'77'}},
+    {workflow:'promote-release.yml',inputs:{candidate_sha:source,candidate_run_id:'42'}},
+  ]);
+});
+
+test('a mutable request description cannot choose the consumer',async()=>{
+  const f=fixture({pull:{body:'Pairs-with: consumer#99'}});
+  assert.deepEqual(await releaseRequest(f.api,repository,17),request);
+});
+
+for(const [name,selection] of [
+  ['null',null],['object',{}],['numeric',77],['zero','0'],['multiple','77,78'],
+]) {
+  test(`${name} request pairing refuses before dispatch`,async()=>{
+    const f=fixture();
+    await assert.rejects(releaseRequest(f.api,repository,17,false,selection),/consumer_pairing_invalid/);
+    assert.equal(f.dispatches.length,0);
+  });
+}
 
 for(const [name,options] of Object.entries({unmerged:{pull:{merged:false}},unlabeled:{pull:{labels:[]}},
   foreignBase:{pull:{base:{ref:'main',repo:{full_name:'another/repo'}}}},behind:{comparison:{status:'behind'}},
@@ -213,6 +243,11 @@ test('the deployed caller admits only trusted main and uses a typed merged-reque
   assert.equal(workflow.on.pull_request_target,undefined);
   assert(workflow.on.workflow_call);
   assert.equal(workflow.on.workflow_dispatch.inputs.dry_run.default,true);
+  assert.deepEqual(workflow.on.workflow_dispatch.inputs.consumer_pull_request,
+    workflow.on.workflow_call.inputs.consumer_pull_request);
+  assert.equal(workflow.on.workflow_dispatch.inputs.consumer_pull_request.type,'string');
+  assert.equal(workflow.on.workflow_dispatch.inputs.consumer_pull_request.default,'');
+  assert.equal(workflow.jobs.release.env.RELEASE_REQUEST_CONSUMER_PULL,'${{ inputs.consumer_pull_request }}');
   assert.equal(workflow.on.schedule,undefined);
   assert(workflow.jobs.report.if.includes('always()'));
   for(const job of Object.values(workflow.jobs)) {

@@ -14,6 +14,12 @@ main and then promotes that exact candidate run. A main advance is accepted
 only after proving that it contains the requesting merge. The candidate and
 promotion workflows retain all existing qualification and publication gates.
 
+To select an explicit consumer pull, add `-f consumer_pull_request=PR_NUMBER` to
+the request workflow command. The request forwards that selection to the
+candidate, whose existing source-pairing and containment rules still apply.
+An empty input leaves selection to the candidate's source declarations.
+Promotion uses the candidate's qualified binding.
+
 The caller waits at most 210 minutes for the candidate and 120 minutes for
 promotion. It reports the exact run IDs, observed job count, pending names and
 failing names on the merged pull request. A failure, unreadable proof or deadline
