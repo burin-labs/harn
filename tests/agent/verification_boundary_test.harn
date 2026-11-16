@@ -1,0 +1,128 @@
+import {
+  VerificationDiagnosticDelta,
+  VerificationSnapshotStaleness,
+  VerificationWarmStateFact,
+  verification_diagnostic_delta,
+  verification_snapshot_staleness,
+  verification_warm_state_facts,
+} from "std/verification"
+import {
+  __verification_delta_feeds_gates,
+  __verification_delta_status,
+  __verification_reference,
+  __verification_warm_state_receipt_handle,
+  __verification_warm_state_timings,
+} from "std/verification_core"
+import { __verification_hud_entry, __verification_row_p95_ms } from "std/verification_ladder"
+
+struct TimingSample {
+  p95: unknown
+}
+
+struct StartedSample {
+  handle_id: unknown
+}
+
+struct LabelSample {
+  name: unknown
+}
+
+struct ClassificationSample {
+  status: unknown
+  feedsGates: unknown
+}
+
+pipeline test_timing_records_preserve_coercion_and_fallback(harness: Harness) {
+  for value in [nil, false, 0, "legacy", [], {}] {
+    const row = {timings: {warmMs: value, coldMs: {p95: 11}}}
+    assert_eq(__verification_warm_state_timings(row, {}), {warm_ms: nil, cold_ms: 11})
+    assert_eq(__verification_row_p95_ms(row, {}, "warm"), 11)
+  }
+  const nominal = {timings: {warmMs: TimingSample {p95: "7"}, coldMs: {p95: 11}}}
+  assert_eq(__verification_warm_state_timings(nominal, {}), {warm_ms: 7, cold_ms: 11})
+  assert_eq(
+    __verification_warm_state_timings(nominal, {warmMs: 0, coldMs: false}),
+    {warm_ms: 0, cold_ms: 0},
+  )
+  assert_eq(__verification_row_p95_ms({timings: {warmMs: {p95: 0}}}, {}, "warm"), 0)
+  assert_eq(
+    __verification_row_p95_ms({timings: {warmMs: {p95: "bad"}, coldMs: {p95: 11}}}, {}, "warm"),
+    999999,
+    "conversion follows raw-value fallback",
+  )
+}
+
+pipeline test_classification_records_preserve_truthiness_and_precedence(harness: Harness) {
+  for key in ["classification", "diagnostic"] {
+    const nominal = {[key]: ClassificationSample {status: "advisory", feedsGates: false}}
+    assert_eq(__verification_delta_status(nominal), "advisory")
+    assert(!__verification_delta_feeds_gates(nominal))
+    assert(__verification_delta_feeds_gates(nominal + {feedsGates: true}))
+    for value in [nil, false, 0, "legacy", [], {}] {
+      const input = {[key]: value}
+      assert_eq(__verification_delta_status(input), "")
+      assert(__verification_delta_feeds_gates(input))
+    }
+  }
+  assert(!__verification_delta_feeds_gates({classification: {feedsGates: false}}))
+  assert(!__verification_delta_feeds_gates({classification: {feedsGates: 0}}))
+  assert(__verification_delta_feeds_gates({classification: {feedsGates: "false"}}))
+}
+
+pipeline test_receipt_and_hud_records_keep_nominal_containers(harness: Harness) {
+  assert_eq(
+    __verification_warm_state_receipt_handle({started: StartedSample {handle_id: " nominal "}}),
+    "nominal",
+  )
+  assert_eq(__verification_warm_state_receipt_handle({started: {handle_id: false}}), "false")
+  assert_eq(
+    __verification_warm_state_receipt_handle({handle_id: "direct", started: {handle_id: "nested"}}),
+    "direct",
+  )
+  for value in [nil, false, 0, "legacy", [], {}] {
+    assert_eq(__verification_warm_state_receipt_handle({started: value}), nil)
+  }
+  for row in [
+    LabelSample {name: "nominal"},
+    {name: "nominal", extension: [1, 2]},
+    {name: "nominal", [7]: "kept"},
+  ] {
+    const entry = __verification_hud_entry(
+      {row_id: "fallback", command: "control", p95_ms: 0, row: row},
+    )
+    if entry == nil {
+      throw "dictionary entry must be measured"
+    }
+    assert_eq(entry.label, "nominal")
+    assert_eq(entry.row, row, "raw metadata remains intact")
+  }
+  assert_eq(
+    __verification_hud_entry(LabelSample {name: "outer"}),
+    nil,
+    "the existing outer dictionary guard remains",
+  )
+  const reference = __verification_reference({name: "kept", extension: [1, 2], [7]: "integer key"})
+  if reference == nil {
+    throw "record decoder must be reached"
+  }
+  assert_eq(reference[7], "integer key")
+  assert_eq(reference.extension, [1, 2])
+}
+
+pipeline test_public_facts_match_their_declared_schemas(harness: Harness) {
+  const facts = verification_warm_state_facts(harness.tools, [{warmMode: {ready: true}}])
+  const fact = facts[0]
+  if fact == nil {
+    throw "warm-state fact must be measured"
+  }
+  assert_eq(schema_expect(fact, schema_of(VerificationWarmStateFact)), fact)
+  const stale = verification_snapshot_staleness({a: "old"}, {a: "new"})
+  assert_eq(schema_expect(stale, schema_of(VerificationSnapshotStaleness)), stale)
+  const delta = verification_diagnostic_delta(
+    harness.agent,
+    {diagnostics: ["old"]},
+    {diagnostics: []},
+  )
+  assert_eq(delta.status, "cleared")
+  assert_eq(schema_expect(delta, schema_of(VerificationDiagnosticDelta)), delta)
+}

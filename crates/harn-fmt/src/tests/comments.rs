@@ -640,10 +640,9 @@ fn assert_comment_stays_in_block(source: &str, comment: &str, closing_anchor: &s
 // stayed unclaimed — and the next top-level item's leading-comment sweep then
 // adopted it, moving it out of the function and onto an unrelated declaration
 // where it was simply false.
-#[test]
-fn comment_in_catch_block_stays_in_the_catch_block() {
-    assert_comment_stays_in_block(
-        "fn risky() -> int { return 1 }\n\
+#[rstest::rstest]
+#[case::comment_in_catch_block_stays_in_the_catch_block(
+    "fn risky() -> int { return 1 }\n\
          fn caller() -> dict {\n\
            const result = try {\n\
              risky()\n\
@@ -654,15 +653,11 @@ fn comment_in_catch_block_stays_in_the_catch_block() {
            return result\n\
          }\n\
          fn unrelated() -> int { return 2 }\n",
-        "BELONGS TO THE CATCH",
-        "fn unrelated",
-    );
-}
-
-#[test]
-fn comment_in_try_body_stays_in_the_try_body() {
-    assert_comment_stays_in_block(
-        "fn risky() -> int { return 1 }\n\
+    "BELONGS TO THE CATCH",
+    "fn unrelated"
+)]
+#[case::comment_in_try_body_stays_in_the_try_body(
+    "fn risky() -> int { return 1 }\n\
          fn caller() -> int {\n\
            const result = try {\n\
              // BELONGS TO THE TRY\n\
@@ -673,15 +668,11 @@ fn comment_in_try_body_stays_in_the_try_body() {
            return result\n\
          }\n\
          fn unrelated() -> int { return 2 }\n",
-        "BELONGS TO THE TRY",
-        "fn unrelated",
-    );
-}
-
-#[test]
-fn comment_in_value_position_else_stays_in_the_else() {
-    assert_comment_stays_in_block(
-        "fn caller(flag: bool) -> dict {\n\
+    "BELONGS TO THE TRY",
+    "fn unrelated"
+)]
+#[case::comment_in_value_position_else_stays_in_the_else(
+    "fn caller(flag: bool) -> dict {\n\
            const result = if flag {\n\
              {a: 1}\n\
            } else {\n\
@@ -691,17 +682,12 @@ fn comment_in_value_position_else_stays_in_the_else() {
            return result\n\
          }\n\
          fn unrelated() -> int { return 2 }\n",
-        "BELONGS TO THE ELSE",
-        "fn unrelated",
-    );
-}
-
-// Not only the comment adjacent to a trailing bare expression: a comment above
-// an ordinary statement inside an expression-position block escaped too.
-#[test]
-fn comment_above_a_statement_in_a_catch_block_stays_put() {
-    assert_comment_stays_in_block(
-        "fn risky() -> int { return 1 }\n\
+    "BELONGS TO THE ELSE",
+    "fn unrelated"
+)]
+// Comments above ordinary statements must stay in expression-position blocks too.
+#[case::comment_above_a_statement_in_a_catch_block_stays_put(
+    "fn risky() -> int { return 1 }\n\
          fn caller() -> dict {\n\
            const result = try {\n\
              risky()\n\
@@ -713,24 +699,37 @@ fn comment_above_a_statement_in_a_catch_block_stays_put() {
            return result\n\
          }\n\
          fn unrelated() -> int { return 2 }\n",
-        "BELONGS TO THE CATCH",
-        "fn unrelated",
-    );
-}
-
-#[test]
-fn comment_in_a_closure_body_stays_in_the_closure() {
-    assert_comment_stays_in_block(
-        "fn caller(items: list) -> list {\n\
+    "BELONGS TO THE CATCH",
+    "fn unrelated"
+)]
+#[case::comment_in_a_closure_body_stays_in_the_closure(
+    "fn caller(items: list) -> list {\n\
            return items.map({ item ->\n\
              // BELONGS TO THE CLOSURE\n\
              item + 1\n\
            })\n\
          }\n\
          fn unrelated() -> int { return 2 }\n",
-        "BELONGS TO THE CLOSURE",
-        "fn unrelated",
-    );
+    "BELONGS TO THE CLOSURE",
+    "fn unrelated"
+)]
+// A trailing comment has no following statement to claim it before the block ends.
+#[case::comment_after_the_last_statement_stays_in_the_function(
+    "fn g() -> int {\n  const y = 2\n  return y\n  // TAIL\n}\n\nfn later() -> int {\n  return 3\n}\n",
+    "// TAIL",
+    "}",
+)]
+#[case::comment_after_the_last_statement_of_a_loop_stays_in_the_loop(
+    "fn g() -> int {\n  for x in xs {\n    use(x)\n    // TAIL_LOOP\n  }\n  return 1\n}\n",
+    "// TAIL_LOOP",
+    "  }"
+)]
+fn comments_remain_in_their_block(
+    #[case] case_input: &str,
+    #[case] case_comment: &str,
+    #[case] case_anchor: &str,
+) {
+    assert_comment_stays_in_block(case_input, case_comment, case_anchor);
 }
 
 // A comment ABOVE a match arm documents the arm, so it must not be sucked into
@@ -795,19 +794,6 @@ fn synthesized_zero_span_body_node_does_not_swallow_earlier_comments() {
     );
 }
 
-/// A comment written after the last statement of a body has nothing to its
-/// right to attach to, so before the tail flush it stayed unclaimed and the
-/// top-level sweep adopted it onto the NEXT declaration — where it silently
-/// described unrelated code.
-#[test]
-fn comment_after_the_last_statement_stays_in_the_function() {
-    assert_comment_stays_in_block(
-        "fn g() -> int {\n  const y = 2\n  return y\n  // TAIL\n}\n\nfn later() -> int {\n  return 3\n}\n",
-        "// TAIL",
-        "}",
-    );
-}
-
 #[test]
 fn comment_after_the_last_statement_of_an_else_stays_in_the_else() {
     let source = "fn h() -> int {\n  if a {\n    b()\n  } else {\n    c()\n    // TAIL_ELSE\n  }\n  return 1\n}\n";
@@ -832,15 +818,6 @@ fn comment_after_the_last_statement_of_a_finally_stays_in_the_finally() {
         "the finally's trailing comment escaped its block:\n{formatted}"
     );
     assert_roundtrip(source);
-}
-
-#[test]
-fn comment_after_the_last_statement_of_a_loop_stays_in_the_loop() {
-    assert_comment_stays_in_block(
-        "fn g() -> int {\n  for x in xs {\n    use(x)\n    // TAIL_LOOP\n  }\n  return 1\n}\n",
-        "// TAIL_LOOP",
-        "  }",
-    );
 }
 
 /// A block's trailing comments belong before its closing brace, even when a

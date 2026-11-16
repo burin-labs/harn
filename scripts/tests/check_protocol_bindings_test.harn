@@ -60,12 +60,99 @@ pipeline test_supplied_artifact_root_round_trip_passes(harness: Harness, task: u
     harness.fs,
     { root ->
       write_fixture_artifacts(harness.fs, root)
+      const python_dir = path_join(root, "spec/protocol-artifacts/python")
+      assert_eq(harness.fs.list_dir(python_dir), ["harn_protocol.py"])
       const report = check_python_protocol_bindings(harness.fs, harness.process, "python3", root)
       assert(report.ok, "Python binding probe failed at ${report.stage}: ${report.stderr}")
       assert_eq(report.stage, "ok")
       assert(to_string(report.stdout).contains("python bindings: OK"))
       assert(to_string(report.stdout).contains("typed event required JSON null cases:"))
       assert(to_string(report.stdout).contains("required JSON fields using shared writer:"))
+      assert_eq(harness.fs.list_dir(python_dir), ["harn_protocol.py"])
+    },
+  )
+}
+
+@test
+pipeline test_invalid_python_is_reported_before_round_trip(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      write_fixture_artifacts(harness.fs, root)
+      write_text(
+        harness.fs,
+        root,
+        "spec/protocol-artifacts/python/harn_protocol.py",
+        "def broken(:\n",
+      )
+      const report = check_python_protocol_bindings(harness.fs, harness.process, "python3", root)
+      assert_eq(report.ok, false)
+      assert_eq(report.stage, "py_compile")
+      assert(to_string(report.stderr).contains("SyntaxError"))
+      assert_eq(
+        harness.fs.list_dir(path_join(root, "spec/protocol-artifacts/python")),
+        ["harn_protocol.py"],
+      )
+    },
+  )
+}
+
+@test
+pipeline test_stale_source_cache_is_ignored_and_preserved(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      write_fixture_artifacts(harness.fs, root)
+      const python_dir = path_join(root, "spec/protocol-artifacts/python")
+      // A real timestamp cache with matching source size/mtime is accepted by an
+      // ordinary import. The checker must validate the source, leaving that cache intact.
+      const stale_cache = harness.process.run(
+        {
+          program: "python3",
+          args: [
+            "-c",
+            """
+import os
+import py_compile
+import sys
+from pathlib import Path
+
+sys.pycache_prefix = None
+directory = Path(sys.argv[1])
+source = directory / "harn_protocol.py"
+original = source.read_bytes()
+stat = source.stat()
+assert b"_harn/agentEvent" in original
+poisoned = original.replace(b"_harn/agentEvent", b"_harn/eventDrift")
+assert len(poisoned) == len(original)
+source.write_bytes(poisoned)
+os.utime(source, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+cache = py_compile.compile(str(source), doraise=True,
+    invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP)
+source.write_bytes(original)
+os.utime(source, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+sys.path.insert(0, str(directory))
+import harn_protocol
+assert harn_protocol.HARN_AGENT_EVENT_METHOD == "_harn/eventDrift"
+print(cache)
+""",
+            python_dir,
+          ],
+        },
+      )
+      assert(stale_cache.success, stale_cache.stderr)
+      const cache_path = stale_cache.stdout.trim()
+      assert(cache_path.starts_with(path_join(python_dir, "__pycache__") + "/"))
+      const cache_before = harness.fs.read_bytes(cache_path)
+      const source_before = harness.fs.read_text(path_join(python_dir, "harn_protocol.py"))
+      const inventory_before = harness.fs.list_dir(dirname(cache_path) ?? python_dir)
+      assert_eq(len(inventory_before), 1)
+      const report = check_python_protocol_bindings(harness.fs, harness.process, "python3", root)
+      assert(report.ok, "Source probe failed at ${report.stage}: ${report.stderr}")
+      assert_eq(report.stage, "ok")
+      assert_eq(harness.fs.read_bytes(cache_path), cache_before)
+      assert_eq(harness.fs.list_dir(dirname(cache_path) ?? python_dir), inventory_before)
+      assert_eq(harness.fs.read_text(path_join(python_dir, "harn_protocol.py")), source_before)
     },
   )
 }

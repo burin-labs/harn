@@ -3,42 +3,643 @@
 // Language: swift.
 
 public struct HarnProviderCatalog: Codable, Sendable, Equatable {
-    public let schemaVersion: Int
-    public let schema: String
-    public let generatedBy: String
-    public let providers: [HarnCatalogProvider]
-    public let models: [HarnCatalogModel]
     public let aliases: [HarnCatalogAlias]
-    public let variants: [HarnCatalogVariant]
-    public let families: [HarnCatalogModelFamily]
-    public let routingRoutes: [HarnCatalogRoutingRoute]?
-    public let qcDefaults: [String: String]
-    public let portalDefaults: [String: HarnCatalogPortalDefault]?
     public let automaticDefaults: [HarnCatalogAutomaticDefault]?
+    public let families: [HarnCatalogModelFamily]
+    public let generatedBy: String
+    public let models: [HarnCatalogModel]
+    public let portalDefaults: [String: HarnCatalogPortalDefault]?
+    public let providers: [HarnCatalogProvider]
+    public let qcDefaults: [String: String]
+    public let routingRoutes: [HarnCatalogRoutingRoute]?
+    public let schema: String
+    public let schemaVersion: Int
+    public let variants: [HarnCatalogVariant]
 
     enum CodingKeys: String, CodingKey {
-        case schemaVersion = "schema_version"
-        case schema
-        case generatedBy = "generated_by"
-        case providers
-        case models
         case aliases
-        case variants
-        case families
-        case routingRoutes = "routing_routes"
-        case qcDefaults = "qc_defaults"
-        case portalDefaults = "portal_defaults"
         case automaticDefaults = "automatic_defaults"
+        case families
+        case generatedBy = "generated_by"
+        case models
+        case portalDefaults = "portal_defaults"
+        case providers
+        case qcDefaults = "qc_defaults"
+        case routingRoutes = "routing_routes"
+        case schema
+        case schemaVersion = "schema_version"
+        case variants
+    }
+}
+
+public struct HarnCatalogAlias: Codable, Sendable, Equatable {
+    public let modelID: String
+    public let name: String
+    public let provider: String
+    public let toolCalling: HarnAliasToolCalling?
+    public let toolFormat: String?
+
+    enum CodingKeys: String, CodingKey {
+        case modelID = "model_id"
+        case name
+        case provider
+        case toolCalling = "tool_calling"
+        case toolFormat = "tool_format"
+    }
+}
+
+public struct HarnModelArchitecture: Codable, Sendable, Equatable {
+    public let activeParameterCountB: Double?
+    public let knowledgeCutoff: String?
+    public let lastVerified: String?
+    public let license: String?
+    public let moe: Bool?
+    public let parameterCountB: Double?
+    public let precision: String?
+    public let quantization: String?
+    public let sourceURL: String?
+    public let tokenizer: String?
+
+    enum CodingKeys: String, CodingKey {
+        case activeParameterCountB = "active_parameter_count_b"
+        case knowledgeCutoff = "knowledge_cutoff"
+        case lastVerified = "last_verified"
+        case license
+        case moe
+        case parameterCountB = "parameter_count_b"
+        case precision
+        case quantization
+        case sourceURL = "source_url"
+        case tokenizer
+    }
+}
+
+public struct HarnProviderAuth: Codable, Sendable, Equatable {
+    public var credentialEnv: [String]? = nil
+    public let env: [String]
+    public let header: String?
+    public let required: Bool
+    public let style: String
+
+    enum CodingKeys: String, CodingKey {
+        case credentialEnv = "credential_env"
+        case env
+        case header
+        case required
+        case style
     }
 }
 
 public struct HarnCatalogAutomaticDefault: Codable, Sendable, Equatable {
-    public let provider: String
     public let modelId: String
+    public let provider: String
 
     enum CodingKeys: String, CodingKey {
-        case provider
         case modelId = "model_id"
+        case provider
+    }
+}
+
+public struct HarnAutomaticModelEligibility: Codable, Sendable, Equatable {
+    public let decision: String
+    public let receipts: [HarnModelEligibilityMeasurement]
+    public let schema: String
+}
+
+public struct HarnCompletionReview: Codable, Sendable, Equatable {
+    public let evidence: String
+    public let maxJudgeCalls: Int?
+    public let scrutiny: String
+
+    enum CodingKeys: String, CodingKey {
+        case evidence
+        case maxJudgeCalls = "max_judge_calls"
+        case scrutiny
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        evidence = try container.decode(String.self, forKey: .evidence)
+        maxJudgeCalls = try container.decodeIfPresent(Int.self, forKey: .maxJudgeCalls)
+        scrutiny = try container.decodeIfPresent(String.self, forKey: .scrutiny) ?? "standard"
+    }
+}
+
+public struct HarnProviderDataControls: Codable, Sendable, Equatable {
+    public let checkedOn: String
+    public let controlScope: String
+    public let noTrainingRequires: [HarnCatalogNoTrainingRequirement]?
+    public let note: String?
+    public let requestControls: [HarnProviderDataControl]?
+    public let retentionDefault: String
+    public let sources: [String]
+    public let trainingDefault: String
+
+    enum CodingKeys: String, CodingKey {
+        case checkedOn = "checked_on"
+        case controlScope = "control_scope"
+        case noTrainingRequires = "no_training_requires"
+        case note
+        case requestControls = "request_controls"
+        case retentionDefault = "retention_default"
+        case sources
+        case trainingDefault = "training_default"
+    }
+}
+
+public struct HarnModelDeprecation: Codable, Sendable, Equatable {
+    public let note: String?
+    public let retiresOn: String?
+    public let status: String
+    public let sunsetDate: String?
+    public let supersededBy: String?
+
+    enum CodingKeys: String, CodingKey {
+        case note
+        case retiresOn = "retires_on"
+        case status
+        case sunsetDate = "sunset_date"
+        case supersededBy = "superseded_by"
+    }
+}
+
+public struct HarnProviderEndpoint: Codable, Sendable, Equatable {
+    public let baseURL: String
+    public let baseURLEnv: String?
+    public let chatAPIAdapter: String?
+    public let chatEndpoint: String
+    public let completionEndpoint: String?
+    public let embeddingsEndpoint: String?
+    public let regionEnv: String?
+    public let regions: [String: HarnProviderEndpointRegion]?
+
+    enum CodingKeys: String, CodingKey {
+        case baseURL = "base_url"
+        case baseURLEnv = "base_url_env"
+        case chatAPIAdapter = "chat_api_adapter"
+        case chatEndpoint = "chat_endpoint"
+        case completionEndpoint = "completion_endpoint"
+        case embeddingsEndpoint = "embeddings_endpoint"
+        case regionEnv = "region_env"
+        case regions
+    }
+}
+
+public struct HarnProviderEndpointRegion: Codable, Sendable, Equatable {
+    public let baseURL: String
+    public let dataControls: HarnModelDataControls?
+    public let label: String?
+    public let lastVerified: String?
+    public let notes: String?
+    public let sourceURL: String?
+
+    enum CodingKeys: String, CodingKey {
+        case baseURL = "base_url"
+        case dataControls = "data_controls"
+        case label
+        case lastVerified = "last_verified"
+        case notes
+        case sourceURL = "source_url"
+    }
+}
+
+public struct HarnModelFormatPreferences: Codable, Sendable, Equatable {
+    public let prefersMarkdownScaffolding: Bool
+    public let prefersRoleDeveloper: Bool
+    public let prefersXMLScaffolding: Bool
+    public let prefersXMLTools: Bool
+    public let structuredOutputMode: String
+    public let supportsAssistantPrefill: Bool
+    public let thinkingBlockStyle: String
+
+    enum CodingKeys: String, CodingKey {
+        case prefersMarkdownScaffolding = "prefers_markdown_scaffolding"
+        case prefersRoleDeveloper = "prefers_role_developer"
+        case prefersXMLScaffolding = "prefers_xml_scaffolding"
+        case prefersXMLTools = "prefers_xml_tools"
+        case structuredOutputMode = "structured_output_mode"
+        case supportsAssistantPrefill = "supports_assistant_prefill"
+        case thinkingBlockStyle = "thinking_block_style"
+    }
+}
+
+public struct HarnProviderHealthcheck: Codable, Sendable, Equatable {
+    public let body: String?
+    public let method: String
+    public let path: String?
+    public let url: String?
+}
+
+public struct HarnLocalMemory: Codable, Sendable, Equatable {
+    public let baseResidentGiB: Double?
+    public let cacheTypeMultipliers: [String: Double]?
+    public let defaultCacheType: String?
+    public let kvCacheGiBPer1KContext: Double?
+    public let lastVerified: String?
+    public let maxRecommendedContext: Int?
+    public let measuredCacheType: String?
+    public let measuredContextWindow: Int?
+    public let measuredResidentGiB: Double?
+    public let notes: String?
+    public let safetyMarginGiB: Double?
+    public let sourceURL: String?
+
+    enum CodingKeys: String, CodingKey {
+        case baseResidentGiB = "base_resident_gib"
+        case cacheTypeMultipliers = "cache_type_multipliers"
+        case defaultCacheType = "default_cache_type"
+        case kvCacheGiBPer1KContext = "kv_cache_gib_per_1k_ctx"
+        case lastVerified = "last_verified"
+        case maxRecommendedContext = "max_recommended_context"
+        case measuredCacheType = "measured_cache_type"
+        case measuredContextWindow = "measured_context_window"
+        case measuredResidentGiB = "measured_resident_gib"
+        case notes
+        case safetyMarginGiB = "safety_margin_gib"
+        case sourceURL = "source_url"
+    }
+}
+
+public struct HarnLocalRuntime: Codable, Sendable, Equatable {
+    public let cacheRamArg: String?
+    public let cacheTypeKArg: String?
+    public let cacheTypeVArg: String?
+    public let chatTemplateKwargsArg: String?
+    public let command: String?
+    public let ctxArg: String?
+    public let defaultArgs: [String]?
+    public let defaultPort: Int?
+    public let enableLoraArg: String?
+    public let flashAttnArg: String?
+    public let gpuLayersArg: String?
+    public let hostArg: String?
+    public let jinjaArg: String?
+    public let kind: String
+    public let lastVerified: String?
+    public let loraModulesArg: String?
+    public let loraModulesValueFormat: String?
+    public let maxLoraRankArg: String?
+    public let metricsArg: String?
+    public let modelArg: String?
+    public let modelSource: String?
+    public let modelSourceEnv: String?
+    public let notes: String?
+    public let parallelArg: String?
+    public let portArg: String?
+    public let prefixArgs: [String]?
+    public let reasoningArg: String?
+    public let reasoningFormatArg: String?
+    public let servedModelArg: String?
+    public let sourceURL: String?
+    public let stop: String
+    public let wireProtocol: String
+
+    enum CodingKeys: String, CodingKey {
+        case cacheRamArg = "cache_ram_arg"
+        case cacheTypeKArg = "cache_type_k_arg"
+        case cacheTypeVArg = "cache_type_v_arg"
+        case chatTemplateKwargsArg = "chat_template_kwargs_arg"
+        case command
+        case ctxArg = "ctx_arg"
+        case defaultArgs = "default_args"
+        case defaultPort = "default_port"
+        case enableLoraArg = "enable_lora_arg"
+        case flashAttnArg = "flash_attn_arg"
+        case gpuLayersArg = "gpu_layers_arg"
+        case hostArg = "host_arg"
+        case jinjaArg = "jinja_arg"
+        case kind
+        case lastVerified = "last_verified"
+        case loraModulesArg = "lora_modules_arg"
+        case loraModulesValueFormat = "lora_modules_value_format"
+        case maxLoraRankArg = "max_lora_rank_arg"
+        case metricsArg = "metrics_arg"
+        case modelArg = "model_arg"
+        case modelSource = "model_source"
+        case modelSourceEnv = "model_source_env"
+        case notes
+        case parallelArg = "parallel_arg"
+        case portArg = "port_arg"
+        case prefixArgs = "prefix_args"
+        case reasoningArg = "reasoning_arg"
+        case reasoningFormatArg = "reasoning_format_arg"
+        case servedModelArg = "served_model_arg"
+        case sourceURL = "source_url"
+        case stop
+        case wireProtocol = "wire_protocol"
+    }
+}
+
+public struct HarnModelModalities: Codable, Sendable, Equatable {
+    public let input: [String]
+    public let output: [String]
+}
+
+public struct HarnCatalogModel: Codable, Sendable, Equatable {
+    public let aliases: [String]
+    public let apiDialect: String?
+    public let architecture: HarnModelArchitecture?
+    public let availability: String
+    public let avoidAsReviewerFor: [String]
+    public let batch: HarnModelBatchSupport?
+    public let benchmarks: [String: Double]
+    public let blurb: String?
+    public let capabilityTags: [String]
+    public let complementaryWith: [String]
+    public let completionReview: HarnCompletionReview?
+    public let contextWindow: Int
+    public let currentSnapshot: String?
+    public let dataControls: HarnModelDataControls?
+    public let deprecation: HarnModelDeprecation
+    public let displayName: String
+    public let embeddingDim: Int?
+    public let embeddingMaxTokens: Int?
+    public let equivalenceGroup: String?
+    public let family: String
+    public let formatPreferences: HarnModelFormatPreferences
+    public let id: String
+    public let lineage: String
+    public let localMemory: HarnLocalMemory?
+    public let logicalModel: String?
+    public let modalities: HarnModelModalities
+    public let name: String
+    public let openWeight: Bool?
+    public let operations: [HarnModelOperation]
+    public let performance: HarnServingPerformance?
+    public let pricing: HarnModelPricing?
+    public let promptCache: Bool
+    public let provider: String
+    public let qualityTags: [String]
+    public let rateLimits: HarnRateLimits?
+    public let reasoning: HarnModelReasoning
+    public let reasoningModes: [HarnModelReasoningMode]
+    public let released: String?
+    public let rowKind: String?
+    public let runtimeContextWindow: Int?
+    public let servedVariant: String?
+    public let servingTiers: [HarnModelServingTier]
+    public let streamTimeout: Double?
+    public let strengths: [String]
+    public let structuredOutput: String
+    public let tier: String
+    public let toolSupport: HarnModelToolSupport
+    public let wireModel: String?
+
+    enum CodingKeys: String, CodingKey {
+        case aliases
+        case apiDialect = "api_dialect"
+        case architecture
+        case availability
+        case avoidAsReviewerFor = "avoid_as_reviewer_for"
+        case batch
+        case benchmarks
+        case blurb
+        case capabilityTags = "capability_tags"
+        case complementaryWith = "complementary_with"
+        case completionReview = "completion_review"
+        case contextWindow = "context_window"
+        case currentSnapshot = "current_snapshot"
+        case dataControls = "data_controls"
+        case deprecation
+        case displayName = "display_name"
+        case embeddingDim = "embedding_dim"
+        case embeddingMaxTokens = "embedding_max_tokens"
+        case equivalenceGroup = "equivalence_group"
+        case family
+        case formatPreferences = "format_preferences"
+        case id
+        case lineage
+        case localMemory = "local_memory"
+        case logicalModel = "logical_model"
+        case modalities
+        case name
+        case openWeight = "open_weight"
+        case operations
+        case performance
+        case pricing
+        case promptCache = "prompt_cache"
+        case provider
+        case qualityTags = "quality_tags"
+        case rateLimits = "rate_limits"
+        case reasoning
+        case reasoningModes = "reasoning_modes"
+        case released
+        case rowKind = "row_kind"
+        case runtimeContextWindow = "runtime_context_window"
+        case servedVariant = "served_variant"
+        case servingTiers = "serving_tiers"
+        case streamTimeout = "stream_timeout"
+        case strengths
+        case structuredOutput = "structured_output"
+        case tier
+        case toolSupport = "tool_support"
+        case wireModel = "wire_model"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        aliases = try container.decode([String].self, forKey: .aliases)
+        apiDialect = try container.decodeIfPresent(String.self, forKey: .apiDialect)
+        architecture = try container.decodeIfPresent(HarnModelArchitecture.self, forKey: .architecture)
+        availability = try container.decode(String.self, forKey: .availability)
+        avoidAsReviewerFor = try container.decodeIfPresent([String].self, forKey: .avoidAsReviewerFor) ?? []
+        batch = try container.decodeIfPresent(HarnModelBatchSupport.self, forKey: .batch)
+        benchmarks = try container.decodeIfPresent([String: Double].self, forKey: .benchmarks) ?? [:]
+        blurb = try container.decodeIfPresent(String.self, forKey: .blurb)
+        capabilityTags = try container.decode([String].self, forKey: .capabilityTags)
+        complementaryWith = try container.decodeIfPresent([String].self, forKey: .complementaryWith) ?? []
+        completionReview = try container.decodeIfPresent(HarnCompletionReview.self, forKey: .completionReview)
+        contextWindow = try container.decode(Int.self, forKey: .contextWindow)
+        currentSnapshot = try container.decodeIfPresent(String.self, forKey: .currentSnapshot)
+        dataControls = try container.decodeIfPresent(HarnModelDataControls.self, forKey: .dataControls)
+        deprecation = try container.decode(HarnModelDeprecation.self, forKey: .deprecation)
+        displayName = try container.decodeIfPresent(String.self, forKey: .displayName) ?? name
+        embeddingDim = try container.decodeIfPresent(Int.self, forKey: .embeddingDim)
+        embeddingMaxTokens = try container.decodeIfPresent(Int.self, forKey: .embeddingMaxTokens)
+        equivalenceGroup = try container.decodeIfPresent(String.self, forKey: .equivalenceGroup)
+        family = try container.decode(String.self, forKey: .family)
+        formatPreferences = try container.decode(HarnModelFormatPreferences.self, forKey: .formatPreferences)
+        id = try container.decode(String.self, forKey: .id)
+        lineage = try container.decode(String.self, forKey: .lineage)
+        localMemory = try container.decodeIfPresent(HarnLocalMemory.self, forKey: .localMemory)
+        logicalModel = try container.decodeIfPresent(String.self, forKey: .logicalModel)
+        modalities = try container.decode(HarnModelModalities.self, forKey: .modalities)
+        openWeight = try container.decodeIfPresent(Bool.self, forKey: .openWeight)
+        operations = try container.decode([HarnModelOperation].self, forKey: .operations)
+        performance = try container.decodeIfPresent(HarnServingPerformance.self, forKey: .performance)
+        pricing = try container.decodeIfPresent(HarnModelPricing.self, forKey: .pricing)
+        promptCache = try container.decode(Bool.self, forKey: .promptCache)
+        provider = try container.decode(String.self, forKey: .provider)
+        qualityTags = try container.decode([String].self, forKey: .qualityTags)
+        rateLimits = try container.decodeIfPresent(HarnRateLimits.self, forKey: .rateLimits)
+        reasoning = try container.decode(HarnModelReasoning.self, forKey: .reasoning)
+        reasoningModes = try container.decodeIfPresent([HarnModelReasoningMode].self, forKey: .reasoningModes) ?? []
+        released = try container.decodeIfPresent(String.self, forKey: .released)
+        rowKind = try container.decodeIfPresent(String.self, forKey: .rowKind)
+        runtimeContextWindow = try container.decodeIfPresent(Int.self, forKey: .runtimeContextWindow)
+        servedVariant = try container.decodeIfPresent(String.self, forKey: .servedVariant)
+        servingTiers = try container.decodeIfPresent([HarnModelServingTier].self, forKey: .servingTiers) ?? []
+        streamTimeout = try container.decodeIfPresent(Double.self, forKey: .streamTimeout)
+        strengths = try container.decodeIfPresent([String].self, forKey: .strengths) ?? []
+        structuredOutput = try container.decode(String.self, forKey: .structuredOutput)
+        tier = try container.decode(String.self, forKey: .tier)
+        toolSupport = try container.decode(HarnModelToolSupport.self, forKey: .toolSupport)
+        wireModel = try container.decodeIfPresent(String.self, forKey: .wireModel)
+    }
+}
+
+public struct HarnModelBatchSupport: Codable, Sendable, Equatable {
+    public let cancellation: String
+    public let discountPercent: Int?
+    public let inputMode: String
+    public let maxInputBytes: Int?
+    public let maxRequests: Int?
+    public let operationalNotes: [String]?
+    public let partialFailure: String
+    public let resultOrdering: String
+    public let resultRetentionDays: Int?
+    public let securityNotes: [String]?
+    public let turnaroundHours: Int?
+    public let wireFormat: String
+
+    enum CodingKeys: String, CodingKey {
+        case cancellation
+        case discountPercent = "discount_percent"
+        case inputMode = "input_mode"
+        case maxInputBytes = "max_input_bytes"
+        case maxRequests = "max_requests"
+        case operationalNotes = "operational_notes"
+        case partialFailure = "partial_failure"
+        case resultOrdering = "result_ordering"
+        case resultRetentionDays = "result_retention_days"
+        case securityNotes = "security_notes"
+        case turnaroundHours = "turnaround_hours"
+        case wireFormat = "wire_format"
+    }
+}
+
+public struct HarnModelDataControls: Codable, Sendable, Equatable {
+    public let checkedOn: String
+    public let note: String?
+    public let retentionDefault: String?
+    public let sources: [String]
+    public let trainingDefault: String
+
+    enum CodingKeys: String, CodingKey {
+        case checkedOn = "checked_on"
+        case note
+        case retentionDefault = "retention_default"
+        case sources
+        case trainingDefault = "training_default"
+    }
+}
+
+public struct HarnModelEligibilityMeasurement: Codable, Sendable, Equatable {
+    public let harnVersion: String
+    public let kind: String
+    public let observedAt: String
+    public let passed: Int
+    public let source: String
+    public let trials: Int
+
+    enum CodingKeys: String, CodingKey {
+        case harnVersion = "harn_version"
+        case kind
+        case observedAt = "observed_at"
+        case passed
+        case source
+        case trials
+    }
+}
+
+public struct HarnCatalogModelFamily: Codable, Sendable, Equatable {
+    public let dimensions: [HarnModelFamilyDimension]
+    public let id: String
+    public let label: String
+    public let modelID: String?
+    public let plainDescription: String
+    public let presets: [HarnModelFamilyPreset]
+    public let provider: String
+
+    enum CodingKeys: String, CodingKey {
+        case dimensions
+        case id
+        case label
+        case modelID = "model_id"
+        case plainDescription = "plain_description"
+        case presets
+        case provider
+    }
+}
+
+public struct HarnModelFamilyDimension: Codable, Sendable, Equatable {
+    public let key: String
+    public let kind: String
+    public let label: String
+    public let orderedValues: [HarnModelFamilyValue]
+    public let plainDescription: String
+
+    enum CodingKeys: String, CodingKey {
+        case key
+        case kind
+        case label
+        case orderedValues = "ordered_values"
+        case plainDescription = "plain_description"
+    }
+}
+
+public struct HarnModelFamilyPreset: Codable, Sendable, Equatable {
+    public let coordinates: [String: String]
+    public let id: String
+    public let label: String
+    public let plainBlurb: String
+
+    enum CodingKeys: String, CodingKey {
+        case coordinates
+        case id
+        case label
+        case plainBlurb = "plain_blurb"
+    }
+}
+
+public struct HarnModelFamilyValue: Codable, Sendable, Equatable {
+    public let label: String
+    public let modelID: String?
+    public let plainDescription: String
+    public let relativeCostHint: Int
+    public let relativeSpeedHint: Int
+    public let value: String
+
+    enum CodingKeys: String, CodingKey {
+        case label
+        case modelID = "model_id"
+        case plainDescription = "plain_description"
+        case relativeCostHint = "relative_cost_hint"
+        case relativeSpeedHint = "relative_speed_hint"
+        case value
+    }
+}
+
+public struct HarnServingPerformance: Codable, Sendable, Equatable {
+    public let lastVerified: String?
+    public let notes: String?
+    public let observedTtftMs: Int?
+    public let outputTokensPerSec: Double?
+    public let sampleSize: Int?
+    public let source: String?
+    public let sourceURL: String?
+    public let timeToAnswerS: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case lastVerified = "last_verified"
+        case notes
+        case observedTtftMs = "observed_ttft_ms"
+        case outputTokensPerSec = "output_tokens_per_sec"
+        case sampleSize = "sample_size"
+        case source
+        case sourceURL = "source_url"
+        case timeToAnswerS = "time_to_answer_s"
     }
 }
 
@@ -52,281 +653,473 @@ public struct HarnCatalogPortalDefault: Codable, Sendable, Equatable {
     }
 }
 
-public struct HarnCatalogProvider: Codable, Sendable, Equatable {
+public struct HarnModelPricing: Codable, Sendable, Equatable {
+    public let cacheReadPerMTok: Double?
+    public let cacheWrite1hPerMTok: Double?
+    public let cacheWritePerMTok: Double?
+    public let hostedToolFees: [String: HarnHostedToolFee]?
+    public let inputPerMTok: Double
+    public let inputTokenBands: [HarnInputTokenPricingBand]?
+    public let modalityRates: HarnModalityRates?
+    public let outputPerMTok: Double
+    public let promotions: [HarnPromotionalPricing]?
+    public let schedules: [HarnRecurringPricingWindow]?
+
+    enum CodingKeys: String, CodingKey {
+        case cacheReadPerMTok = "cache_read_per_mtok"
+        case cacheWrite1hPerMTok = "cache_write_1h_per_mtok"
+        case cacheWritePerMTok = "cache_write_per_mtok"
+        case hostedToolFees = "hosted_tool_fees"
+        case inputPerMTok = "input_per_mtok"
+        case inputTokenBands = "input_token_bands"
+        case modalityRates = "modality_rates"
+        case outputPerMTok = "output_per_mtok"
+        case promotions
+        case schedules
+    }
+}
+
+public struct HarnPromotionalPricing: Codable, Sendable, Equatable {
+    public let cacheReadPerMTok: Double?
+    public let cacheWrite1hPerMTok: Double?
+    public let cacheWritePerMTok: Double?
+    public let endsAt: String?
+    public let endsOn: String?
     public let id: String
-    public let displayName: String
-    public let icon: String?
-    public let classification: String
-    public let endpoint: HarnProviderEndpoint
-    public let auth: HarnProviderAuth
-    public let extraHeaders: [String: String]?
-    public let healthcheck: HarnProviderHealthcheck?
-    private let encodedCacheUsageAccounting: Bool?
-    public var cacheUsageAccounting: Bool { encodedCacheUsageAccounting ?? false }
-    private let encodedStreamUsageAccounting: Bool?
-    public var streamUsageAccounting: Bool? { encodedStreamUsageAccounting }
-    public let platformFeePercent: Double?
-    public let dataControls: HarnProviderDataControls?
-    public let protocols: [String]
-    public let features: [String]
-    public let caveats: [String]
-    public let rpm: Int?
-    public let rateLimits: HarnRateLimits?
-    public let localRuntime: HarnLocalRuntime?
-    public let latencyP50Ms: Int?
-    public let performance: HarnServingPerformance?
+    public let inputPerMTok: Double
+    public let outputPerMTok: Double
+    public let reviewAfter: String?
+    public let sourceURL: String
+    public let startsAt: String?
+    public let startsOn: String
 
     enum CodingKeys: String, CodingKey {
+        case cacheReadPerMTok = "cache_read_per_mtok"
+        case cacheWrite1hPerMTok = "cache_write_1h_per_mtok"
+        case cacheWritePerMTok = "cache_write_per_mtok"
+        case endsAt = "ends_at"
+        case endsOn = "ends_on"
         case id
-        case displayName = "display_name"
-        case icon
-        case classification
-        case endpoint
+        case inputPerMTok = "input_per_mtok"
+        case outputPerMTok = "output_per_mtok"
+        case reviewAfter = "review_after"
+        case sourceURL = "source_url"
+        case startsAt = "starts_at"
+        case startsOn = "starts_on"
+    }
+}
+
+public struct HarnCatalogProvider: Codable, Sendable, Equatable {
+    public let auth: HarnProviderAuth
+    private let encodedCacheUsageAccounting: Bool?
+    public let caveats: [String]
+    public let classification: String
+    public let dataControls: HarnProviderDataControls?
+    public let displayName: String
+    public let endpoint: HarnProviderEndpoint
+    public let extraHeaders: [String: String]?
+    public let features: [String]
+    public let healthcheck: HarnProviderHealthcheck?
+    public let icon: String?
+    public let id: String
+    public let latencyP50Ms: Int?
+    public let localRuntime: HarnLocalRuntime?
+    public let performance: HarnServingPerformance?
+    public let platformFeePercent: Double?
+    public let protocols: [String]
+    public let rateLimits: HarnRateLimits?
+    public let rpm: Int?
+    private let encodedStreamUsageAccounting: Bool?
+    public var cacheUsageAccounting: Bool { encodedCacheUsageAccounting ?? false }
+    public var streamUsageAccounting: Bool? { encodedStreamUsageAccounting }
+
+    enum CodingKeys: String, CodingKey {
         case auth
-        case extraHeaders = "extra_headers"
-        case healthcheck
         case encodedCacheUsageAccounting = "cache_usage_accounting"
-        case encodedStreamUsageAccounting = "stream_usage_accounting"
-        case platformFeePercent = "platform_fee_percent"
-        case dataControls = "data_controls"
-        case protocols
-        case features
         case caveats
-        case rpm
-        case rateLimits = "rate_limits"
-        case localRuntime = "local_runtime"
+        case classification
+        case dataControls = "data_controls"
+        case displayName = "display_name"
+        case endpoint
+        case extraHeaders = "extra_headers"
+        case features
+        case healthcheck
+        case icon
+        case id
         case latencyP50Ms = "latency_p50_ms"
+        case localRuntime = "local_runtime"
         case performance
+        case platformFeePercent = "platform_fee_percent"
+        case protocols
+        case rateLimits = "rate_limits"
+        case rpm
+        case encodedStreamUsageAccounting = "stream_usage_accounting"
     }
 }
 
-public enum HarnCatalogNoTrainingRequirement: String, Codable, Sendable {
-    case billing_enabled = "billing_enabled"
-    case contributor_sharing_disabled = "contributor_sharing_disabled"
-}
-
-public struct HarnProviderDataControls: Codable, Sendable, Equatable {
-    public let controlScope: String
-    public let retentionDefault: String
-    public let trainingDefault: String
-    public let noTrainingRequires: [HarnCatalogNoTrainingRequirement]?
-    public let checkedOn: String
-    public let sources: [String]
-    public let note: String?
-    public let requestControls: [HarnProviderDataControl]?
+public struct HarnRateLimits: Codable, Sendable, Equatable {
+    public let concurrency: Int?
+    public let inputTpm: Int?
+    public let lastVerified: String?
+    public let notes: String?
+    public let outputTpm: Int?
+    public let rpd: Int?
+    public let rph: Int?
+    public let rpm: Int?
+    public let sourceURL: String?
+    public let tier: String?
+    public let tpd: Int?
+    public let tph: Int?
+    public let tpm: Int?
 
     enum CodingKeys: String, CodingKey {
-        case controlScope = "control_scope"
-        case retentionDefault = "retention_default"
-        case trainingDefault = "training_default"
-        case noTrainingRequires = "no_training_requires"
-        case checkedOn = "checked_on"
-        case sources
-        case note
-        case requestControls = "request_controls"
+        case concurrency
+        case inputTpm = "input_tpm"
+        case lastVerified = "last_verified"
+        case notes
+        case outputTpm = "output_tpm"
+        case rpd
+        case rph
+        case rpm
+        case sourceURL = "source_url"
+        case tier
+        case tpd
+        case tph
+        case tpm
     }
 }
 
-public struct HarnModelDataControls: Codable, Sendable, Equatable {
-    public let trainingDefault: String
-    public let retentionDefault: String?
-    public let checkedOn: String
-    public let sources: [String]
-    public let note: String?
+public struct HarnModelReasoning: Codable, Sendable, Equatable {
+    public let effortLevels: [String]
+    public let effortSupported: Bool
+    public let interleavedSupported: Bool
+    public let modes: [String]
+    public let noneSupported: Bool
+    public let preserveThinking: Bool
 
     enum CodingKeys: String, CodingKey {
-        case trainingDefault = "training_default"
-        case retentionDefault = "retention_default"
-        case checkedOn = "checked_on"
-        case sources
+        case effortLevels = "effort_levels"
+        case effortSupported = "effort_supported"
+        case interleavedSupported = "interleaved_supported"
+        case modes
+        case noneSupported = "none_supported"
+        case preserveThinking = "preserve_thinking"
+    }
+}
+
+public struct HarnModelReasoningMode: Codable, Sendable, Equatable {
+    public let economics: String
+    public let id: String
+    public let label: String?
+    public let latency: String?
+    public let note: String?
+    public let request: HarnModelReasoningModeRequest?
+    public let status: String?
+    public let suitableWorkloads: [String]
+    public let tokenMultiplier: Double?
+    public let unsuitableWorkloads: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case economics
+        case id
+        case label
+        case latency
         case note
+        case request
+        case status
+        case suitableWorkloads = "suitable_workloads"
+        case tokenMultiplier = "token_multiplier"
+        case unsuitableWorkloads = "unsuitable_workloads"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        economics = try container.decode(String.self, forKey: .economics)
+        id = try container.decode(String.self, forKey: .id)
+        label = try container.decodeIfPresent(String.self, forKey: .label)
+        latency = try container.decodeIfPresent(String.self, forKey: .latency)
+        note = try container.decodeIfPresent(String.self, forKey: .note)
+        request = try container.decodeIfPresent(HarnModelReasoningModeRequest.self, forKey: .request)
+        status = try container.decodeIfPresent(String.self, forKey: .status)
+        suitableWorkloads = try container.decodeIfPresent([String].self, forKey: .suitableWorkloads) ?? []
+        tokenMultiplier = try container.decodeIfPresent(Double.self, forKey: .tokenMultiplier)
+        unsuitableWorkloads = try container.decodeIfPresent([String].self, forKey: .unsuitableWorkloads) ?? []
+    }
+}
+
+public struct HarnModelReasoningModeRequest: Codable, Sendable, Equatable {
+    public let paramPath: [String]
+    public let responseValues: [String]?
+    public let value: String
+
+    enum CodingKeys: String, CodingKey {
+        case paramPath = "param_path"
+        case responseValues = "response_values"
+        case value
+    }
+}
+
+public struct HarnRecurringPricingWindow: Codable, Sendable, Equatable {
+    public let cacheReadMultiplier: Double?
+    public let cacheWriteMultiplier: Double?
+    public let days: [String]
+    public let end: String
+    public let id: String
+    public let inputMultiplier: Double
+    public let note: String?
+    public let outputMultiplier: Double
+    public let reviewAfter: String?
+    public let sourceURL: String
+    public let start: String
+    public let utcOffset: String
+
+    enum CodingKeys: String, CodingKey {
+        case cacheReadMultiplier = "cache_read_multiplier"
+        case cacheWriteMultiplier = "cache_write_multiplier"
+        case days
+        case end
+        case id
+        case inputMultiplier = "input_multiplier"
+        case note
+        case outputMultiplier = "output_multiplier"
+        case reviewAfter = "review_after"
+        case sourceURL = "source_url"
+        case start
+        case utcOffset = "utc_offset"
+    }
+}
+
+public struct HarnCatalogRoutingRoute: Codable, Sendable, Equatable {
+    public let baseURL: String?
+    public let capabilities: [String]?
+    public let family: String?
+    public let label: String?
+    public let model: String
+    public let provider: String
+    public let secretEnv: String?
+    public let timeoutMs: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case baseURL = "base_url"
+        case capabilities
+        case family
+        case label
+        case model
+        case provider
+        case secretEnv = "secret_env"
+        case timeoutMs = "timeout_ms"
+    }
+}
+
+public struct HarnModelServingTier: Codable, Sendable, Equatable {
+    public let costMultiplier: Double?
+    public let discountPercent: Int?
+    public let economics: String
+    public let id: String
+    public let label: String?
+    public let latency: String?
+    public let mode: String
+    public let note: String?
+    public let otpsSpeedup: Double?
+    public let pricing: HarnModelPricing?
+    public let quota: String?
+    public let reliability: String?
+    public let request: HarnModelServingTierRequest?
+    public let status: String?
+    public let suitableWorkloads: [String]
+    public let unsuitableWorkloads: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case costMultiplier = "cost_multiplier"
+        case discountPercent = "discount_percent"
+        case economics
+        case id
+        case label
+        case latency
+        case mode
+        case note
+        case otpsSpeedup = "otps_speedup"
+        case pricing
+        case quota
+        case reliability
+        case request
+        case status
+        case suitableWorkloads = "suitable_workloads"
+        case unsuitableWorkloads = "unsuitable_workloads"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        costMultiplier = try container.decodeIfPresent(Double.self, forKey: .costMultiplier)
+        discountPercent = try container.decodeIfPresent(Int.self, forKey: .discountPercent)
+        economics = try container.decode(String.self, forKey: .economics)
+        id = try container.decode(String.self, forKey: .id)
+        label = try container.decodeIfPresent(String.self, forKey: .label)
+        latency = try container.decodeIfPresent(String.self, forKey: .latency)
+        mode = try container.decode(String.self, forKey: .mode)
+        note = try container.decodeIfPresent(String.self, forKey: .note)
+        otpsSpeedup = try container.decodeIfPresent(Double.self, forKey: .otpsSpeedup)
+        pricing = try container.decodeIfPresent(HarnModelPricing.self, forKey: .pricing)
+        quota = try container.decodeIfPresent(String.self, forKey: .quota)
+        reliability = try container.decodeIfPresent(String.self, forKey: .reliability)
+        request = try container.decodeIfPresent(HarnModelServingTierRequest.self, forKey: .request)
+        status = try container.decodeIfPresent(String.self, forKey: .status)
+        suitableWorkloads = try container.decodeIfPresent([String].self, forKey: .suitableWorkloads) ?? []
+        unsuitableWorkloads = try container.decodeIfPresent([String].self, forKey: .unsuitableWorkloads) ?? []
+    }
+}
+
+public struct HarnModelServingTierRequest: Codable, Sendable, Equatable {
+    public let betaHeader: String?
+    public let param: String
+    public let responseValues: [String]?
+    public let value: String
+
+    enum CodingKeys: String, CodingKey {
+        case betaHeader = "beta_header"
+        case param
+        case responseValues = "response_values"
+        case value
+    }
+}
+
+public struct HarnToolEmpiricalParity: Codable, Sendable, Equatable {
+    public let confidence: String
+    public let lastEvaluated: String
+    public let nativePassRate: Double
+    public let preferredFormat: String
+    public let sampleSize: Int
+    public let textPassRate: Double
+    public let verdict: String
+    public let verifierDivergenceRate: Double
+
+    enum CodingKeys: String, CodingKey {
+        case confidence
+        case lastEvaluated = "last_evaluated"
+        case nativePassRate = "native_pass_rate"
+        case preferredFormat = "preferred_format"
+        case sampleSize = "sample_size"
+        case textPassRate = "text_pass_rate"
+        case verdict
+        case verifierDivergenceRate = "verifier_divergence_rate"
+    }
+}
+
+public struct HarnModelToolSupport: Codable, Sendable, Equatable {
+    public let empiricalParity: HarnToolEmpiricalParity?
+    public let maxTools: Int?
+    public let native: Bool
+    public let parity: String?
+    public let parityNotes: String?
+    public let paritySource: String?
+    public let preferredFormat: String?
+    public let text: Bool
+    public let toolSearch: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case empiricalParity = "empirical_parity"
+        case maxTools = "max_tools"
+        case native
+        case parity
+        case parityNotes = "parity_notes"
+        case paritySource = "parity_source"
+        case preferredFormat = "preferred_format"
+        case text
+        case toolSearch = "tool_search"
+    }
+}
+
+public struct HarnCatalogVariant: Codable, Sendable, Equatable {
+    public let automaticEligibility: HarnAutomaticModelEligibility?
+    public let description: String
+    public let id: String
+    public let label: String
+    public let modelID: String
+    public let provider: String
+    public let source: String
+
+    enum CodingKeys: String, CodingKey {
+        case automaticEligibility = "automatic_eligibility"
+        case description
+        case id
+        case label
+        case modelID = "model_id"
+        case provider
+        case source
     }
 }
 
 public struct HarnProviderDataControl: Codable, Sendable, Equatable {
-    public let location: String
-    public let name: String
-    public let valueKind: String
-    public let value: String
-    public let effect: String
     public let appliesTo: [String]?
     public let caveat: String?
+    public let effect: String
+    public let location: String
+    public let name: String
+    public let value: String
+    public let valueKind: String
 
     enum CodingKeys: String, CodingKey {
-        case location
-        case name
-        case valueKind = "value_kind"
-        case value
-        case effect
         case appliesTo = "applies_to"
         case caveat
-    }
-}
-
-public struct HarnProviderHealthcheck: Codable, Sendable, Equatable {
-    public let method: String
-    public let path: String?
-    public let url: String?
-    public let body: String?
-}
-
-public struct HarnLocalRuntime: Codable, Sendable, Equatable {
-    public let kind: String
-    public let wireProtocol: String
-    public let command: String?
-    public let prefixArgs: [String]?
-    public let modelSource: String?
-    public let modelSourceEnv: String?
-    public let defaultPort: Int?
-    public let modelArg: String?
-    public let servedModelArg: String?
-    public let hostArg: String?
-    public let portArg: String?
-    public let ctxArg: String?
-    public let parallelArg: String?
-    public let gpuLayersArg: String?
-    public let cacheTypeKArg: String?
-    public let cacheTypeVArg: String?
-    public let cacheRamArg: String?
-    public let chatTemplateKwargsArg: String?
-    public let jinjaArg: String?
-    public let reasoningArg: String?
-    public let reasoningFormatArg: String?
-    public let flashAttnArg: String?
-    public let metricsArg: String?
-    public let enableLoraArg: String?
-    public let loraModulesArg: String?
-    public let loraModulesValueFormat: String?
-    public let maxLoraRankArg: String?
-    public let defaultArgs: [String]?
-    public let stop: String
-    public let sourceURL: String?
-    public let lastVerified: String?
-    public let notes: String?
-
-    enum CodingKeys: String, CodingKey {
-        case kind
-        case wireProtocol = "wire_protocol"
-        case command
-        case prefixArgs = "prefix_args"
-        case modelSource = "model_source"
-        case modelSourceEnv = "model_source_env"
-        case defaultPort = "default_port"
-        case modelArg = "model_arg"
-        case servedModelArg = "served_model_arg"
-        case hostArg = "host_arg"
-        case portArg = "port_arg"
-        case ctxArg = "ctx_arg"
-        case parallelArg = "parallel_arg"
-        case gpuLayersArg = "gpu_layers_arg"
-        case cacheTypeKArg = "cache_type_k_arg"
-        case cacheTypeVArg = "cache_type_v_arg"
-        case cacheRamArg = "cache_ram_arg"
-        case chatTemplateKwargsArg = "chat_template_kwargs_arg"
-        case jinjaArg = "jinja_arg"
-        case reasoningArg = "reasoning_arg"
-        case reasoningFormatArg = "reasoning_format_arg"
-        case flashAttnArg = "flash_attn_arg"
-        case metricsArg = "metrics_arg"
-        case enableLoraArg = "enable_lora_arg"
-        case loraModulesArg = "lora_modules_arg"
-        case loraModulesValueFormat = "lora_modules_value_format"
-        case maxLoraRankArg = "max_lora_rank_arg"
-        case defaultArgs = "default_args"
-        case stop
-        case sourceURL = "source_url"
-        case lastVerified = "last_verified"
-        case notes
-    }
-}
-
-public struct HarnProviderEndpoint: Codable, Sendable, Equatable {
-    public let baseURL: String
-    public let baseURLEnv: String?
-    public let regionEnv: String?
-    public let regions: [String: HarnProviderEndpointRegion]?
-    public let chatEndpoint: String
-    public let chatAPIAdapter: String?
-    public let completionEndpoint: String?
-    public let embeddingsEndpoint: String?
-
-    enum CodingKeys: String, CodingKey {
-        case baseURL = "base_url"
-        case baseURLEnv = "base_url_env"
-        case regionEnv = "region_env"
-        case regions
-        case chatEndpoint = "chat_endpoint"
-        case chatAPIAdapter = "chat_api_adapter"
-        case completionEndpoint = "completion_endpoint"
-        case embeddingsEndpoint = "embeddings_endpoint"
-    }
-}
-
-public struct HarnProviderEndpointRegion: Codable, Sendable, Equatable {
-    public let baseURL: String
-    public let dataControls: HarnModelDataControls?
-    public let label: String?
-    public let sourceURL: String?
-    public let lastVerified: String?
-    public let notes: String?
-
-    enum CodingKeys: String, CodingKey {
-        case baseURL = "base_url"
-        case dataControls = "data_controls"
-        case label
-        case sourceURL = "source_url"
-        case lastVerified = "last_verified"
-        case notes
-    }
-}
-
-public struct HarnProviderAuth: Codable, Sendable, Equatable {
-    public let style: String
-    public let header: String?
-    public let env: [String]
-    public let required: Bool
-    public var credentialEnv: [String]? = nil
-
-    enum CodingKeys: String, CodingKey {
-        case style
-        case header
-        case env
-        case required
-        case credentialEnv = "credential_env"
-    }
-}
-
-public struct HarnCatalogAlias: Codable, Sendable, Equatable {
-    public let name: String
-    public let modelID: String
-    public let provider: String
-    public let toolFormat: String?
-    public let toolCalling: HarnAliasToolCalling?
-
-    enum CodingKeys: String, CodingKey {
+        case effect
+        case location
         case name
-        case modelID = "model_id"
-        case provider
-        case toolFormat = "tool_format"
-        case toolCalling = "tool_calling"
+        case value
+        case valueKind = "value_kind"
     }
 }
 
 public struct HarnAliasToolCalling: Codable, Sendable, Equatable {
-    public let native: String?
-    public let text: String?
-    public let streamingNative: String?
-    public let fallbackMode: String?
     public let failureReason: String?
+    public let fallbackMode: String?
     public let lastProbeAt: String?
+    public let native: String?
+    public let streamingNative: String?
+    public let text: String?
 
     enum CodingKeys: String, CodingKey {
-        case native
-        case text
-        case streamingNative = "streaming_native"
-        case fallbackMode = "fallback_mode"
         case failureReason = "failure_reason"
+        case fallbackMode = "fallback_mode"
         case lastProbeAt = "last_probe_at"
+        case native
+        case streamingNative = "streaming_native"
+        case text
+    }
+}
+
+public struct HarnHostedToolFee: Codable, Sendable, Equatable {
+    public let freePerMonth: UInt64?
+    public let per1kCalls: Double
+    public let sourceUrl: String
+
+    enum CodingKeys: String, CodingKey {
+        case freePerMonth = "free_per_month"
+        case per1kCalls = "per_1k_calls"
+        case sourceUrl = "source_url"
+    }
+}
+
+public struct HarnModalityRates: Codable, Sendable, Equatable {
+    public let audioInputPerMTok: Double?
+    public let audioOutputPerMTok: Double?
+    public let cachedAudioInputPerMTok: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case audioInputPerMTok = "audio_input_per_mtok"
+        case audioOutputPerMTok = "audio_output_per_mtok"
+        case cachedAudioInputPerMTok = "cached_audio_input_per_mtok"
+    }
+}
+
+public struct HarnInputTokenPricingBand: Codable, Sendable, Equatable {
+    public let inputMultiplier: Double
+    public let minimumInputTokens: Int
+    public let outputMultiplier: Double
+
+    enum CodingKeys: String, CodingKey {
+        case inputMultiplier = "input_multiplier"
+        case minimumInputTokens = "minimum_input_tokens"
+        case outputMultiplier = "output_multiplier"
     }
 }
 
@@ -336,809 +1129,7 @@ public enum HarnModelOperation: String, Codable, Sendable, Equatable {
     case decision = "decision"
 }
 
-public struct HarnCatalogModel: Codable, Sendable, Equatable {
-    public let id: String
-    public let name: String
-    public let dataControls: HarnModelDataControls?
-    public let displayName: String
-    public let blurb: String?
-    public let provider: String
-    public let aliases: [String]
-    public let contextWindow: Int
-    public let logicalModel: String?
-    public let equivalenceGroup: String?
-    public let servedVariant: String?
-    public let wireModel: String?
-    public let apiDialect: String?
-    public let rateLimits: HarnRateLimits?
-    public let performance: HarnServingPerformance?
-    public let architecture: HarnModelArchitecture?
-    public let localMemory: HarnLocalMemory?
-    public let runtimeContextWindow: Int?
-    public let streamTimeout: Double?
-    public let modalities: HarnModelModalities
-    public let toolSupport: HarnModelToolSupport
-    public let structuredOutput: String
-    public let formatPreferences: HarnModelFormatPreferences
-    public let reasoning: HarnModelReasoning
-    public let promptCache: Bool
-    public let batch: HarnModelBatchSupport?
-    public let pricing: HarnModelPricing?
-    public let deprecation: HarnModelDeprecation
-    public let availability: String
-    public let qualityTags: [String]
-    public let capabilityTags: [String]
-    public let family: String
-    public let lineage: String
-    public let complementaryWith: [String]
-    public let avoidAsReviewerFor: [String]
-    public let completionReview: HarnCompletionReview?
-    /// Popular-consensus tier label: "small" | "mid" | "frontier" | "reasoning".
-    public let tier: String
-    /// True when weights are downloadable / self-hostable; nil when the
-    /// catalog row predates the field.
-    public let openWeight: Bool?
-    /// Workload-shaped strength tags (`coding`, `summarization`, `vision`, ...).
-    public let strengths: [String]
-    /// Public benchmark numbers keyed by `snake_case` identifier.
-    public let benchmarks: [String: Double]
-    /// Non-default synchronous serving tiers such as fast, priority, or flex.
-    public let servingTiers: [HarnModelServingTier]
-    public let reasoningModes: [HarnModelReasoningMode]
-    /// ISO 8601 date (`YYYY-MM-DD`) when the provider published this snapshot.
-    public let released: String?
-    /// `"snapshot"` for a pinned dated id, `"selector"` for an undated moving target.
-    public let rowKind: String?
-    /// Catalog id of the snapshot a selector currently points at.
-    public let currentSnapshot: String?
-    /// Embedding vector length when this row describes an embeddings model.
-    public let embeddingDim: Int?
-    public let operations: [HarnModelOperation]
-    /// Maximum input tokens the embeddings endpoint accepts for this row.
-    public let embeddingMaxTokens: Int?
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case name
-        case dataControls = "data_controls"
-        case displayName = "display_name"
-        case blurb
-        case provider
-        case aliases
-        case contextWindow = "context_window"
-        case logicalModel = "logical_model"
-        case equivalenceGroup = "equivalence_group"
-        case servedVariant = "served_variant"
-        case wireModel = "wire_model"
-        case apiDialect = "api_dialect"
-        case rateLimits = "rate_limits"
-        case performance
-        case architecture
-        case localMemory = "local_memory"
-        case runtimeContextWindow = "runtime_context_window"
-        case streamTimeout = "stream_timeout"
-        case modalities
-        case toolSupport = "tool_support"
-        case structuredOutput = "structured_output"
-        case formatPreferences = "format_preferences"
-        case reasoning
-        case promptCache = "prompt_cache"
-        case batch
-        case pricing
-        case deprecation
-        case availability
-        case qualityTags = "quality_tags"
-        case capabilityTags = "capability_tags"
-        case family
-        case lineage
-        case complementaryWith = "complementary_with"
-        case avoidAsReviewerFor = "avoid_as_reviewer_for"
-        case completionReview = "completion_review"
-        case tier
-        case openWeight = "open_weight"
-        case strengths
-        case benchmarks
-        case servingTiers = "serving_tiers"
-        case reasoningModes = "reasoning_modes"
-        case released
-        case rowKind = "row_kind"
-        case currentSnapshot = "current_snapshot"
-        case embeddingDim = "embedding_dim"
-        case operations
-        case embeddingMaxTokens = "embedding_max_tokens"
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(String.self, forKey: .id)
-        name = try container.decode(String.self, forKey: .name)
-        dataControls = try container.decodeIfPresent(HarnModelDataControls.self, forKey: .dataControls)
-        displayName = try container.decodeIfPresent(String.self, forKey: .displayName) ?? name
-        blurb = try container.decodeIfPresent(String.self, forKey: .blurb)
-        provider = try container.decode(String.self, forKey: .provider)
-        aliases = try container.decode([String].self, forKey: .aliases)
-        contextWindow = try container.decode(Int.self, forKey: .contextWindow)
-        logicalModel = try container.decodeIfPresent(String.self, forKey: .logicalModel)
-        equivalenceGroup = try container.decodeIfPresent(String.self, forKey: .equivalenceGroup)
-        servedVariant = try container.decodeIfPresent(String.self, forKey: .servedVariant)
-        wireModel = try container.decodeIfPresent(String.self, forKey: .wireModel)
-        apiDialect = try container.decodeIfPresent(String.self, forKey: .apiDialect)
-        rateLimits = try container.decodeIfPresent(HarnRateLimits.self, forKey: .rateLimits)
-        performance = try container.decodeIfPresent(HarnServingPerformance.self, forKey: .performance)
-        architecture = try container.decodeIfPresent(HarnModelArchitecture.self, forKey: .architecture)
-        localMemory = try container.decodeIfPresent(HarnLocalMemory.self, forKey: .localMemory)
-        runtimeContextWindow = try container.decodeIfPresent(Int.self, forKey: .runtimeContextWindow)
-        streamTimeout = try container.decodeIfPresent(Double.self, forKey: .streamTimeout)
-        modalities = try container.decode(HarnModelModalities.self, forKey: .modalities)
-        toolSupport = try container.decode(HarnModelToolSupport.self, forKey: .toolSupport)
-        structuredOutput = try container.decode(String.self, forKey: .structuredOutput)
-        formatPreferences = try container.decode(HarnModelFormatPreferences.self, forKey: .formatPreferences)
-        reasoning = try container.decode(HarnModelReasoning.self, forKey: .reasoning)
-        promptCache = try container.decode(Bool.self, forKey: .promptCache)
-        batch = try container.decodeIfPresent(HarnModelBatchSupport.self, forKey: .batch)
-        pricing = try container.decodeIfPresent(HarnModelPricing.self, forKey: .pricing)
-        deprecation = try container.decode(HarnModelDeprecation.self, forKey: .deprecation)
-        availability = try container.decode(String.self, forKey: .availability)
-        qualityTags = try container.decode([String].self, forKey: .qualityTags)
-        capabilityTags = try container.decode([String].self, forKey: .capabilityTags)
-        family = try container.decode(String.self, forKey: .family)
-        lineage = try container.decode(String.self, forKey: .lineage)
-        complementaryWith = try container.decodeIfPresent([String].self, forKey: .complementaryWith) ?? []
-        avoidAsReviewerFor = try container.decodeIfPresent([String].self, forKey: .avoidAsReviewerFor) ?? []
-        completionReview = try container.decodeIfPresent(HarnCompletionReview.self, forKey: .completionReview)
-        tier = try container.decode(String.self, forKey: .tier)
-        openWeight = try container.decodeIfPresent(Bool.self, forKey: .openWeight)
-        strengths = try container.decodeIfPresent([String].self, forKey: .strengths) ?? []
-        benchmarks = try container.decodeIfPresent([String: Double].self, forKey: .benchmarks) ?? [:]
-        servingTiers = try container.decodeIfPresent([HarnModelServingTier].self, forKey: .servingTiers) ?? []
-        reasoningModes = try container.decodeIfPresent([HarnModelReasoningMode].self, forKey: .reasoningModes) ?? []
-        released = try container.decodeIfPresent(String.self, forKey: .released)
-        rowKind = try container.decodeIfPresent(String.self, forKey: .rowKind)
-        currentSnapshot = try container.decodeIfPresent(String.self, forKey: .currentSnapshot)
-        embeddingDim = try container.decodeIfPresent(Int.self, forKey: .embeddingDim)
-        operations = try container.decode([HarnModelOperation].self, forKey: .operations)
-        embeddingMaxTokens = try container.decodeIfPresent(Int.self, forKey: .embeddingMaxTokens)
-    }
-}
-
-public struct HarnModelBatchSupport: Codable, Sendable, Equatable {
-    public let wireFormat: String
-    public let inputMode: String
-    public let resultOrdering: String
-    public let partialFailure: String
-    public let cancellation: String
-    public let discountPercent: Int?
-    public let turnaroundHours: Int?
-    public let maxRequests: Int?
-    public let maxInputBytes: Int?
-    public let resultRetentionDays: Int?
-    public let securityNotes: [String]?
-    public let operationalNotes: [String]?
-
-    enum CodingKeys: String, CodingKey {
-        case wireFormat = "wire_format"
-        case inputMode = "input_mode"
-        case resultOrdering = "result_ordering"
-        case partialFailure = "partial_failure"
-        case cancellation
-        case discountPercent = "discount_percent"
-        case turnaroundHours = "turnaround_hours"
-        case maxRequests = "max_requests"
-        case maxInputBytes = "max_input_bytes"
-        case resultRetentionDays = "result_retention_days"
-        case securityNotes = "security_notes"
-        case operationalNotes = "operational_notes"
-    }
-}
-
-public struct HarnModelModalities: Codable, Sendable, Equatable {
-    public let input: [String]
-    public let output: [String]
-}
-
-public struct HarnModelToolSupport: Codable, Sendable, Equatable {
-    public let native: Bool
-    public let text: Bool
-    public let preferredFormat: String?
-    public let parity: String?
-    public let paritySource: String?
-    public let parityNotes: String?
-    public let empiricalParity: HarnToolEmpiricalParity?
-    public let toolSearch: [String]
-    public let maxTools: Int?
-
-    enum CodingKeys: String, CodingKey {
-        case native
-        case text
-        case preferredFormat = "preferred_format"
-        case parity
-        case paritySource = "parity_source"
-        case parityNotes = "parity_notes"
-        case empiricalParity = "empirical_parity"
-        case toolSearch = "tool_search"
-        case maxTools = "max_tools"
-    }
-}
-
-public struct HarnToolEmpiricalParity: Codable, Sendable, Equatable {
-    public let verdict: String
-    public let preferredFormat: String
-    public let confidence: String
-    public let sampleSize: Int
-    public let lastEvaluated: String
-    public let nativePassRate: Double
-    public let textPassRate: Double
-    public let verifierDivergenceRate: Double
-
-    enum CodingKeys: String, CodingKey {
-        case verdict
-        case preferredFormat = "preferred_format"
-        case confidence
-        case sampleSize = "sample_size"
-        case lastEvaluated = "last_evaluated"
-        case nativePassRate = "native_pass_rate"
-        case textPassRate = "text_pass_rate"
-        case verifierDivergenceRate = "verifier_divergence_rate"
-    }
-}
-
-public struct HarnModelFormatPreferences: Codable, Sendable, Equatable {
-    public let prefersXMLScaffolding: Bool
-    public let prefersMarkdownScaffolding: Bool
-    public let structuredOutputMode: String
-    public let supportsAssistantPrefill: Bool
-    public let prefersRoleDeveloper: Bool
-    public let prefersXMLTools: Bool
-    public let thinkingBlockStyle: String
-
-    enum CodingKeys: String, CodingKey {
-        case prefersXMLScaffolding = "prefers_xml_scaffolding"
-        case prefersMarkdownScaffolding = "prefers_markdown_scaffolding"
-        case structuredOutputMode = "structured_output_mode"
-        case supportsAssistantPrefill = "supports_assistant_prefill"
-        case prefersRoleDeveloper = "prefers_role_developer"
-        case prefersXMLTools = "prefers_xml_tools"
-        case thinkingBlockStyle = "thinking_block_style"
-    }
-}
-
-public struct HarnModelReasoning: Codable, Sendable, Equatable {
-    public let modes: [String]
-    public let effortSupported: Bool
-    public let effortLevels: [String]
-    public let noneSupported: Bool
-    public let interleavedSupported: Bool
-    public let preserveThinking: Bool
-
-    enum CodingKeys: String, CodingKey {
-        case modes
-        case effortSupported = "effort_supported"
-        case effortLevels = "effort_levels"
-        case noneSupported = "none_supported"
-        case interleavedSupported = "interleaved_supported"
-        case preserveThinking = "preserve_thinking"
-    }
-}
-
-public struct HarnModelPricing: Codable, Sendable, Equatable {
-    public let inputPerMTok: Double
-    public let outputPerMTok: Double
-    public let cacheReadPerMTok: Double?
-    public let cacheWritePerMTok: Double?
-    public let cacheWrite1hPerMTok: Double?
-    public let inputTokenBands: [HarnInputTokenPricingBand]?
-    public let promotions: [HarnPromotionalPricing]?
-    public let schedules: [HarnRecurringPricingWindow]?
-    public let hostedToolFees: [String: HarnHostedToolFee]?
-    public let modalityRates: HarnModalityRates?
-
-    enum CodingKeys: String, CodingKey {
-        case inputPerMTok = "input_per_mtok"
-        case outputPerMTok = "output_per_mtok"
-        case cacheReadPerMTok = "cache_read_per_mtok"
-        case cacheWritePerMTok = "cache_write_per_mtok"
-        case cacheWrite1hPerMTok = "cache_write_1h_per_mtok"
-        case inputTokenBands = "input_token_bands"
-        case promotions
-        case schedules
-        case hostedToolFees = "hosted_tool_fees"
-        case modalityRates = "modality_rates"
-    }
-}
-
-public struct HarnHostedToolFee: Codable, Sendable, Equatable {
-    public let per1kCalls: Double
-    public let freePerMonth: UInt64?
-    public let sourceUrl: String
-    enum CodingKeys: String, CodingKey {
-        case per1kCalls = "per_1k_calls"
-        case freePerMonth = "free_per_month"
-        case sourceUrl = "source_url"
-    }
-}
-
-public struct HarnModalityRates: Codable, Sendable, Equatable {
-    public let audioInputPerMTok: Double?
-    public let audioOutputPerMTok: Double?
-    public let cachedAudioInputPerMTok: Double?
-    enum CodingKeys: String, CodingKey {
-        case audioInputPerMTok = "audio_input_per_mtok"
-        case audioOutputPerMTok = "audio_output_per_mtok"
-        case cachedAudioInputPerMTok = "cached_audio_input_per_mtok"
-    }
-}
-
-public struct HarnRecurringPricingWindow: Codable, Sendable, Equatable {
-    public let id: String
-    public let days: [String]
-    public let start: String
-    public let end: String
-    public let utcOffset: String
-    public let inputMultiplier: Double
-    public let outputMultiplier: Double
-    public let cacheReadMultiplier: Double?
-    public let cacheWriteMultiplier: Double?
-    public let sourceURL: String
-    public let reviewAfter: String?
-    public let note: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case days
-        case start
-        case end
-        case utcOffset = "utc_offset"
-        case inputMultiplier = "input_multiplier"
-        case outputMultiplier = "output_multiplier"
-        case cacheReadMultiplier = "cache_read_multiplier"
-        case cacheWriteMultiplier = "cache_write_multiplier"
-        case sourceURL = "source_url"
-        case reviewAfter = "review_after"
-        case note
-    }
-}
-
-public struct HarnPromotionalPricing: Codable, Sendable, Equatable {
-    public let id: String
-    public let startsOn: String
-    public let startsAt: String?
-    public let endsOn: String?
-    public let endsAt: String?
-    public let reviewAfter: String?
-    public let sourceURL: String
-    public let inputPerMTok: Double
-    public let outputPerMTok: Double
-    public let cacheReadPerMTok: Double?
-    public let cacheWritePerMTok: Double?
-    public let cacheWrite1hPerMTok: Double?
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case startsOn = "starts_on"
-        case startsAt = "starts_at"
-        case endsOn = "ends_on"
-        case endsAt = "ends_at"
-        case reviewAfter = "review_after"
-        case sourceURL = "source_url"
-        case inputPerMTok = "input_per_mtok"
-        case outputPerMTok = "output_per_mtok"
-        case cacheReadPerMTok = "cache_read_per_mtok"
-        case cacheWritePerMTok = "cache_write_per_mtok"
-        case cacheWrite1hPerMTok = "cache_write_1h_per_mtok"
-    }
-}
-
-public struct HarnInputTokenPricingBand: Codable, Sendable, Equatable {
-    public let minimumInputTokens: Int
-    public let inputMultiplier: Double
-    public let outputMultiplier: Double
-
-    enum CodingKeys: String, CodingKey {
-        case minimumInputTokens = "minimum_input_tokens"
-        case inputMultiplier = "input_multiplier"
-        case outputMultiplier = "output_multiplier"
-    }
-}
-
-public struct HarnRateLimits: Codable, Sendable, Equatable {
-    public let rpm: Int?
-    public let rph: Int?
-    public let rpd: Int?
-    public let tpm: Int?
-    public let tph: Int?
-    public let tpd: Int?
-    public let inputTpm: Int?
-    public let outputTpm: Int?
-    public let concurrency: Int?
-    public let tier: String?
-    public let sourceURL: String?
-    public let lastVerified: String?
-    public let notes: String?
-
-    enum CodingKeys: String, CodingKey {
-        case rpm
-        case rph
-        case rpd
-        case tpm
-        case tph
-        case tpd
-        case inputTpm = "input_tpm"
-        case outputTpm = "output_tpm"
-        case concurrency
-        case tier
-        case sourceURL = "source_url"
-        case lastVerified = "last_verified"
-        case notes
-    }
-}
-
-public struct HarnServingPerformance: Codable, Sendable, Equatable {
-    public let observedTtftMs: Int?
-    public let outputTokensPerSec: Double?
-    public let timeToAnswerS: Double?
-    public let source: String?
-    public let sourceURL: String?
-    public let lastVerified: String?
-    public let sampleSize: Int?
-    public let notes: String?
-
-    enum CodingKeys: String, CodingKey {
-        case observedTtftMs = "observed_ttft_ms"
-        case outputTokensPerSec = "output_tokens_per_sec"
-        case timeToAnswerS = "time_to_answer_s"
-        case source
-        case sourceURL = "source_url"
-        case lastVerified = "last_verified"
-        case sampleSize = "sample_size"
-        case notes
-    }
-}
-
-public struct HarnModelArchitecture: Codable, Sendable, Equatable {
-    public let parameterCountB: Double?
-    public let activeParameterCountB: Double?
-    public let moe: Bool?
-    public let quantization: String?
-    public let precision: String?
-    public let license: String?
-    public let tokenizer: String?
-    public let knowledgeCutoff: String?
-    public let sourceURL: String?
-    public let lastVerified: String?
-
-    enum CodingKeys: String, CodingKey {
-        case parameterCountB = "parameter_count_b"
-        case activeParameterCountB = "active_parameter_count_b"
-        case moe
-        case quantization
-        case precision
-        case license
-        case tokenizer
-        case knowledgeCutoff = "knowledge_cutoff"
-        case sourceURL = "source_url"
-        case lastVerified = "last_verified"
-    }
-}
-
-public struct HarnLocalMemory: Codable, Sendable, Equatable {
-    public let measuredResidentGiB: Double?
-    public let measuredContextWindow: Int?
-    public let measuredCacheType: String?
-    public let baseResidentGiB: Double?
-    public let kvCacheGiBPer1KContext: Double?
-    public let cacheTypeMultipliers: [String: Double]?
-    public let defaultCacheType: String?
-    public let safetyMarginGiB: Double?
-    public let maxRecommendedContext: Int?
-    public let sourceURL: String?
-    public let lastVerified: String?
-    public let notes: String?
-
-    enum CodingKeys: String, CodingKey {
-        case measuredResidentGiB = "measured_resident_gib"
-        case measuredContextWindow = "measured_context_window"
-        case measuredCacheType = "measured_cache_type"
-        case baseResidentGiB = "base_resident_gib"
-        case kvCacheGiBPer1KContext = "kv_cache_gib_per_1k_ctx"
-        case cacheTypeMultipliers = "cache_type_multipliers"
-        case defaultCacheType = "default_cache_type"
-        case safetyMarginGiB = "safety_margin_gib"
-        case maxRecommendedContext = "max_recommended_context"
-        case sourceURL = "source_url"
-        case lastVerified = "last_verified"
-        case notes
-    }
-}
-
-public struct HarnModelDeprecation: Codable, Sendable, Equatable {
-    public let status: String
-    public let note: String?
-    public let sunsetDate: String?
-    public let retiresOn: String?
-    public let supersededBy: String?
-
-    enum CodingKeys: String, CodingKey {
-        case status
-        case note
-        case sunsetDate = "sunset_date"
-        case retiresOn = "retires_on"
-        case supersededBy = "superseded_by"
-    }
-}
-
-public struct HarnCompletionReview: Codable, Sendable, Equatable {
-    public let scrutiny: String
-    public let maxJudgeCalls: Int?
-    public let evidence: String
-
-    enum CodingKeys: String, CodingKey {
-        case scrutiny
-        case maxJudgeCalls = "max_judge_calls"
-        case evidence
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        scrutiny = try container.decodeIfPresent(String.self, forKey: .scrutiny) ?? "standard"
-        maxJudgeCalls = try container.decodeIfPresent(Int.self, forKey: .maxJudgeCalls)
-        evidence = try container.decode(String.self, forKey: .evidence)
-    }
-}
-
-public struct HarnModelReasoningModeRequest: Codable, Sendable, Equatable {
-    public let paramPath: [String]
-    public let value: String
-    public let responseValues: [String]?
-
-    enum CodingKeys: String, CodingKey {
-        case paramPath = "param_path"
-        case value
-        case responseValues = "response_values"
-    }
-}
-
-public struct HarnModelReasoningMode: Codable, Sendable, Equatable {
-    public let id: String
-    public let label: String?
-    public let economics: String
-    public let request: HarnModelReasoningModeRequest?
-    public let tokenMultiplier: Double?
-    public let status: String?
-    public let latency: String?
-    public let suitableWorkloads: [String]
-    public let unsuitableWorkloads: [String]
-    public let note: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case label
-        case economics
-        case request
-        case tokenMultiplier = "token_multiplier"
-        case status
-        case latency
-        case suitableWorkloads = "suitable_workloads"
-        case unsuitableWorkloads = "unsuitable_workloads"
-        case note
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(String.self, forKey: .id)
-        label = try container.decodeIfPresent(String.self, forKey: .label)
-        economics = try container.decode(String.self, forKey: .economics)
-        request = try container.decodeIfPresent(HarnModelReasoningModeRequest.self, forKey: .request)
-        tokenMultiplier = try container.decodeIfPresent(Double.self, forKey: .tokenMultiplier)
-        status = try container.decodeIfPresent(String.self, forKey: .status)
-        latency = try container.decodeIfPresent(String.self, forKey: .latency)
-        suitableWorkloads = try container.decodeIfPresent([String].self, forKey: .suitableWorkloads) ?? []
-        unsuitableWorkloads = try container.decodeIfPresent([String].self, forKey: .unsuitableWorkloads) ?? []
-        note = try container.decodeIfPresent(String.self, forKey: .note)
-    }
-}
-
-public struct HarnModelServingTierRequest: Codable, Sendable, Equatable {
-    public let param: String
-    public let value: String
-    public let responseValues: [String]?
-    public let betaHeader: String?
-
-    enum CodingKeys: String, CodingKey {
-        case param
-        case value
-        case responseValues = "response_values"
-        case betaHeader = "beta_header"
-    }
-}
-
-public struct HarnModelServingTier: Codable, Sendable, Equatable {
-    public let id: String
-    public let label: String?
-    public let mode: String
-    public let economics: String
-    public let request: HarnModelServingTierRequest?
-    public let otpsSpeedup: Double?
-    public let costMultiplier: Double?
-    public let discountPercent: Int?
-    public let status: String?
-    public let pricing: HarnModelPricing?
-    public let latency: String?
-    public let reliability: String?
-    public let quota: String?
-    public let suitableWorkloads: [String]
-    public let unsuitableWorkloads: [String]
-    public let note: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case label
-        case mode
-        case economics
-        case request
-        case otpsSpeedup = "otps_speedup"
-        case costMultiplier = "cost_multiplier"
-        case discountPercent = "discount_percent"
-        case status
-        case pricing
-        case latency
-        case reliability
-        case quota
-        case suitableWorkloads = "suitable_workloads"
-        case unsuitableWorkloads = "unsuitable_workloads"
-        case note
-    }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        id = try container.decode(String.self, forKey: .id)
-        label = try container.decodeIfPresent(String.self, forKey: .label)
-        mode = try container.decode(String.self, forKey: .mode)
-        economics = try container.decode(String.self, forKey: .economics)
-        request = try container.decodeIfPresent(HarnModelServingTierRequest.self, forKey: .request)
-        otpsSpeedup = try container.decodeIfPresent(Double.self, forKey: .otpsSpeedup)
-        costMultiplier = try container.decodeIfPresent(Double.self, forKey: .costMultiplier)
-        discountPercent = try container.decodeIfPresent(Int.self, forKey: .discountPercent)
-        status = try container.decodeIfPresent(String.self, forKey: .status)
-        pricing = try container.decodeIfPresent(HarnModelPricing.self, forKey: .pricing)
-        latency = try container.decodeIfPresent(String.self, forKey: .latency)
-        reliability = try container.decodeIfPresent(String.self, forKey: .reliability)
-        quota = try container.decodeIfPresent(String.self, forKey: .quota)
-        suitableWorkloads = try container.decodeIfPresent([String].self, forKey: .suitableWorkloads) ?? []
-        unsuitableWorkloads = try container.decodeIfPresent([String].self, forKey: .unsuitableWorkloads) ?? []
-        note = try container.decodeIfPresent(String.self, forKey: .note)
-    }
-}
-
-public struct HarnCatalogVariant: Codable, Sendable, Equatable {
-    public let id: String
-    public let label: String
-    public let description: String
-    public let modelID: String
-    public let provider: String
-    public let source: String
-    public let automaticEligibility: HarnAutomaticModelEligibility?
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case label
-        case description
-        case modelID = "model_id"
-        case provider
-        case source
-        case automaticEligibility = "automatic_eligibility"
-    }
-}
-
-public struct HarnAutomaticModelEligibility: Codable, Sendable, Equatable {
-    public let schema: String
-    public let decision: String
-    public let receipts: [HarnModelEligibilityMeasurement]
-}
-
-public struct HarnModelEligibilityMeasurement: Codable, Sendable, Equatable {
-    public let kind: String
-    public let source: String
-    public let observedAt: String
-    public let harnVersion: String
-    public let passed: Int
-    public let trials: Int
-
-    enum CodingKeys: String, CodingKey {
-        case kind
-        case source
-        case observedAt = "observed_at"
-        case harnVersion = "harn_version"
-        case passed
-        case trials
-    }
-}
-
-public struct HarnCatalogModelFamily: Codable, Sendable, Equatable {
-    public let id: String
-    public let label: String
-    public let plainDescription: String
-    public let provider: String
-    public let modelID: String?
-    public let dimensions: [HarnModelFamilyDimension]
-    public let presets: [HarnModelFamilyPreset]
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case label
-        case plainDescription = "plain_description"
-        case provider
-        case modelID = "model_id"
-        case dimensions
-        case presets
-    }
-}
-
-public struct HarnModelFamilyDimension: Codable, Sendable, Equatable {
-    public let key: String
-    public let label: String
-    public let plainDescription: String
-    public let kind: String
-    public let orderedValues: [HarnModelFamilyValue]
-
-    enum CodingKeys: String, CodingKey {
-        case key
-        case label
-        case plainDescription = "plain_description"
-        case kind
-        case orderedValues = "ordered_values"
-    }
-}
-
-public struct HarnModelFamilyValue: Codable, Sendable, Equatable {
-    public let value: String
-    public let label: String
-    public let plainDescription: String
-    public let relativeCostHint: Int
-    public let relativeSpeedHint: Int
-    public let modelID: String?
-
-    enum CodingKeys: String, CodingKey {
-        case value
-        case label
-        case plainDescription = "plain_description"
-        case relativeCostHint = "relative_cost_hint"
-        case relativeSpeedHint = "relative_speed_hint"
-        case modelID = "model_id"
-    }
-}
-
-public struct HarnModelFamilyPreset: Codable, Sendable, Equatable {
-    public let id: String
-    public let label: String
-    public let plainBlurb: String
-    public let coordinates: [String: String]
-
-    enum CodingKeys: String, CodingKey {
-        case id
-        case label
-        case plainBlurb = "plain_blurb"
-        case coordinates
-    }
-}
-
-public struct HarnCatalogRoutingRoute: Codable, Sendable, Equatable {
-    public let provider: String
-    public let model: String
-    public let baseURL: String?
-    public let secretEnv: String?
-    public let timeoutMs: Int?
-    public let label: String?
-    public let family: String?
-    public let capabilities: [String]?
-
-    enum CodingKeys: String, CodingKey {
-        case provider
-        case model
-        case baseURL = "base_url"
-        case secretEnv = "secret_env"
-        case timeoutMs = "timeout_ms"
-        case label
-        case family
-        case capabilities
-    }
+public enum HarnCatalogNoTrainingRequirement: String, Codable, Sendable {
+    case billing_enabled = "billing_enabled"
+    case contributor_sharing_disabled = "contributor_sharing_disabled"
 }

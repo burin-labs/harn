@@ -349,113 +349,89 @@ fn test_shape_mismatch_detail_wrong_type() {
     );
 }
 
-#[test]
-fn test_match_pattern_string_against_int() {
-    let warns = warnings(
-        r#"pipeline t(task) {
+#[rstest::rstest]
+#[case::test_match_pattern_string_against_int(
+    r#"pipeline t(task) {
   const x: int = 42
   match x {
 "hello" -> { log("bad") }
 42 -> { log("ok") }
   }
 }"#,
-    );
-    let pattern_warns: Vec<_> = warns
-        .iter()
-        .filter(|w| w.contains("Match pattern type mismatch"))
-        .collect();
-    assert_eq!(pattern_warns.len(), 1);
-    assert!(pattern_warns[0].contains("matching int against string literal"));
-}
-
-#[test]
-fn test_match_pattern_int_against_string() {
-    let warns = warnings(
-        r#"pipeline t(task) {
+    "matching int against string literal"
+)]
+#[case::test_match_pattern_int_against_string(
+    r#"pipeline t(task) {
   const x: string = "hello"
   match x {
 42 -> { log("bad") }
 "hello" -> { log("ok") }
   }
 }"#,
-    );
-    let pattern_warns: Vec<_> = warns
-        .iter()
-        .filter(|w| w.contains("Match pattern type mismatch"))
-        .collect();
-    assert_eq!(pattern_warns.len(), 1);
-    assert!(pattern_warns[0].contains("matching string against int literal"));
-}
-
-#[test]
-fn test_match_pattern_bool_against_int() {
-    let warns = warnings(
-        r#"pipeline t(task) {
+    "matching string against int literal"
+)]
+#[case::test_match_pattern_bool_against_int(
+    r#"pipeline t(task) {
   const x: int = 42
   match x {
 true -> { log("bad") }
 42 -> { log("ok") }
   }
 }"#,
-    );
-    let pattern_warns: Vec<_> = warns
-        .iter()
-        .filter(|w| w.contains("Match pattern type mismatch"))
-        .collect();
-    assert_eq!(pattern_warns.len(), 1);
-    assert!(pattern_warns[0].contains("matching int against bool literal"));
-}
-
-#[test]
-fn test_match_pattern_float_against_string() {
-    let warns = warnings(
-        r#"pipeline t(task) {
+    "matching int against bool literal"
+)]
+#[case::test_match_pattern_float_against_string(
+    r#"pipeline t(task) {
   const x: string = "hello"
   match x {
 3.14 -> { log("bad") }
 "hello" -> { log("ok") }
   }
 }"#,
-    );
+    "matching string against float literal"
+)]
+fn incompatible_match_pattern_warns(#[case] case_input: &str, #[case] case_expected: &str) {
+    let warns = warnings(case_input);
     let pattern_warns: Vec<_> = warns
         .iter()
         .filter(|w| w.contains("Match pattern type mismatch"))
         .collect();
     assert_eq!(pattern_warns.len(), 1);
-    assert!(pattern_warns[0].contains("matching string against float literal"));
+    assert!(pattern_warns[0].contains(case_expected));
 }
 
-#[test]
-fn test_match_pattern_int_against_float_ok() {
-    // int and float are compatible for match patterns
-    let warns = warnings(
-        r#"pipeline t(task) {
+#[rstest::rstest]
+// Numeric patterns are compatible in either direction.
+#[case::test_match_pattern_int_against_float_ok(
+    r#"pipeline t(task) {
   const x: float = 3.14
   match x {
 42 -> { log("ok") }
 _ -> { log("default") }
   }
-}"#,
-    );
-    let pattern_warns: Vec<_> = warns
-        .iter()
-        .filter(|w| w.contains("Match pattern type mismatch"))
-        .collect();
-    assert!(pattern_warns.is_empty());
-}
-
-#[test]
-fn test_match_pattern_float_against_int_ok() {
-    // float and int are compatible for match patterns
-    let warns = warnings(
-        r#"pipeline t(task) {
+}"#
+)]
+#[case::test_match_pattern_float_against_int_ok(
+    r#"pipeline t(task) {
   const x: int = 42
   match x {
 3.14 -> { log("close") }
 _ -> { log("default") }
   }
-}"#,
-    );
+}"#
+)]
+// Unknown input types cannot justify a pattern mismatch warning.
+#[case::test_match_pattern_untyped_no_warning(
+    r#"pipeline t(task) {
+  const x = some_unknown_fn()
+  match x {
+"hello" -> { log("string") }
+42 -> { log("int") }
+  }
+}"#
+)]
+fn compatible_match_patterns_do_not_warn(#[case] case_input: &str) {
+    let warns = warnings(case_input);
     let pattern_warns: Vec<_> = warns
         .iter()
         .filter(|w| w.contains("Match pattern type mismatch"))
@@ -489,25 +465,6 @@ fn test_match_pattern_wildcard_no_warning() {
   const x: int = 42
   match x {
 _ -> { log("catch all") }
-  }
-}"#,
-    );
-    let pattern_warns: Vec<_> = warns
-        .iter()
-        .filter(|w| w.contains("Match pattern type mismatch"))
-        .collect();
-    assert!(pattern_warns.is_empty());
-}
-
-#[test]
-fn test_match_pattern_untyped_no_warning() {
-    // When value has no known type, no warning should be emitted
-    let warns = warnings(
-        r#"pipeline t(task) {
-  const x = some_unknown_fn()
-  match x {
-"hello" -> { log("string") }
-42 -> { log("int") }
   }
 }"#,
     );

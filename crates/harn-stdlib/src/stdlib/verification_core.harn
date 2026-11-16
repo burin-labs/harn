@@ -14,6 +14,14 @@ import { shell_quote } from "std/runtime"
 import { regex_first_capture } from "std/text"
 import "std/verification_types"
 
+pub fn __verification_reference(value: unknown) -> VerificationRawReference? {
+  const kind = type_of(value)
+  return kind == "dict" || kind == "struct" ? schema_expect(
+    value,
+    schema_of(VerificationRawReference),
+  ) : nil
+}
+
 pub fn verification_file_hash_snapshot(
   code_index: HarnessCodeIndex,
   paths: list<string>,
@@ -21,7 +29,10 @@ pub fn verification_file_hash_snapshot(
   return code_index.file_hash_snapshot({paths: paths})
 }
 
-pub fn verification_snapshot_staleness(bound_snapshot: dict, current_hashes: dict) -> dict {
+pub fn verification_snapshot_staleness(
+  bound_snapshot: dict,
+  current_hashes: dict,
+) -> VerificationSnapshotStaleness {
   const bound = __verification_snapshot_map(bound_snapshot)
   if type_of(bound) != "dict" || len(keys(bound)) == 0 {
     return {
@@ -91,7 +102,7 @@ fn __verification_duration_ms(result: CommandResult, opts: dict) {
   return nil
 }
 
-pub fn __verification_exit(result: any, opts: dict) {
+pub fn __verification_exit(result: any, opts: dict) -> int? {
   if opts?.exit != nil {
     return to_int(opts.exit)
   }
@@ -374,7 +385,7 @@ pub fn __verification_warm_state_cache_identity(row: dict, opts: dict) -> dict {
       ?? {})
 }
 
-pub fn __verification_warm_state_expected_delta_ms(row: dict, mode: dict) {
+pub fn __verification_warm_state_expected_delta_ms(row: dict, mode: dict) -> int? {
   return to_int(
     mode?.expectedWarmDeltaMs
       ?? mode?.expected_warm_delta_ms
@@ -383,14 +394,14 @@ pub fn __verification_warm_state_expected_delta_ms(row: dict, mode: dict) {
   )
 }
 
-pub fn __verification_warm_state_timings(row: dict, mode: dict) {
-  const timings = row?.timings ?? mode?.timings ?? {}
-  const warm_ms = to_int(
-    mode?.warmMs ?? mode?.warm_ms ?? timings?.warmMs?.p95 ?? timings?.warm_ms?.p95,
-  )
-  const cold_ms = to_int(
-    mode?.coldMs ?? mode?.cold_ms ?? timings?.coldMs?.p95 ?? timings?.cold_ms?.p95,
-  )
+pub fn __verification_warm_state_timings(row: dict, mode: dict) -> VerificationWarmStateTimings {
+  const timings = __verification_reference(row?.timings ?? mode?.timings ?? {})
+  const warm = __verification_reference(timings?.warmMs)
+  const warm_snake = __verification_reference(timings?.warm_ms)
+  const cold = __verification_reference(timings?.coldMs)
+  const cold_snake = __verification_reference(timings?.cold_ms)
+  const warm_ms = to_int(mode?.warmMs ?? mode?.warm_ms ?? warm?.p95 ?? warm_snake?.p95)
+  const cold_ms = to_int(mode?.coldMs ?? mode?.cold_ms ?? cold?.p95 ?? cold_snake?.p95)
   return {warm_ms: warm_ms, cold_ms: cold_ms}
 }
 
@@ -410,12 +421,16 @@ pub fn __verification_warm_state_probe_receipt(result: any) -> dict {
   }
 }
 
-pub fn __verification_warm_state_first_fact(tools: HarnessTools, row: any, opts: dict?) {
+pub fn __verification_warm_state_first_fact(
+  tools: HarnessTools,
+  row: any,
+  opts: dict?,
+) -> VerificationWarmStateFact? {
   const facts = verification_warm_state_facts(tools, [row], opts)
   return len(facts) == 0 ? nil : facts[0]
 }
 
-pub fn __verification_warm_state_receipt_handle(value: dict?) {
+pub fn __verification_warm_state_receipt_handle(value: dict?) -> string? {
   if value == nil {
     return nil
   }
@@ -423,8 +438,9 @@ pub fn __verification_warm_state_receipt_handle(value: dict?) {
     const handle = trim(to_string(value.handle_id))
     return handle == "" ? nil : handle
   }
-  if value?.started?.handle_id != nil {
-    const handle = trim(to_string(value.started.handle_id))
+  const started = __verification_reference(value?.started)
+  if started?.handle_id != nil {
+    const handle = trim(to_string(started.handle_id))
     return handle == "" ? nil : handle
   }
   return nil
@@ -551,9 +567,9 @@ pub fn __verification_delta_status(value: unknown) -> string {
   if direct != "" {
     return direct
   }
-  return lowercase(
-    trim(to_string(value?.classification?.status ?? value?.diagnostic?.status ?? "")),
-  )
+  const classification = __verification_reference(value?.classification)
+  const diagnostic = __verification_reference(value?.diagnostic)
+  return lowercase(trim(to_string(classification?.status ?? diagnostic?.status ?? "")))
 }
 
 pub fn __verification_delta_feeds_gates(value: unknown) -> bool {
@@ -566,17 +582,19 @@ pub fn __verification_delta_feeds_gates(value: unknown) -> bool {
   if value?.feeds_gates != nil {
     return value.feeds_gates ? true : false
   }
-  if value?.classification?.feedsGates != nil {
-    return value.classification.feedsGates ? true : false
+  const classification = __verification_reference(value?.classification)
+  if classification?.feedsGates != nil {
+    return classification.feedsGates ? true : false
   }
-  if value?.classification?.feeds_gates != nil {
-    return value.classification.feeds_gates ? true : false
+  if classification?.feeds_gates != nil {
+    return classification.feeds_gates ? true : false
   }
-  if value?.diagnostic?.feedsGates != nil {
-    return value.diagnostic.feedsGates ? true : false
+  const diagnostic = __verification_reference(value?.diagnostic)
+  if diagnostic?.feedsGates != nil {
+    return diagnostic.feedsGates ? true : false
   }
-  if value?.diagnostic?.feeds_gates != nil {
-    return value.diagnostic.feeds_gates ? true : false
+  if diagnostic?.feeds_gates != nil {
+    return diagnostic.feeds_gates ? true : false
   }
   const status = __verification_delta_status(value)
   return !["advisory", "bound_stale", "stale", "unbound"].contains(status)
@@ -631,7 +649,8 @@ fn __verification_delta_complete(value: unknown) -> bool {
  * @api_stability: experimental
  */
 pub fn __verification_command_fact(value: dict) -> dict {
-  const data = value?.data ?? value?.result?.data ?? value
+  const result = __verification_reference(value?.result)
+  const data = value?.data ?? result?.data ?? value
   const command = data?.run_outcome ?? value?.run_outcome ?? data
   const command_status = command?.command_status ?? data?.command_status
   const exit = to_int(command?.exit_code)
@@ -831,14 +850,18 @@ pub fn __verification_delta_ignored(signature: string, cfg: dict) -> bool {
   return false
 }
 
-pub fn __verification_delta_direct_count(value: unknown) {
+pub fn __verification_delta_direct_count(value: unknown) -> int? {
   return to_int(
     value?.error_count ?? value?.diagnostic_count ?? value?.diagnostics_count
       ?? value?.failure_count,
   )
 }
 
-pub fn __verification_delta_info(agent: HarnessAgent, value: unknown, cfg: dict) -> dict {
+pub fn __verification_delta_info(
+  agent: HarnessAgent,
+  value: unknown,
+  cfg: dict,
+) -> VerificationDiagnosticInfo {
   const entries = __verification_delta_raw_entries(value)
   let normalized: list<string> = []
   let failure_signatures: list<string> = []
@@ -904,11 +927,13 @@ pub fn __verification_delta_set_intersection(
   return out.sorted()
 }
 
-pub fn __verification_delta_gate_signatures(info: dict) -> list<string> {
+pub fn __verification_delta_gate_signatures(info: VerificationDiagnosticInfo) -> list<string> {
   return info.feedsGates ? info.signatures : []
 }
 
-pub fn __verification_delta_snapshot(info: dict) -> dict {
+pub fn __verification_delta_snapshot(
+  info: VerificationDiagnosticInfo,
+) -> VerificationDiagnosticSnapshot {
   return {
     count: info.count,
     complete: info.complete,
@@ -922,8 +947,8 @@ pub fn __verification_delta_snapshot(info: dict) -> dict {
 pub fn __verification_delta_result(
   status: string,
   progress_credit: bool,
-  previous_info: dict,
-  current_info: dict,
+  previous_info: VerificationDiagnosticInfo,
+  current_info: VerificationDiagnosticInfo,
   removed: list<string>,
   added: list<string>,
   persisted: list<string>,

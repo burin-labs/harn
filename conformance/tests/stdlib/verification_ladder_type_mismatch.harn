@@ -1,0 +1,10 @@
+import { VerificationLadderPlanEntry } from "std/verification"
+
+fn wrong_p95(value: VerificationLadderPlanEntry) -> string {
+  const p95: string = value.p95_ms
+  return p95
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(type_of(wrong_p95))
+}

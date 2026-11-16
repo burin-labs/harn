@@ -14,6 +14,14 @@ use serde_json::Value as JsonValue;
 
 use crate::value::VmValue;
 
+pub(crate) const WORKSPACE_ANCHOR_REMINDER_KEY: &str = "workspace_anchor";
+
+/// Facts eligible for model delivery, distinct from permission authority.
+pub(crate) enum WorkspaceAnchorContext {
+    Current(WorkspaceAnchor),
+    Cleared,
+}
+
 /// How a mounted root contributes to the session's effective workspace.
 ///
 /// * `ReadOnly` — visible to file-reading tools, blocked for writes.
