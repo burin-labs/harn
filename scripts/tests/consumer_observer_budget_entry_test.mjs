@@ -39,6 +39,8 @@ test('the actual budget entrypoint authenticates archives and exact job timing b
       steps: [{status: 'in_progress', conclusion: null, started_at: iso(1848)}]};
     const fixture = path.join(scratch, 'fixture.json'), preload = path.join(scratch, 'fetch.mjs');
     fs.writeFileSync(preload, `import fs from 'node:fs';
+      import {readRetry} from ${JSON.stringify(new URL('../lib/consumer-observer.mjs', import.meta.url).href)};
+      readRetry.backoffMs=0;
       const f=JSON.parse(fs.readFileSync(${JSON.stringify(fixture)},'utf8'));
       let parentReads=0;
       Date.now=()=>f.now*1000;
