@@ -777,18 +777,77 @@ async fn semantic_lane_fairness_prevents_monopolization() {
         .max()
         .unwrap();
     assert!(
-            earliest_b < latest_a,
-            "fair scheduler should interleave slices: B's first finished at {earliest_b}us, A's last at {latest_a}us",
-        );
+        earliest_b < latest_a,
+        "fair scheduler should interleave slices: B's first finished at {earliest_b}us, A's last at {latest_a}us",
+    );
 }
 
 #[tokio::test]
 async fn deterministic_progress_continues_while_semantic_work_waits() {
-    // Single global semantic lane with a slow semantic predicate that
-    // dominates the scheduler. Deterministic predicates must complete
-    // before the semantic predicate because deterministic and semantic
-    // lanes are independent.
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::sync::{watch, Notify};
+
+    struct Progress {
+        semantic_entered: watch::Sender<bool>,
+        release_semantic: Notify,
+        deterministic_completions: AtomicUsize,
+        completed: Mutex<Vec<&'static str>>,
+    }
+
+    struct ProgressProbe {
+        hash: &'static str,
+        kind: PredicateKind,
+        progress: Arc<Progress>,
+    }
+
+    #[async_trait]
+    impl PredicateRunner for ProgressProbe {
+        fn hash(&self) -> PredicateHash {
+            PredicateHash::new(self.hash)
+        }
+
+        fn kind(&self) -> PredicateKind {
+            self.kind
+        }
+
+        fn fallback_hash(&self) -> Option<PredicateHash> {
+            (self.kind == PredicateKind::Semantic).then(|| PredicateHash::new("det-1"))
+        }
+
+        async fn evaluate(&self, _context: PredicateContext) -> InvariantResult {
+            if self.kind == PredicateKind::Semantic {
+                let released = self.progress.release_semantic.notified();
+                self.progress.semantic_entered.send_replace(true);
+                released.await;
+            } else {
+                let mut entered = self.progress.semantic_entered.subscribe();
+                entered
+                    .wait_for(|entered| *entered)
+                    .await
+                    .expect("semantic entry signal");
+            }
+            self.progress
+                .completed
+                .lock()
+                .expect("progress log lock")
+                .push(self.hash);
+            if self.kind == PredicateKind::Deterministic
+                && self
+                    .progress
+                    .deterministic_completions
+                    .fetch_add(1, Ordering::SeqCst)
+                    == 3
+            {
+                // Both deterministic predicates must finish their initial and replay
+                // evaluations while the semantic predicate still owns its lane.
+                self.progress.release_semantic.notify_one();
+            }
+            InvariantResult::allow()
+        }
+    }
+
     let config = PredicateExecutorConfig {
+        replay_deterministic: true,
         semantic_budget: Duration::from_secs(10),
         scheduler: PredicateSchedulerConfig {
             max_semantic_lanes: 1,
@@ -800,50 +859,56 @@ async fn deterministic_progress_continues_while_semantic_work_waits() {
     };
     let executor = PredicateExecutor::with_cheap_judge(config, Arc::new(PassingJudge));
 
-    let log = Arc::new(Mutex::new(Vec::new()));
-    let epoch = Instant::now();
+    let (semantic_entered, _) = watch::channel(false);
+    let progress = Arc::new(Progress {
+        semantic_entered,
+        release_semantic: Notify::new(),
+        deterministic_completions: AtomicUsize::new(0),
+        completed: Mutex::new(Vec::new()),
+    });
 
     let predicates: Vec<Arc<dyn PredicateRunner>> = vec![
-        Arc::new(FinishingProbe {
+        Arc::new(ProgressProbe {
             hash: "slow-semantic",
             kind: PredicateKind::Semantic,
-            delay: Duration::from_millis(80),
-            finish_log: log.clone(),
-            epoch,
+            progress: progress.clone(),
         }),
-        Arc::new(FinishingProbe {
+        Arc::new(ProgressProbe {
             hash: "det-1",
             kind: PredicateKind::Deterministic,
-            delay: Duration::from_millis(5),
-            finish_log: log.clone(),
-            epoch,
+            progress: progress.clone(),
         }),
-        Arc::new(FinishingProbe {
+        Arc::new(ProgressProbe {
             hash: "det-2",
             kind: PredicateKind::Deterministic,
-            delay: Duration::from_millis(5),
-            finish_log: log.clone(),
-            epoch,
+            progress: progress.clone(),
         }),
     ];
 
-    let _ = executor.execute_slice(&slice(), &predicates).await;
-    let snapshot = log.lock().expect("finish log lock").clone();
-    let det_finish = snapshot
+    let report = executor.execute_slice(&slice(), &predicates).await;
+    let completed = progress.completed.lock().expect("progress log lock");
+    assert_eq!(completed.len(), 5);
+    assert_eq!(completed.last(), Some(&"slow-semantic"));
+    for name in ["det-1", "det-2"] {
+        assert_eq!(
+            completed
+                .iter()
+                .filter(|completed| **completed == name)
+                .count(),
+            2
+        );
+        let record = report
+            .records
+            .iter()
+            .find(|record| record.predicate_hash.as_str() == name)
+            .expect("deterministic execution record");
+        assert_eq!(record.attempts, 2);
+    }
+    assert_eq!(report.records.len(), 3);
+    assert!(report
+        .records
         .iter()
-        .filter_map(|(name, micros)| name.starts_with("det-").then_some(*micros))
-        .max()
-        .expect("deterministic finished");
-    let semantic_finish = snapshot
-        .iter()
-        .find(|(name, _)| name == "slow-semantic")
-        .map(|(_, micros)| *micros)
-        .expect("semantic finished");
-
-    assert!(
-        det_finish < semantic_finish,
-        "deterministic ({det_finish}us) should finish before slow semantic ({semantic_finish}us)",
-    );
+        .all(|record| !record.result.is_blocking()));
 }
 
 #[tokio::test]
