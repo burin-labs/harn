@@ -594,7 +594,7 @@ prompt-cache breakpoint in `prompt_cache_breakpoint.outcome`:
 
 | Outcome | Meaning |
 |---|---|
-| `placed` | Harn added its marker; `style` is `top_level` or `last_block`. |
+| `placed` | Harn added its markers; `style` is `top_level`, `last_block`, or `{"tools_and_top_level":{"tool_index":N}}`. The indexed form marks the final native tool and enables automatic conversation caching with the same TTL. `tool_index` is zero-based and excludes appended provider tools. |
 | `not_requested` | The call turned caching off. |
 | `unsupported` | The route does not declare prompt caching. |
 | `automatic` | The route caches without a request marker, so none was sent. |
