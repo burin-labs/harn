@@ -43,5 +43,44 @@ pipeline test(harness: Harness, task: unknown) {
   assert(common.ok, "git result satisfies the shared CommandResult contract")
   assert(common.success && result.success, "shared and git-specific fields coexist")
   assert(len(result.argv) == 3, "runner contract preserved git argv")
+  assert(result.stdout_truncated == nil, "legacy stdout completeness remains unmeasured")
+  assert(result.stderr_truncated == nil, "legacy stderr completeness remains unmeasured")
+  harness.testing.push_scope()
+  harness.testing.respond(
+    "process",
+    "exec",
+    {
+      success: true,
+      exit_code: 0,
+      stdout: "prefix",
+      stderr: "",
+      stdout_truncated: true,
+      stderr_truncated: false,
+    },
+  )
+  const truncated: GitCommandResult = forward_git_run(runner, ["--version"])
+  harness.testing.pop_scope()
+  assert(truncated.stdout_truncated == true, "the typed runner preserves stdout truncation")
+  assert(
+    truncated.stderr_truncated == false,
+    "the typed runner preserves measured stderr completeness",
+  )
+  harness.testing.push_scope()
+  harness.testing.respond(
+    "process",
+    "exec",
+    {
+      success: false,
+      exit_code: 1,
+      stdout: "",
+      stderr: "prefix",
+      stdout_truncated: false,
+      stderr_truncated: true,
+    },
+  )
+  const stderr_truncated: GitCommandResult = forward_git_run(runner, ["--version"])
+  harness.testing.pop_scope()
+  assert(stderr_truncated.stdout_truncated == false, "complete stdout stays measured")
+  assert(stderr_truncated.stderr_truncated == true, "the typed runner preserves stderr truncation")
   harness.stdio.log("git_command_result_forward ok argv=" + to_string(len(result.argv)))
 }
