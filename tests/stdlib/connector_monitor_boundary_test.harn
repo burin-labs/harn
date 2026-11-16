@@ -314,4 +314,22 @@ pipeline test_linear_initial_poll_reaches_the_connector(harness: Harness) {
       )
     },
   )
+  for target in [nil, "Done"] {
+    with_scenario(
+      harness,
+      {capabilities: [{capability: "net", method: "connector_call", result: {data: {issue: nil}}}]},
+      { _ ->
+        const poll = linear.issue_state_source(harness.net, "I", target).poll
+        const refused = try {
+          poll(context + {last_push_event: {}})
+        }
+        assert(is_err(refused), "a missing GraphQL issue remains refused even without a target")
+        const calls = harness.testing.calls().filter(
+          { call -> call.capability == "net" && call.operation == "connector_call" },
+        )
+          .to_list()
+        assert_eq(calls.count, 1, "the missing-issue control must reach its connector reply")
+      },
+    )
+  }
 }
