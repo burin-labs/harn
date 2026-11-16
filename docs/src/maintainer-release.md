@@ -197,7 +197,12 @@ Follow the runs for the commit you named in
    it rehearses contains each trailer-named pull's head; otherwise it refuses
    with `pairing_superset_missing` and names the missing pull. The canary
    rechecks containment against the revision the consumer run tested and
-   records the superseded pulls in the rehearsal binding. A paired pull
+   records the superseded pulls in the rehearsal binding. Publication rechecks
+   every recorded component's current head against that rehearsed revision.
+   A component may be closed; its current head must still be contained.
+   If a component advances beyond that revision, publication refuses with
+   `pairing_superset_missing`; run another rehearsal.
+   A paired pull
    already merged into the consumer's default branch rehearses that branch and
    logs `decision=rehearse_default`; a pull closed without merging refuses.
    A passing release rehearsal must retain `consumer-rehearsal-binding-<attempt>`;

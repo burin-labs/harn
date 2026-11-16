@@ -82,6 +82,8 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/consumer_canary_pol
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/green_checkpoint.sh"
 # shellcheck source=scripts/lib/sha256.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/sha256.sh"
+# shellcheck source=scripts/lib/consumer_pairing_superset.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/consumer_pairing_superset.sh"
 
 # The consumer's repository name, which no output line may contain.
 CANARY_SECRET_NAME=
@@ -346,25 +348,18 @@ canary_read_pairing() {
 # rehearses contains every one of their heads, so the rehearsal still measures
 # each pairing. On refusal CANARY_SUPERSET_REASON and CANARY_SUPERSET_DETAIL
 # name the first pull that is missing or unmeasured.
+canary_superset_read() {
+  local destination=$1 repository=$2 endpoint=$3 query=$4
+  canary_api --optional "$destination" pairing_superset_unmeasured secret:CONSUMER_CANARY_REPOSITORY \
+    "repos/$repository$endpoint" --jq "$query"
+}
+
 canary_check_superset() {
-  local repo=$1 paired=$2 rehearsed=$3 superseded=$4 pull head comparison status base
-  CANARY_SUPERSET_REASON=pairing_superset_unmeasured CANARY_SUPERSET_DETAIL="pull=$paired"
-  [[ "$rehearsed" =~ ^[0-9a-f]{40}$ ]] || return 1
-  for pull in ${superseded//,/ }; do
-    CANARY_SUPERSET_REASON=pairing_superset_unmeasured CANARY_SUPERSET_DETAIL="pull=$paired superseded=$pull"
-    head=''
-    canary_api --optional head pairing_superset_unmeasured secret:CONSUMER_CANARY_REPOSITORY \
-      "repos/$repo/pulls/$pull" --jq .head.sha || return 1
-    [[ "$head" =~ ^[0-9a-f]{40}$ ]] || return 1
-    comparison=''
-    canary_api --optional comparison pairing_superset_unmeasured secret:CONSUMER_CANARY_REPOSITORY \
-      "repos/$repo/compare/$head...$rehearsed" --jq '"\(.status) \(.merge_base_commit.sha)"' || return 1
-    read -r status base <<< "$comparison"
-    if [[ ! ( "$status" == identical || "$status" == ahead ) || "$base" != "$head" ]]; then
-      CANARY_SUPERSET_REASON=pairing_superset_missing CANARY_SUPERSET_DETAIL="pull=$paired missing=$pull"
-      return 1
-    fi
-  done
+  local result=0
+  consumer_pairing_superset_check "$@" canary_superset_read || result=$?
+  CANARY_SUPERSET_REASON=$CONSUMER_SUPERSET_REASON
+  CANARY_SUPERSET_DETAIL=$CONSUMER_SUPERSET_DETAIL
+  return "$result"
 }
 
 canary_require_superset() {
