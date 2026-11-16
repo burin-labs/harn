@@ -1835,6 +1835,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Dispatch exact-source qualification
+        id: native-dispatch
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -1847,6 +1848,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           SOURCE_SHA: ${{ needs.setup.outputs.candidate_source_sha }}
           WAIT_FOR_FULL_SUITE: 'true'
+          NATIVE_QUALIFICATION_RUN_ID: ${{ steps.native-dispatch.outputs.run_id }}
           NATIVE_QUALIFICATION_STATUS_FILE: ${{ runner.temp }}/native-qualification.json
         run: >-
           bash scripts/ci/require_native_qualification.sh

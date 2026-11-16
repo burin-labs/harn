@@ -12,6 +12,12 @@ case "$*" in
   'run watch '*)
     printf '%s\n' "$*" >> "$FIXTURE/watch-calls"
     case "${FAKE_WATCH_CASE:-}" in
+      native-purpose)
+        cp "$FIXTURE/good-native/native-run" "$FIXTURE/native-run"
+        if [[ ${FAKE_NATIVE_FINAL_TITLE:-correct} != correct ]]; then
+          jq --arg title "$FAKE_NATIVE_FINAL_TITLE" '.display_title=$title' "$FIXTURE/native-run" > "$FIXTURE/native-final"
+          mv "$FIXTURE/native-final" "$FIXTURE/native-run"
+        fi ;;
       recover)
         if [[ $(wc -l < "$FIXTURE/watch-calls" | tr -d ' ') == 1 ]]; then
           echo 'failed to get run: HTTP 502: fixture interruption' >&2
@@ -53,6 +59,7 @@ case "$*" in
   *workflows/macos-nightly.yml*) cat "$FIXTURE/native-workflow" ;;
   *runs/81/attempts/1/jobs*) cat "$FIXTURE/native-jobs" ;;
   *runs/81/attempts/1*) cat "$FIXTURE/native-run" ;;
+  *runs/81) cat "$FIXTURE/native-run" ;;
   *runs/82/attempts/1/jobs*) cat "$FIXTURE/newer-jobs" ;;
   *runs/82/attempts/1*) cat "$FIXTURE/newer-run" ;;
   *runs/81/artifacts*) cat "$FIXTURE/native-artifacts" ;;
@@ -81,7 +88,7 @@ chmod +x "$scratch/bin/sleep"
 export PATH="$scratch/bin:$PATH" FIXTURE="$scratch" GH_REPO=fixture/repo
 export SOURCE_SHA=1111111111111111111111111111111111111111
 export FULL_SUITE_STATUS_FILE="$scratch/source-ci.json"
-jq -nc '{id:64,path:".github/workflows/macos-nightly.yml",state:"active"}' > "$scratch/native-workflow"
+jq -nc '{id:64,name:"macOS workspace tests",path:".github/workflows/macos-nightly.yml",state:"active"}' > "$scratch/native-workflow"
 jq -nc --arg source "$SOURCE_SHA" '{id:81,run_attempt:1,workflow_id:64,path:".github/workflows/macos-nightly.yml",
   head_sha:"2222222222222222222222222222222222222222",head_branch:"main",display_title:("Native qualification " + $source),event:"workflow_dispatch",status:"completed",conclusion:"success",
   repository:{full_name:"fixture/repo"},head_repository:{full_name:"fixture/repo"}}' > "$scratch/native-run"
@@ -152,6 +159,57 @@ WAIT_FOR_FULL_SUITE=true FAKE_NATIVE_DISCOVERY=true NATIVE_QUALIFICATION_STATUS_
   bash "$root/scripts/ci/require_native_qualification.sh" "$GH_REPO" "$SOURCE_SHA" "$root/scripts/release_audit_contract.json" > "$scratch/discovery-log"
 [[ $(cat "$scratch/discovery-waits") == 5 ]]
 jq -e '.verdict == "success" and .source_sha == "1111111111111111111111111111111111111111" and .pending_count == 0 and .failed_count == 0' "$scratch/native-status.json" >/dev/null
+# A dispatched run can remain queued with its workflow name until GitHub
+# evaluates run-name. The returned ID owns observation, never source proof.
+jq '.status="queued"|.conclusion=null|.display_title="macOS workspace tests"' "$scratch/good-native/native-run" > "$scratch/native-run"
+jq -sc '[{total_count:1,workflow_runs:.}]' "$scratch/native-run" > "$scratch/native-runs"
+: > "$scratch/watch-calls"
+if ! WAIT_FOR_FULL_SUITE=true NATIVE_QUALIFICATION_RUN_ID=81 FAKE_WATCH_CASE=native-purpose \
+  NATIVE_QUALIFICATION_STATUS_FILE="$scratch/native-status.json" \
+  bash "$root/scripts/ci/require_native_qualification.sh" "$GH_REPO" "$SOURCE_SHA" "$root/scripts/release_audit_contract.json" > "$scratch/queued-purpose-log"; then
+  cat "$scratch/queued-purpose-log" >&2
+  echo 'Known queued dispatch was lost before its purpose reported' >&2
+  exit 1
+fi
+[[ $(cat "$scratch/watch-calls") == 'run watch 81 --repo fixture/repo --exit-status' ]]
+jq -e '.verdict == "success" and .platforms[0].run_id == 81 and .pending_count == 0 and .failed_count == 0' "$scratch/native-status.json" >/dev/null
+for title in null '""'; do
+  jq --argjson title "$title" '.status="waiting"|.conclusion=null|.display_title=$title' "$scratch/good-native/native-run" > "$scratch/native-run"
+  : > "$scratch/watch-calls"
+  WAIT_FOR_FULL_SUITE=true NATIVE_QUALIFICATION_RUN_ID=81 FAKE_WATCH_CASE=native-purpose \
+    bash "$root/scripts/ci/require_native_qualification.sh" "$GH_REPO" "$SOURCE_SHA" "$root/scripts/release_audit_contract.json" > "$scratch/queued-purpose-log"
+  [[ $(wc -l < "$scratch/watch-calls" | tr -d ' ') == 1 ]]
+done
+jq '.status="queued"|.conclusion=null|.display_title="macOS workspace tests"' "$scratch/good-native/native-run" > "$scratch/native-run"
+: > "$scratch/watch-calls"
+if NATIVE_QUALIFICATION_RUN_ID=81 NATIVE_QUALIFICATION_STATUS_FILE="$scratch/native-status.json" \
+  bash "$root/scripts/ci/require_native_qualification.sh" "$GH_REPO" "$SOURCE_SHA" "$root/scripts/release_audit_contract.json" > "$scratch/pending-purpose-log"; then
+  echo 'A pending purpose passed without qualification' >&2; exit 1
+fi
+[[ ! -s "$scratch/watch-calls" ]]
+jq -e '.verdict == "pending" and .next_action == "wait-native-qualification" and .pending_count == 1 and .failed_count == 0
+  and .pending_jobs == ["native run purpose has not reported"] and .platforms[0].observed_jobs == null' "$scratch/native-status.json" >/dev/null
+for defect in '.display_title="Native qualification wrong-source"' '.id=82' '.workflow_id=65' \
+  '.repository.full_name="foreign/repo"' '.head_repository.full_name="foreign/repo"' '.head_branch="topic"' \
+  '.event="push"' '.status="completed"|.conclusion="success"'; do
+  jq "$defect" "$scratch/native-run" > "$scratch/invalid-native"
+  cp "$scratch/native-run" "$scratch/pending-native"
+  mv "$scratch/invalid-native" "$scratch/native-run"
+  if WAIT_FOR_FULL_SUITE=true NATIVE_QUALIFICATION_RUN_ID=81 FAKE_WATCH_CASE=native-purpose \
+    bash "$root/scripts/ci/require_native_qualification.sh" "$GH_REPO" "$SOURCE_SHA" "$root/scripts/release_audit_contract.json" > "$scratch/invalid-purpose-log"; then
+    echo "An unrelated native run passed: $defect" >&2; exit 1
+  fi
+  [[ ! -s "$scratch/watch-calls" ]]
+  mv "$scratch/pending-native" "$scratch/native-run"
+done
+for title in 'Native qualification wrong-source' 'macOS workspace tests'; do
+  jq '.status="queued"|.conclusion=null|.display_title="macOS workspace tests"' "$scratch/good-native/native-run" > "$scratch/native-run"
+  if WAIT_FOR_FULL_SUITE=true NATIVE_QUALIFICATION_RUN_ID=81 FAKE_WATCH_CASE=native-purpose FAKE_NATIVE_FINAL_TITLE="$title" \
+    bash "$root/scripts/ci/require_native_qualification.sh" "$GH_REPO" "$SOURCE_SHA" "$root/scripts/release_audit_contract.json" > "$scratch/final-purpose-log"; then
+    echo 'A completed foreign or unreported purpose passed qualification' >&2; exit 1
+  fi
+done
+cp "$scratch/good-native/"* "$scratch/"
 for kind in changing api; do
   rm -f "$scratch/native-census-reads"
   : > "$scratch/discovery-waits"

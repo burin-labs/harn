@@ -43,46 +43,65 @@ require_native_platform() {
   name=$(jq -r .name <<< "$policy")
   # A known positive workflow read precedes trusting an empty run census.
   if ! metadata=$(gh api "repos/$repo/actions/workflows/${workflow##*/}") ||
-    ! jq -e --arg path "$workflow" '.path == $path and .state == "active" and (.id | type == "number" and . > 0 and floor == .)' <<< "$metadata" >/dev/null; then
+    ! jq -e --arg path "$workflow" '.path == $path and .state == "active" and (.name | type == "string" and length > 0) and (.id | type == "number" and . > 0 and floor == .)' <<< "$metadata" >/dev/null; then
     native_qualification_unmeasured "$name:workflow"
     return 1
   fi
-  for ((discovery=0; ; discovery++)); do
-    if ! pages=$(gh api --paginate --slurp "repos/$repo/actions/workflows/${workflow##*/}/runs?event=workflow_dispatch&branch=main&per_page=100") ||
-    ! runs=$(jq -ce --arg source "$source" --arg repo "$repo" --arg path "$workflow" --argjson workflow "$(jq .id <<< "$metadata")" '
-      if type != "array" or length == 0 or any(.[]; (.workflow_runs | type) != "array" or (.total_count | type) != "number")
-      then error("unmeasured native run census")
-      elif ([.[].total_count] | unique | length) != 1 then error("changing native run census")
-      else . as $pages | [.[].workflow_runs[]]
-        | if length == $pages[0].total_count and (map(.id) | unique | length) == length then . else error("partial native run census") end
-        | if all(.[]; (.head_sha|test("^[0-9a-f]{40}$")) and .head_branch == "main" and .event == "workflow_dispatch" and .path == $path and .workflow_id == $workflow
-          and .repository.full_name == $repo and .head_repository.full_name == $repo
-          and (.id | type == "number" and . > 0 and floor == .)
-          and (.run_attempt | type == "number" and . > 0 and floor == .)) then . else error("foreign native run") end
-        | map(select(.display_title == ("Native qualification " + $source))) end
-    ' <<< "$pages"); then
-      if [[ ${WAIT_FOR_FULL_SUITE:-false} == true && $discovery -lt 24 ]]; then
-        sleep 5
-        continue
+  if [[ -n ${NATIVE_QUALIFICATION_RUN_ID:-} ]]; then
+    id=$NATIVE_QUALIFICATION_RUN_ID
+    if [[ ! "$id" =~ ^[1-9][0-9]*$ ]] || ! selected=$(gh api "repos/$repo/actions/runs/$id") ||
+      ! jq -e --arg repo "$repo" --arg source "$source" --arg path "$workflow" \
+        --arg placeholder "$(jq -r .name <<< "$metadata")" --argjson id "$id" --argjson workflow "$(jq .id <<< "$metadata")" '
+        .display_title as $title | .id == $id and .workflow_id == $workflow and .path == $path
+        and .repository.full_name == $repo and .head_repository.full_name == $repo
+        and .head_branch == "main" and .event == "workflow_dispatch"
+        and (.head_sha | test("^[0-9a-f]{40}$"))
+        and (.run_attempt | type == "number" and . > 0 and floor == .)
+        and (.display_title == ("Native qualification " + $source)
+          or (.status | IN("queued", "requested", "waiting", "pending", "in_progress"))
+            and .conclusion == null and ([null,"",$placeholder] | index($title)) != null)
+      ' <<< "$selected" >/dev/null; then
+      native_qualification_unmeasured "$name:dispatch"
+      return 1
+    fi
+  else
+    for ((discovery=0; ; discovery++)); do
+      if ! pages=$(gh api --paginate --slurp "repos/$repo/actions/workflows/${workflow##*/}/runs?event=workflow_dispatch&branch=main&per_page=100") ||
+      ! runs=$(jq -ce --arg source "$source" --arg repo "$repo" --arg path "$workflow" --argjson workflow "$(jq .id <<< "$metadata")" '
+        if type != "array" or length == 0 or any(.[]; (.workflow_runs | type) != "array" or (.total_count | type) != "number")
+        then error("unmeasured native run census")
+        elif ([.[].total_count] | unique | length) != 1 then error("changing native run census")
+        else . as $pages | [.[].workflow_runs[]]
+          | if length == $pages[0].total_count and (map(.id) | unique | length) == length then . else error("partial native run census") end
+          | if all(.[]; (.head_sha|test("^[0-9a-f]{40}$")) and .head_branch == "main" and .event == "workflow_dispatch" and .path == $path and .workflow_id == $workflow
+            and .repository.full_name == $repo and .head_repository.full_name == $repo
+            and (.id | type == "number" and . > 0 and floor == .)
+            and (.run_attempt | type == "number" and . > 0 and floor == .)) then . else error("foreign native run") end
+          | map(select(.display_title == ("Native qualification " + $source))) end
+      ' <<< "$pages"); then
+        if [[ ${WAIT_FOR_FULL_SUITE:-false} == true && $discovery -lt 24 ]]; then
+          sleep 5
+          continue
+        fi
+        native_qualification_unmeasured "$name:runs"
+        return 1
       fi
-      native_qualification_unmeasured "$name:runs"
+      [[ $(jq length <<< "$runs") == 0 ]] || break
+      if [[ ${WAIT_FOR_FULL_SUITE:-false} != true || $discovery -ge 24 ]]; then
+        jq -nc --arg platform "$name" '{kind:"harn.release.native_qualification",platform:$platform,status:"missing",runs:0,pending_count:1,failed_count:0,missing:["exact-source workflow dispatch"]}'
+        return 1
+      fi
+      # Dispatch acceptance can precede visibility in the run census.
+      sleep 5
+    done
+    # A cancelled or skipped dispatch never decides; absence of another run is unmeasured.
+    runs=$(jq -c 'map(select(.status != "completed" or (.conclusion != "cancelled" and .conclusion != "skipped")))' <<< "$runs")
+    if [[ $(jq length <<< "$runs") == 0 ]]; then
+      native_qualification_unmeasured "$name:cancelled-only"
       return 1
     fi
-    [[ $(jq length <<< "$runs") == 0 ]] || break
-    if [[ ${WAIT_FOR_FULL_SUITE:-false} != true || $discovery -ge 24 ]]; then
-      jq -nc --arg platform "$name" '{kind:"harn.release.native_qualification",platform:$platform,status:"missing",runs:0,pending_count:1,failed_count:0,missing:["exact-source workflow dispatch"]}'
-      return 1
-    fi
-    # Dispatch acceptance can precede visibility in the run census.
-    sleep 5
-  done
-  # A cancelled or skipped dispatch (often a duplicate) never decides; absence of any other run is unmeasured.
-  runs=$(jq -c 'map(select(.status != "completed" or (.conclusion != "cancelled" and .conclusion != "skipped")))' <<< "$runs")
-  if [[ $(jq length <<< "$runs") == 0 ]]; then
-    native_qualification_unmeasured "$name:cancelled-only"
-    return 1
+    selected=$(jq -c 'max_by(.id)' <<< "$runs")
   fi
-  selected=$(jq -c 'max_by(.id)' <<< "$runs")
   id=$(jq -r .id <<< "$selected")
   attempt=$(jq -r .run_attempt <<< "$selected")
   revision=$(jq -r .head_sha <<< "$selected")
@@ -92,6 +111,13 @@ require_native_platform() {
       native_qualification_unmeasured "$name:watch"
       return 1
     fi
+  fi
+  if [[ ${WAIT_FOR_FULL_SUITE:-false} != true ]] && jq -e --arg source "$source" \
+    '.display_title != ("Native qualification " + $source)' <<< "$selected" >/dev/null; then
+    jq -nc --arg platform "$name" --argjson id "$id" \
+      '{kind:"harn.release.native_qualification",platform:$platform,status:"pending",run_id:$id,
+        observed_jobs:null,pending_count:1,failed_count:0,pending:["native run purpose has not reported"]}'
+    return 1
   fi
   if ! run=$(gh api "repos/$repo/actions/runs/$id/attempts/$attempt") ||
     ! jq -e --arg repo "$repo" --arg source "$source" --arg revision "$revision" --arg path "$workflow" --argjson id "$id" --argjson attempt "$attempt" --argjson workflow "$(jq .id <<< "$metadata")" '
@@ -192,8 +218,10 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     .failed_count = (if any($platforms[]; .failed_count == null) then null else [$platforms[].failed_count] | add end) |
     .verdict = (if ($platforms|length) == 0 or any($platforms[]; .status == "unmeasured") then "unmeasured"
       elif $status == 0 and all($platforms[]; .status == "complete") then "success"
+      elif any($platforms[]; .status == "pending") then "pending"
       else "failure" end) |
-    .next_action = (if .verdict == "success" then "continue" elif .verdict == "unmeasured" then "retry-read" else "inspect-native-qualification" end)
+    .next_action = (if .verdict == "success" then "continue" elif .verdict == "unmeasured" then "retry-read"
+      elif .verdict == "pending" then "wait-native-qualification" else "inspect-native-qualification" end)
   ' <<< "$qualification")
   if [[ -n ${NATIVE_QUALIFICATION_STATUS_FILE:-} ]]; then
     printf '%s\n' "$verdict" > "$NATIVE_QUALIFICATION_STATUS_FILE"
