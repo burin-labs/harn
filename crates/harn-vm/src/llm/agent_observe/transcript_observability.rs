@@ -524,6 +524,18 @@ pub(super) fn dump_llm_request_with_receipt(
         .transpose()
         .unwrap_or(None)
         .unwrap_or(serde_json::Value::Null);
+    if let Some(session_id) = opts.session_id.as_deref().filter(|id| !id.is_empty()) {
+        crate::llm::agent_runtime::emit_agent_event_sync(
+            &crate::agent_events::AgentEvent::ContextUsage {
+                session_id: session_id.to_string(),
+                call_id: call_id.to_string(),
+                used_tokens: context.resident_input_tokens.max(0) as u64,
+                capacity_tokens: context
+                    .context_window
+                    .and_then(|size| u64::try_from(size).ok()),
+            },
+        );
+    }
     let context_token_breakdown = serde_json::to_value(context).unwrap_or(serde_json::Value::Null);
     emit_context_token_breakdown_checkpoint(
         opts,

@@ -1,7 +1,7 @@
 use super::*;
 use harn_vm::agent_events::{AgentEvent, AgentEventSink};
 
-fn upstream_session_update_schema() -> serde_json::Value {
+pub(super) fn upstream_session_update_schema() -> serde_json::Value {
     let upstream: serde_json::Value = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../conformance/protocols/schemas/acp-1.26.0-upstream.schema.json"
@@ -14,8 +14,180 @@ fn upstream_session_update_schema() -> serde_json::Value {
     })
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn real_warning_notice_requires_the_standard_session_grant() {
+    harn_clock::test_support::with_local_tasks(async {
+        let validator = jsonschema::draft202012::new(&upstream_session_update_schema()).unwrap();
+        for (session_capabilities, expected) in [
+            (serde_json::json!({}), 0),
+            (serde_json::json!({"notices": false}), 0),
+            (serde_json::json!({"notices": {}}), 1),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let (request_tx, request_rx) = mpsc::unbounded_channel();
+            let (response_tx, mut response_rx) = mpsc::unbounded_channel();
+            let server = tokio::task::spawn_local(run_acp_channel_server(
+                AcpServerConfig::new(None), request_rx, response_tx,
+            ));
+            request_tx.send(serde_json::json!({"jsonrpc":"2.0", "id":1, "method":"initialize", "params":{
+                "clientCapabilities":{"session":session_capabilities}
+            }})).unwrap();
+            assert!(recv_response_with_id(&mut response_rx, 1).await.get("result").is_some());
+            request_tx.send(serde_json::json!({"jsonrpc":"2.0", "id":2, "method":"session/new", "params":{
+                "cwd":root.path(), "environmentPolicy":{"kind":"isolated"}
+            }})).unwrap();
+            let created = recv_response_with_id(&mut response_rx, 2).await;
+            let session = created["result"]["sessionId"].as_str().unwrap();
+            request_tx.send(serde_json::json!({"jsonrpc":"2.0", "id":3, "method":"session/prompt", "params":{
+                "sessionId":session, "prompt":[{"type":"text", "text":concat!(
+                    "harness.obs.log_warn(\"A real warning\", {diagnostic: \"private detail\"})\n",
+                    "harness.obs.log_debug(\"debug only\")\n",
+                    "harness.stdio.println(\"warning producer reached\")"
+                )}]
+            }})).unwrap();
+            let mut notices = 0;
+            let mut reached = false;
+            loop {
+                let frame = recv_json(&mut response_rx).await;
+                if frame["method"] == "host/capabilities" { reply_empty_result(&request_tx, &frame); }
+                if frame["method"] == "session/update" {
+                    let params = &frame["params"];
+                    assert!(validator.is_valid(params), "{frame}");
+                    let update = &params["update"];
+                    if update["sessionUpdate"] == "notice" {
+                        assert_eq!(update["severity"], "warning");
+                        assert_eq!(update["title"], "A real warning");
+                        assert!(update.get("description").is_none());
+                        notices += 1;
+                    }
+                    if update["sessionUpdate"] == "agent_message_chunk" {
+                        assert_eq!(update["content"]["text"], "warning producer reached\n");
+                        reached = true;
+                    }
+                }
+                if frame["id"] == 3 && frame.get("method").is_none() {
+                    assert_eq!(frame["result"]["stopReason"], "end_turn", "{frame}");
+                    break;
+                }
+            }
+            assert!(reached, "the actual prompt must execute");
+            assert_eq!(notices, expected);
+            drop(request_tx);
+            server.await.unwrap();
+        }
+    }).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn negotiated_compaction_projects_the_canonical_receipt_identity() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+    server.handle_initialize(
+        &serde_json::json!(1),
+        &serde_json::json!({"clientCapabilities": {
+            "session": {"compaction": {}},
+            "_meta": {"harn": {"sessionUpdateExtensions": ["transcript_compacted"]}}
+        }}),
+    );
+    assert_eq!(recv_json(&mut rx).await["id"], 1);
+    let receipt = harn_vm::orchestration::CompactionReceipt {
+        schema_version: harn_vm::orchestration::COMPACTION_RECEIPT_SCHEMA_VERSION,
+        receipt_id: "compaction-owned-17".into(),
+        session_id: Some("session-owned".into()),
+        estimated_tokens_before: 100,
+        estimated_tokens_after: 40,
+        ..Default::default()
+    };
+    let sink = AcpAgentEventSink::new(server.output.clone());
+    sink.handle_event(&AgentEvent::TranscriptCompacted {
+        session_id: "session-owned".into(),
+        receipt: receipt.clone(),
+    });
+    let mut frames = Vec::new();
+    while let Ok(line) = rx.try_recv() {
+        frames.push(serde_json::from_str::<serde_json::Value>(&line).unwrap());
+    }
+    assert_eq!(
+        frames
+            .iter()
+            .filter(|frame| frame["params"]["update"]["sessionUpdate"] == "transcript_compacted")
+            .count(),
+        1,
+        "the known canonical receipt producer must be reached"
+    );
+    let stable = frames
+        .iter()
+        .find(|frame| frame["params"]["update"]["sessionUpdate"] == "compaction_update")
+        .expect("a negotiated standard client must receive the compaction");
+    let params = &stable["params"];
+    assert_eq!(params["sessionId"], "session-owned");
+    assert_eq!(params["update"]["compactionId"], "compaction-owned-17");
+    assert_eq!(params["update"]["status"], "completed");
+    let validator = jsonschema::draft202012::new(&upstream_session_update_schema()).unwrap();
+    assert!(validator.is_valid(params), "{params}");
+    let mut invalid = params.clone();
+    invalid["update"]
+        .as_object_mut()
+        .unwrap()
+        .remove("compactionId");
+    assert!(!validator.is_valid(&invalid));
+    invalid = params.clone();
+    invalid["update"]["status"] = serde_json::json!(42);
+    assert!(!validator.is_valid(&invalid));
+
+    for capabilities in [
+        serde_json::json!({}),
+        serde_json::json!({"session":{"compaction":false}}),
+        serde_json::json!({"_meta":{"harn":{"sessionUpdateExtensions":["compaction_update"]}}}),
+    ] {
+        server.handle_initialize(
+            &serde_json::json!(2),
+            &serde_json::json!({"clientCapabilities":capabilities}),
+        );
+        assert_eq!(recv_json(&mut rx).await["id"], 2);
+        sink.handle_event(&AgentEvent::TranscriptCompacted {
+            session_id: "session-owned".into(),
+            receipt: receipt.clone(),
+        });
+        assert!(
+            rx.try_recv().is_err(),
+            "an old sink cannot retain revoked compaction grants"
+        );
+    }
+    server.handle_initialize(
+        &serde_json::json!(3),
+        &serde_json::json!({"clientCapabilities":{"session":{"compaction":{}}}}),
+    );
+    assert_eq!(recv_json(&mut rx).await["id"], 3);
+    let replay = AcpAgentEventSink::for_replay(server.output.clone());
+    replay.handle_event(&AgentEvent::TranscriptCompacted {
+        session_id: "session-owned".into(),
+        receipt: receipt.clone(),
+    });
+    let replayed = recv_json(&mut rx).await;
+    assert_eq!(
+        replayed["params"]["update"]["compactionId"],
+        "compaction-owned-17"
+    );
+    assert_eq!(replayed["params"]["update"]["status"], "completed");
+    assert_eq!(
+        replayed["params"]["update"]["_meta"]["harn"]["replayed"],
+        true
+    );
+    let mut legacy = receipt;
+    legacy.receipt_id.clear();
+    replay.handle_event(&AgentEvent::TranscriptCompacted {
+        session_id: "session-owned".into(),
+        receipt: legacy,
+    });
+    assert!(
+        rx.try_recv().is_err(),
+        "legacy compaction cannot acquire an invented ID"
+    );
+}
+
 #[test]
-fn unconditional_update_vocabulary_is_upstream_and_extensions_require_exact_grants() {
+fn upstream_updates_obey_standard_capabilities_and_extensions_require_exact_grants() {
     let schema = upstream_session_update_schema();
     let upstream = schema["$defs"]["SessionUpdate"]["oneOf"]
         .as_array()
@@ -31,7 +203,11 @@ fn unconditional_update_vocabulary_is_upstream_and_extensions_require_exact_gran
             .any(|variant| variant["properties"]["sessionUpdate"]["const"] == *kind);
         assert_eq!(
             capabilities.supports_session_update(kind),
-            is_upstream,
+            is_upstream
+                && !matches!(
+                    *kind,
+                    "notice" | "compaction_update" | "compaction_summary_chunk"
+                ),
             "{kind}"
         );
         standards += usize::from(is_upstream);
@@ -40,6 +216,19 @@ fn unconditional_update_vocabulary_is_upstream_and_extensions_require_exact_gran
         standards >= 10,
         "the registry must exercise real standard updates"
     );
+    let granted = super::super::client_capabilities::ClientCapabilities::from_initialize(
+        &serde_json::json!({"clientCapabilities": {"session": {"notices": {}, "compaction": {}}}}),
+    );
+    for kind in ["notice", "compaction_update", "compaction_summary_chunk"] {
+        assert!(granted.supports_session_update(kind), "{kind}");
+        let extension_only = super::super::client_capabilities::ClientCapabilities::from_initialize(
+            &serde_json::json!({"clientCapabilities": {"_meta": {"harn": {"sessionUpdateExtensions": [kind]}}}}),
+        );
+        assert!(
+            !extension_only.supports_session_update(kind),
+            "an extension grant cannot authorize {kind}"
+        );
+    }
     for grant in [
         serde_json::json!(true),
         serde_json::json!("log"),
