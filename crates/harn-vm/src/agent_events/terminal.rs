@@ -546,7 +546,20 @@ mod tests {
         let contradictory =
             terminal_outcome_for_session_finalize("budget_exhausted", "sentinel", None, true);
         assert!(contradictory.has_conflicting_evidence());
-        let error = serde_json::json!({"category": "timeout", "reason": "timeout"});
+        let unproven = serde_json::json!({"category": "timeout", "reason": "timeout"});
+        let unknown = terminal_outcome_for_session_finalize(
+            "provider_error",
+            "timeout",
+            Some(&unproven),
+            true,
+        );
+        assert_eq!(
+            unknown.terminal_class,
+            Some(super::AgentTerminalClass::GenericThrow)
+        );
+        let error = serde_json::json!({
+            "category": "timeout", "reason": "timeout", "provider": "mock", "model": "fixture",
+        });
         let failed =
             terminal_outcome_for_session_finalize("provider_error", "timeout", Some(&error), true);
         assert_eq!(failed.kind, AgentTerminalKind::ProviderError);
