@@ -138,7 +138,6 @@
 # count   17  crates/harn-stdlib/src/stdlib/stdlib_text.harn
 # count    4  crates/harn-stdlib/src/stdlib/stdlib_tool_hooks.harn
 # count    8  crates/harn-stdlib/src/stdlib/stdlib_tool_hooks_catalogues.harn
-# count    2  crates/harn-stdlib/src/stdlib/stdlib_triage.harn
 # count    1  crates/harn-stdlib/src/stdlib/stdlib_tui.harn
 # count    8  crates/harn-stdlib/src/stdlib/stdlib_web.harn
 # count    5  crates/harn-stdlib/src/stdlib/stdlib_worktree.harn
@@ -1095,8 +1094,6 @@ crates/harn-stdlib/src/stdlib/stdlib_tool_hooks_catalogues.harn::tool_hooks_cata
 crates/harn-stdlib/src/stdlib/stdlib_tool_hooks_catalogues.harn::tool_hooks_catalogue_typescript
 crates/harn-stdlib/src/stdlib/stdlib_tool_hooks_catalogues.harn::tool_hooks_catalogue_universal
 crates/harn-stdlib/src/stdlib/stdlib_tool_hooks_catalogues.harn::tool_hooks_seed_registry
-crates/harn-stdlib/src/stdlib/stdlib_triage.harn::triage_dedupe_key
-crates/harn-stdlib/src/stdlib/stdlib_triage.harn::triage_start_my_day
 crates/harn-stdlib/src/stdlib/stdlib_tui.harn::clear
 crates/harn-stdlib/src/stdlib/stdlib_web.harn::html_json_ld
 crates/harn-stdlib/src/stdlib/stdlib_web.harn::html_links
