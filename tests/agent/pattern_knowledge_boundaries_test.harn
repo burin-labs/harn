@@ -50,10 +50,10 @@ pipeline test_pattern_sessions_retain_nominal_records_and_extensions(harness: Ha
   const groups = pl_session_runs([event])
   assert_eq(len(groups), 1)
   const group = groups[0]
-  require group != nil, "the nominal event must produce a group"
+  assert(group != nil, "the nominal event must produce a group")
   assert_eq(group.run_id, "nominal")
   const grouped_event = group.events[0]
-  require grouped_event != nil, "the nominal event must be retained"
+  assert(grouped_event != nil, "the nominal event must be retained")
   assert_eq(type_of(grouped_event), "struct")
   assert_eq(type_of(grouped_event.headers), "struct")
   const extended = {
@@ -63,9 +63,9 @@ pipeline test_pattern_sessions_retain_nominal_records_and_extensions(harness: Ha
     extension: {empty: [], missing: nil},
   }
   const extended_group = pl_session_runs([extended])[0]
-  require extended_group != nil, "the extended event must produce a group"
+  assert(extended_group != nil, "the extended event must produce a group")
   const retained = extended_group.events[0]
-  require retained != nil, "the extended event must be retained"
+  assert(retained != nil, "the extended event must be retained")
   assert_eq(retained, extended)
   assert_eq(pl_session_tool_sequence([extended]), ["run-shell"])
   assert_eq(pl_session_runs([{headers: {run_id: ""}}]), [])
@@ -221,7 +221,7 @@ pipeline test_pattern_transcript_reads_store_and_redacts_before_bounds(harness: 
       assert_eq(page.returned_count, 2)
       assert_eq(page.next_entry, 2)
       const first = page.entries[0]
-      require first != nil, "the public message must reach the transcript page"
+      assert(first != nil, "the public message must reach the transcript page")
       assert_eq(first.kind, "message")
       assert(first.content_truncated)
       const serialized = json_stringify(page)
