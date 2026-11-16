@@ -27,7 +27,7 @@ pipeline test_filter_selection_bootstraps_without_building_the_workspace(harness
   const bootstrap = steps.find({ step -> step.id == "filter_runtime" })
   assert(bootstrap != nil, "install the released filter runtime before Rust cache preparation")
   assert_eq(bootstrap.uses, "./.github/actions/setup-harn")
-  assert_eq(bootstrap.with.version, "0.10.201")
+  assert_eq(bootstrap.with?.version, "0.10.201")
   let installed = false
   for step in steps {
     if step.id == "filter_runtime" {
@@ -35,7 +35,7 @@ pipeline test_filter_selection_bootstraps_without_building_the_workspace(harness
     }
     if step.id == "touched" {
       assert(installed)
-      assert_eq(step.env.HARN_BIN, "$" + "{{ steps.filter_runtime.outputs.path }}")
+      assert_eq(step.env?.HARN_BIN, "$" + "{{ steps.filter_runtime.outputs.path }}")
     }
   }
 }
