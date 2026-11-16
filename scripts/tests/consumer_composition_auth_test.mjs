@@ -96,6 +96,8 @@ const invalid = [
   ['manifest path redirect', f => { f.records.get(`/contents/${consumerCompositionPath}?ref=${head}`).path = 'other.json'; }],
   ['base outside owning main', f => { f.records.get(`/compare/${base}...${base}?per_page=100&page=1`).status = 'diverged'; }],
   ['advertised component missing from merged ancestry', f => { f.records.get(`/compare/${sha('b')}...${head}?per_page=100&page=1`).merge_base_commit.sha = base; }],
+  ['empty unequal-head ancestry', f => { const value = f.records.get(`/compare/${sha('b')}...${head}?per_page=100&page=1`); value.total_commits = 0; value.commits = []; }],
+  ['component absent from combined commit inventory', f => { const value = f.records.get(`/compare/${base}...${head}?per_page=100&page=1`); value.commits = value.commits.filter(item => item.sha !== sha('b')); value.total_commits--; }],
   ['partial graph census', f => { f.records.get(`/compare/${base}...${head}?per_page=100&page=1`).total_commits++; }],
   ['empty graph census', f => { const value = f.records.get(`/compare/${base}...${head}?per_page=100&page=1`); value.total_commits = 0; value.commits = []; }],
   ['extra linear code commit', f => { const value = f.records.get(`/compare/${base}...${head}?per_page=100&page=1`); value.commits.push(commit('3', '1')); value.total_commits++; }],
@@ -129,6 +131,50 @@ test('a refused private read does not try parent authority or a weaker source', 
   }), /consumer_source_read_refused$/);
   assert.equal(calls.length, 1);
   assert.equal(calls[0].authorization, 'Bearer consumer-read');
+});
+
+test('a default branch retarget during graph reads refuses the original declaration', async () => {
+  const f = fixture();
+  const original = structuredClone(f.records.get(''));
+  f.records.set('', count => count === 1 ? original : {...original, default_branch: 'retargeted'});
+  await assert.rejects(githubConsumerSelection('consumer-read', repository, declaration(), f.fetchRecord), /consumer_composition_source_moved$/);
+});
+
+for (const status of ['ahead', 'diverged']) test(`a default head moving ${status} receives a fresh ancestry decision`, async () => {
+  const f = fixture();
+  f.records.set('/commits/main', count => ({sha: count === 1 ? base : sha('4')}));
+  f.records.set(`/compare/${base}...${sha('4')}?per_page=100&page=1`, {
+    base_commit: {sha: base}, merge_base_commit: {sha: status === 'ahead' ? base : sha('3')},
+    status, total_commits: 1, commits: [commit('4', 'a')],
+  });
+  const selected = githubConsumerSelection('consumer-read', repository, declaration(), f.fetchRecord);
+  if (status === 'ahead') assert.equal((await selected).headSha, head);
+  else await assert.rejects(selected, /consumer_composition_ancestry_unproven$/);
+  assert.equal(f.calls.filter(call => call === `/compare/${base}...${sha('4')}?per_page=100&page=1`).length, 1);
+});
+
+test('a complete paginated graph is accepted and a missing next page refuses', async () => {
+  for (const partial of [false, true]) {
+    const f = fixture();
+    const path = `/compare/${base}...${head}?per_page=100&page=`;
+    const original = f.records.get(`${path}1`);
+    const history = Array.from({length: 94}, (_, index) => ({sha: index.toString(16).padStart(40, '0'), parents: [{sha: base}]}));
+    const all = [...history, ...original.commits];
+    f.records.set(`${path}1`, {...original, total_commits: all.length, commits: all.slice(0, 100)});
+    f.records.set(`${path}2`, {...original, total_commits: all.length, commits: partial ? [] : all.slice(100)});
+    const componentPath = `/compare/${base}...${sha('b')}?per_page=100&page=1`;
+    const component = f.records.get(componentPath);
+    f.records.set(componentPath, {...component, total_commits: 95, commits: [...history, ...component.commits]});
+    const fetchRecord = async (url, options) => {
+      const response = await f.fetchRecord(url, options);
+      if (url.endsWith(`${path}1`)) response.headers.set('link', '<https://api.github.com/next>; rel="next"');
+      return response;
+    };
+    const selected = githubConsumerSelection('consumer-read', repository, declaration(), fetchRecord);
+    if (partial) await assert.rejects(selected, /consumer_composition_graph_unmeasured$/);
+    else assert.equal((await selected).headSha, head);
+    assert.equal(f.calls.filter(call => call === `${path}2`).length, 1);
+  }
 });
 
 test('actual CI pin and private Bash source entrypoints select the combined head and refuse a missing component', t => {

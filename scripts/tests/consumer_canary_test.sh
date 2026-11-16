@@ -1034,7 +1034,7 @@ const cleanupToken = steps.find(step => step.id === 'cleanup-token');
 assert.equal(cleanupToken.if, "always() && steps.observer.outputs.context != ''");
 const [mint, observe] = action.runs.steps;
 assert.equal(mint.uses, 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1');
-assert.deepEqual(Object.fromEntries(Object.entries(mint.with).filter(([key]) => key.startsWith('permission-'))), { 'permission-actions': 'read', 'permission-pull-requests': 'read' });
+assert.deepEqual(Object.fromEntries(Object.entries(mint.with).filter(([key]) => key.startsWith('permission-'))), { 'permission-actions': 'read', 'permission-pull-requests': 'read', 'permission-contents': 'read' });
 assert.equal(mint.with.repositories.trim(), '${{ inputs.repository }}');
 assert.equal(observe.env.GH_TOKEN, '${{ steps.token.outputs.token }}');
 assert.equal(observe.env.GITHUB_TOKEN, '${{ github.token }}');

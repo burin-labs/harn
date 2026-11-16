@@ -776,8 +776,11 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
       CANARY_DISPATCHING=true
       canary_dispatch
       [[ -n "${GITHUB_OUTPUT:-}" ]] || canary_fail observation_output_unset
-      printf 'run_id=%s\nstarted_at=%s\npaired_pull=%s\ndeclared_pull=%s\nsource_declaration=%s\n' "$CANARY_RUN_ID" "$CANARY_STARTED_AT" \
-        "${CANARY_PAIRED_PULL:-}" "${CANARY_DECLARED_PULL:-}" "${CANARY_SOURCE_DECLARATION:-}" >> "$GITHUB_OUTPUT"
+      printf 'run_id=%s\nstarted_at=%s\npaired_pull=%s\ndeclared_pull=%s\n' "$CANARY_RUN_ID" "$CANARY_STARTED_AT" \
+        "${CANARY_PAIRED_PULL:-}" "${CANARY_DECLARED_PULL:-}" >> "$GITHUB_OUTPUT"
+      if jq -e '.kind == "composition"' <<< "$CANARY_SOURCE_DECLARATION" >/dev/null; then
+        printf 'source_declaration=%s\n' "$CANARY_SOURCE_DECLARATION" >> "$GITHUB_OUTPUT"
+      fi
       ;;
     --observe) canary_observe ;;
     --record) canary_record ;;

@@ -213,6 +213,13 @@ export async function resolveConsumerComposition(repository, declaration, read) 
         || !['ahead', 'behind', 'diverged', 'identical'].includes(value.status)
         || ancestor && (!['ahead', 'identical'].includes(value.status) || value.merge_base_commit.sha !== base)
         || !Number.isSafeInteger(value.total_commits) || value.total_commits < 0 || value.total_commits > graphLimit
+        || value.status === 'identical' && (base !== head || value.total_commits !== 0 || value.merge_base_commit.sha !== base)
+        || value.status === 'ahead' && (base === head || value.total_commits < 1 || value.merge_base_commit.sha !== base)
+        || value.status === 'behind' && (base === head || value.total_commits !== 0 || value.merge_base_commit.sha !== head)
+        || value.status === 'diverged' && (value.total_commits < 1 || [base, head].includes(value.merge_base_commit.sha))
+        || ancestor && (base === head
+          ? value.status !== 'identical' || value.total_commits !== 0
+          : value.status !== 'ahead' || value.total_commits < 1)
         || total !== undefined && total !== value.total_commits || !Array.isArray(value.commits)) {
         refuse('consumer_composition_ancestry_unproven');
       }
@@ -233,10 +240,14 @@ export async function resolveConsumerComposition(repository, declaration, read) 
   if (!revision.test(currentDefault?.sha ?? '')) refuse('consumer_source_unmeasured');
   await comparison(manifest.base_sha, currentDefault.sha, true);
   const compositionCommits = await comparison(manifest.base_sha, selected.headSha, true);
+  const compositionCommitIds = new Set(compositionCommits.map(commit => commit.sha));
   const componentCommits = new Set();
   for (const component of components) {
     await comparison(component.head_sha, selected.headSha, true);
-    for (const commit of await comparison(manifest.base_sha, component.head_sha)) componentCommits.add(commit.sha);
+    for (const commit of await comparison(manifest.base_sha, component.head_sha)) {
+      if (!compositionCommitIds.has(commit.sha)) refuse('consumer_composition_component_missing');
+      componentCommits.add(commit.sha);
+    }
   }
   const extra = compositionCommits.filter(commit => !componentCommits.has(commit.sha) && commit.parents.length === 1);
   if (extra.length !== 1 || extra[0].sha !== selected.headSha) refuse('consumer_composition_extra_commit');
@@ -253,6 +264,13 @@ export async function resolveConsumerComposition(repository, declaration, read) 
     const final = await pull(String(components[index].pull_request));
     if (JSON.stringify(final) !== JSON.stringify(snapshots[index])) refuse('consumer_composition_component_moved');
   }
+  const finalRepository = await one('');
+  if (finalRepository?.full_name !== repository || finalRepository.default_branch !== repo.default_branch) {
+    refuse('consumer_composition_source_moved');
+  }
+  const finalDefault = await one(`/commits/${encodeURIComponent(repo.default_branch)}`);
+  if (!revision.test(finalDefault?.sha ?? '')) refuse('consumer_source_unmeasured');
+  if (finalDefault.sha !== currentDefault.sha) await comparison(manifest.base_sha, finalDefault.sha, true);
   if (JSON.stringify(await pull(pullNumber, true)) !== JSON.stringify(selected)) refuse('consumer_composition_source_moved');
   return Object.freeze({headSha: selected.headSha, branch: selected.branch,
     composition: consumerCompositionIdentity({schema: 'harn.consumer_composition_identity.v1', pull: pullNumber,

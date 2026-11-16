@@ -9,7 +9,8 @@ async function main(){
   if(!/^[0-9a-f]{40}$/.test(env.SOURCE_REVISION??'')) throw new Error('CONSUMER_OBSERVER reason=source_identity_invalid');
   if(!env.REHEARSAL_PROMOTION_RUN_ID){
     if(declaration.kind==='composition') await githubConsumerSelection(env.GH_TOKEN,env.CANARY_REPOSITORY,declaration);
-    fs.appendFileSync(env.GITHUB_OUTPUT,`reused=false\npaired_pull=${paired??''}\nsource_declaration=${JSON.stringify(declaration)}\n`);
+    const composition=declaration.kind==='composition'?`source_declaration=${JSON.stringify(declaration)}\n`:'';
+    fs.appendFileSync(env.GITHUB_OUTPUT,`reused=false\npaired_pull=${paired??''}\n${composition}`);
     console.log('CONSUMER_OBSERVER selection=fresh');
     return;
   }
