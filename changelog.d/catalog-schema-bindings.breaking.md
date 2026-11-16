@@ -1,0 +1,4 @@
+Generate Swift and TypeScript provider-catalog field shapes from the existing JSON Schema.
+Swift public properties, unsigned fee allowances and decoding defaults remain unchanged.
+TypeScript now includes the supported Bedrock batch format, permits omitted completion-review scrutiny,
+and restricts recurring pricing days to the seven weekday literals already accepted by the runtime.
