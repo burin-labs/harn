@@ -142,8 +142,8 @@
 # count    8  crates/harn-stdlib/src/stdlib/stdlib_web.harn
 # count    5  crates/harn-stdlib/src/stdlib/stdlib_worktree.harn
 # count    1  crates/harn-stdlib/src/stdlib/stdlib_xml.harn
-# count   19  crates/harn-stdlib/src/stdlib/verification_core.harn
-# count    6  crates/harn-stdlib/src/stdlib/verification_ladder.harn
+# count   13  crates/harn-stdlib/src/stdlib/verification_core.harn
+# count    3  crates/harn-stdlib/src/stdlib/verification_ladder.harn
 # count   13  crates/harn-stdlib/src/stdlib/verification_targets.harn
 # count    1  crates/harn-stdlib/src/stdlib/workflow/checkpoints.harn
 # count    4  crates/harn-stdlib/src/stdlib/workflow/context.harn
@@ -1110,27 +1110,18 @@ crates/harn-stdlib/src/stdlib/stdlib_worktree.harn::worktree_shell
 crates/harn-stdlib/src/stdlib/stdlib_worktree.harn::worktree_status
 crates/harn-stdlib/src/stdlib/stdlib_xml.harn::from_xml
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_capture_snapshot
-crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_delta_direct_count
-crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_exit
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_failure_signature
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_gate_embedded_classification
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_snapshot_map
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_toolchain_probe
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_toolchain_probe_options
-crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_warm_state_expected_delta_ms
-crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_warm_state_first_fact
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_warm_state_mode
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_warm_state_probe
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_warm_state_probe_options
-crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_warm_state_receipt_handle
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_warm_state_start_options
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_warm_state_start_spec
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_warm_state_teardown_options
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_warm_state_teardown_spec
-crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_warm_state_timings
-crates/harn-stdlib/src/stdlib/verification_ladder.harn::__verification_hud_entry
-crates/harn-stdlib/src/stdlib/verification_ladder.harn::__verification_hud_last_check
-crates/harn-stdlib/src/stdlib/verification_ladder.harn::__verification_ladder_candidate
 crates/harn-stdlib/src/stdlib/verification_ladder.harn::__verification_row_command
 crates/harn-stdlib/src/stdlib/verification_ladder.harn::__verification_rung_rank
 crates/harn-stdlib/src/stdlib/verification_ladder.harn::__verification_warm_state_fact_for
