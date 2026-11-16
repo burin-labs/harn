@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import copy
 import sys
+import py_compile
+import tempfile
 from pathlib import Path
 from collections.abc import Mapping
 from dataclasses import MISSING, fields as dataclass_fields, is_dataclass
@@ -31,6 +33,9 @@ def assert_round_trip(label: str, expected: Mapping[str, object], actual: Mappin
 
 def main() -> int:
     artifacts = Path(sys.argv[1]).resolve()
+    py_compile.compile(str(artifacts / "python" / "harn_protocol.py"), doraise=True)
+    if sys.argv[2:] == ["--syntax-only"]:
+        return 0
     hp = load_bindings(artifacts)
     fixture = json.loads((artifacts / "fixtures" / "round_trip.json").read_text())
 
@@ -168,7 +173,11 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # Explicit compilation and imports share a disposable cache, never the
+    # checked source tree or any preexisting timestamp cache beside it.
+    with tempfile.TemporaryDirectory(prefix="harn-protocol-bindings-") as cache:
+        sys.pycache_prefix = cache
+        sys.exit(main())
 """
 
 fn repo_root(fs: HarnessFs) -> string {
@@ -197,8 +206,9 @@ pub fn check_python_protocol_bindings(
   root: string = "",
 ) -> dict {
   const artifacts = artifact_root(fs, root)
-  const binding = path_join(artifacts, "python", "harn_protocol.py")
-  const compile = process.run({program: python, args: ["-m", "py_compile", binding]})
+  const compile = process.run(
+    {program: python, args: python_binding_probe_args(artifacts) + ["--syntax-only"]},
+  )
   if !compile.success {
     return {
       ok: false,
