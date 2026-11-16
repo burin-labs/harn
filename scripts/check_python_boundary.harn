@@ -45,6 +45,14 @@ const PYTHON_ALLOWLIST = [
   },
   {
     kind: "exact",
+    pattern: "experiments/learned-dispatch/accounting.py",
+    category: "subprocess-fixture",
+    owner: "Learned workflow execution qualification",
+    reason:
+      "Independently validates the native subprocess provider ledger against physical-call and cost rollups; Harn owns dispatch and qualification.",
+  },
+  {
+    kind: "exact",
     pattern: "scripts/lib/target_gc_incremental.py",
     category: "foreign-runtime-bootstrap",
     owner: "Target-cache collector",
