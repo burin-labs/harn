@@ -761,6 +761,13 @@ capability_method!(
     "Read aggregate session totals."
 );
 capability_method!(
+    agent_session_loop_budget,
+    "harness.agent.session_loop_budget",
+    [],
+    harn_builtin_meta::signatures::AGENT_LOOP_BUDGET.with_name("__cap_agent_session_loop_budget"),
+    "Read the current loop-owned budget projection, or nil before the loop has measured it."
+);
+capability_method!(
     agent_session_inject_feedback,
     "harness.agent.session_inject_feedback",
     // Match the corresponding `__host_agent_*` runtime_internal builtin

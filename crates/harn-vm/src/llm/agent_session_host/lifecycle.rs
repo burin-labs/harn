@@ -250,6 +250,7 @@ async fn host_agent_session_init(
             execution_id: ctx.execution_id(),
             task_id: ctx.task_id(),
             owns_session,
+            loop_budget: None,
             task: message.clone(),
             tokens_used: 0,
             cost_used: 0.0,

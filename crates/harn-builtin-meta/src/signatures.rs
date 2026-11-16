@@ -26,6 +26,12 @@ use crate::{
     TY_NIL, TY_STRING, TY_STRING_OR_NIL,
 };
 
+pub const AGENT_LOOP_BUDGET: BuiltinSignature = BuiltinSignature::simple(
+    "agent_session_loop_budget",
+    &[Param::new("session_id", TY_STRING)],
+    Ty::Optional(&crate::shapes::AGENT_LOOP_BUDGET_SNAPSHOT),
+);
+
 /// Pure source builtins implemented by the portable kernel. The parser's
 /// standalone fallback, native handlers, browser compiler, and portable
 /// execution registry all project these exact values.
