@@ -623,20 +623,15 @@ pub fn signal_pid_tree_group_and_token_with_report(
     {
         let mut report = ProcessCleanupReport::for_signal(Some(pid), signal);
         // Read the parent edges first: they are gone once the root has died.
-        let descendants = descendant_processes(pid);
+        let (descendants, cohort) = descendants_and_token_cohort(pid, cleanup_token);
         signal_pid_and_group(pid, signal);
         for child in descendants.into_iter().rev() {
             signal_pid_and_group(child.pid, signal);
             report.merge_child(child.with_signal(signal));
         }
-        if let Some(cleanup_token) = cleanup_token.filter(|token| !token.is_empty()) {
-            for child in cleanup_token_processes(cleanup_token) {
-                if child.pid == pid {
-                    continue;
-                }
-                signal_pid_and_group(child.pid, signal);
-                report.merge_child(child.with_signal(signal));
-            }
+        for child in cohort {
+            signal_pid_and_group(child.pid, signal);
+            report.merge_child(child.with_signal(signal));
         }
         if signal == 9 {
             wait_for_report_children_to_exit(&report, SUBPROCESS_KILL_SETTLE);
@@ -712,20 +707,17 @@ pub fn signal_pid_tree_and_token_preserving_group_with_report(
 ) -> ProcessCleanupReport {
     let preserved_pgid = preserved_pgid as i32;
     let mut report = ProcessCleanupReport::for_signal(Some(pid), signal);
-    let descendants = descendant_processes(pid);
+    let (descendants, cohort) = descendants_and_token_cohort(pid, cleanup_token);
     signal_pid_preserving_group(pid, preserved_pgid, signal);
     for child in descendants.into_iter().rev() {
         signal_pid_preserving_group(child.pid, preserved_pgid, signal);
         report.merge_child(child.with_signal(signal));
     }
+    for child in cohort {
+        signal_pid_preserving_group(child.pid, preserved_pgid, signal);
+        report.merge_child(child.with_signal(signal));
+    }
     if let Some(cleanup_token) = cleanup_token.filter(|token| !token.is_empty()) {
-        for child in cleanup_token_processes(cleanup_token) {
-            if child.pid == pid {
-                continue;
-            }
-            signal_pid_preserving_group(child.pid, preserved_pgid, signal);
-            report.merge_child(child.with_signal(signal));
-        }
         for pgid in owner_process_groups(cleanup_token) {
             if pgid != preserved_pgid as u32 {
                 unsafe {
@@ -749,30 +741,67 @@ fn signal_pid_preserving_group(pid: u32, preserved_pgid: i32, signal: i32) {
     }
 }
 
+/// One read of the host process table: parent edges and command names, plus
+/// environments when a cleanup token must be matched. Each scan costs a pass
+/// over every process on the host, so a cleanup pass reads one table and asks
+/// it both questions instead of scanning once per question.
 #[cfg(unix)]
-fn descendant_processes(root: u32) -> Vec<ProcessCleanupChild> {
-    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
+struct ProcessTable(sysinfo::System);
 
-    let Ok(mut sys) = System::new() else {
-        return Vec::new();
+#[cfg(unix)]
+impl ProcessTable {
+    /// Nil when the platform cannot enumerate processes.
+    fn read(with_environ: bool) -> Option<Self> {
+        use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+
+        let mut sys = System::new().ok()?;
+        let mut kind = ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always);
+        if with_environ {
+            kind = kind.with_environ(UpdateKind::Always);
+        }
+        sys.refresh_processes_specifics(ProcessesToUpdate::All, false, kind);
+        Some(Self(sys))
+    }
+
+    fn descendants(&self, root: u32) -> Vec<ProcessCleanupChild> {
+        let rows = self
+            .0
+            .processes()
+            .iter()
+            .filter_map(|(pid, process)| {
+                Some((
+                    pid.as_u32(),
+                    process.parent()?.as_u32(),
+                    command_name(process.cmd()),
+                ))
+            })
+            .collect::<Vec<_>>();
+        descendant_processes_from_parent_edges(root, &rows)
+    }
+}
+
+/// The descendants of `pid`, then any other process carrying `cleanup_token`,
+/// both read from one process table taken before anything is signalled.
+#[cfg(unix)]
+fn descendants_and_token_cohort(
+    pid: u32,
+    cleanup_token: Option<&str>,
+) -> (Vec<ProcessCleanupChild>, Vec<ProcessCleanupChild>) {
+    let token = cleanup_token.filter(|token| !token.is_empty());
+    let Some(table) = ProcessTable::read(token.is_some()) else {
+        return (Vec::new(), Vec::new());
     };
-    sys.refresh_processes_specifics(
-        ProcessesToUpdate::All,
-        false,
-        ProcessRefreshKind::everything(),
-    );
-    let rows = sys
-        .processes()
-        .iter()
-        .filter_map(|(pid, process)| {
-            Some((
-                pid.as_u32(),
-                process.parent()?.as_u32(),
-                command_name(process.cmd()),
-            ))
+    let descendants = table.descendants(pid);
+    let cohort = token
+        .map(|token| {
+            token_census(&table, token)
+                .0
+                .into_iter()
+                .filter(|child| child.pid != pid)
+                .collect()
         })
-        .collect::<Vec<_>>();
-    descendant_processes_from_parent_edges(root, &rows)
+        .unwrap_or_default();
+    (descendants, cohort)
 }
 
 #[cfg(unix)]
@@ -782,18 +811,18 @@ fn cleanup_token_processes(token: &str) -> Vec<ProcessCleanupChild> {
 
 #[cfg(unix)]
 fn cleanup_token_census(token: &str) -> (Vec<ProcessCleanupChild>, ProcessCleanupCensus) {
-    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+    match ProcessTable::read(true) {
+        Some(table) => token_census(&table, token),
+        None => (Vec::new(), ProcessCleanupCensus::default()),
+    }
+}
 
-    let Ok(mut sys) = System::new() else {
-        return (Vec::new(), ProcessCleanupCensus::default());
-    };
-    sys.refresh_processes_specifics(
-        ProcessesToUpdate::All,
-        false,
-        ProcessRefreshKind::nothing()
-            .with_environ(UpdateKind::Always)
-            .with_cmd(UpdateKind::Always),
-    );
+#[cfg(unix)]
+fn token_census(
+    table: &ProcessTable,
+    token: &str,
+) -> (Vec<ProcessCleanupChild>, ProcessCleanupCensus) {
+    let sys = &table.0;
     let own_pid = sysinfo::Pid::from_u32(std::process::id());
     let own = sys.process(own_pid);
     let control_read = own.is_some_and(|process| {
