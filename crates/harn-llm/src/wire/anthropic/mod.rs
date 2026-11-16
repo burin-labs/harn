@@ -89,11 +89,6 @@ pub fn encode_request(
     {
         cache_control["ttl"] = json!(ttl);
     }
-    super::prompt_cache::apply_prompt_cache_breakpoint(
-        &mut body,
-        context.prompt_cache,
-        cache_control,
-    );
     let tools: Vec<Value> = opts
         .native_tools
         .iter()
@@ -104,6 +99,11 @@ pub fn encode_request(
     if !tools.is_empty() {
         body["tools"] = Value::Array(tools);
     }
+    super::prompt_cache::apply_prompt_cache_breakpoint(
+        &mut body,
+        context.prompt_cache,
+        cache_control,
+    );
     if let Some(choice) = opts.tool_choice.as_ref().and_then(normalize_tool_choice) {
         body["tool_choice"] = choice;
     }
