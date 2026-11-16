@@ -270,7 +270,11 @@ pub(crate) fn project_llm_call_context_breakdown(
         segments,
         input_tokens: projected_input_tokens,
         resident_input_tokens: projected_input_tokens.saturating_sub(deferred_tool_tokens),
-        context_window: super::api::known_provider_max_context(&opts.provider, &opts.model),
+        context_window: super::api::known_provider_max_context(
+            &opts.provider,
+            &opts.model,
+            opts.provider_overrides.as_ref(),
+        ),
         output_budget_tokens: projected_output_tokens,
         context_tokens: projected_input_tokens.saturating_add(projected_output_tokens),
         message_count: opts.messages.len(),

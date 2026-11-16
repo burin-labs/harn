@@ -47,7 +47,7 @@ pipeline main(harness: Harness) {
             "$ref":"#/$defs/SessionNotification", "$defs":upstream["$defs"]
         })).unwrap();
         for (id, expected_run_cost) in [
-            (3, Some(0.125)), (4, Some(0.25)), (5, Some(0.0)),
+            (3, 0.125), (4, 0.25), (5, 0.0),
         ] {
             request_tx.send(serde_json::json!({"jsonrpc":"2.0", "id":id, "method":"session/prompt", "params":{
                 "sessionId":session_id, "prompt":[{"type":"text", "text":format!("Root turn {id}")}]
@@ -92,8 +92,7 @@ pipeline main(harness: Harness) {
                 assert_eq!(final_update["_meta"]["harn"]["costAvailability"], "unmeasured");
                 let usage = run_usage.expect("the actual provider ledger must settle");
                 assert_eq!(usage["provider_call_count"].as_i64(), Some(1));
-                assert_eq!(usage["cost_usd"].as_f64(), expected_run_cost);
-                if expected_run_cost.is_none() { assert!(usage["unpriced_calls"].as_i64().unwrap() > 0); }
+                assert_eq!(usage["cost_usd"].as_f64(), Some(expected_run_cost));
             }
         }
         drop(request_tx);

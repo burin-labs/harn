@@ -27,7 +27,11 @@ enum ContextWindowSource {
     },
 }
 
-fn context_window_source(provider: &str, model: &str) -> ContextWindowSource {
+fn context_window_source(
+    provider: &str,
+    model: &str,
+    overrides: Option<&serde_json::Value>,
+) -> ContextWindowSource {
     // Ollama requests always inject num_ctx. Architecture metadata from
     // /api/show does not describe that setting, nor an already-loaded runner.
     // Resolve on each call so environment/catalog changes cannot be cached out.
@@ -37,7 +41,7 @@ fn context_window_source(provider: &str, model: &str) -> ContextWindowSource {
     {
         return ContextWindowSource::Configured(
             usize::try_from(
-                super::ollama::OllamaRuntimeSettings::for_route(provider, Some(model), None)
+                super::ollama::OllamaRuntimeSettings::for_route(provider, Some(model), overrides)
                     .num_ctx,
             )
             .ok(),
@@ -76,8 +80,12 @@ fn context_window_source(provider: &str, model: &str) -> ContextWindowSource {
 
 /// Read the same effective limit without starting provider discovery.
 /// Unknown local/server capacity remains unknown until its owner measures it.
-pub(crate) fn known_provider_max_context(provider: &str, model: &str) -> Option<usize> {
-    match context_window_source(provider, model) {
+pub(crate) fn known_provider_max_context(
+    provider: &str,
+    model: &str,
+    overrides: Option<&serde_json::Value>,
+) -> Option<usize> {
+    match context_window_source(provider, model, overrides) {
         ContextWindowSource::Configured(window) => window,
         ContextWindowSource::Discovery {
             catalog_window,
@@ -108,7 +116,7 @@ pub async fn fetch_provider_max_context(
     model: &str,
     api_key: &str,
 ) -> Option<usize> {
-    let (catalog_window, base_url) = match context_window_source(provider, model) {
+    let (catalog_window, base_url) = match context_window_source(provider, model, None) {
         ContextWindowSource::Configured(window) => return window,
         ContextWindowSource::Discovery {
             catalog_window,

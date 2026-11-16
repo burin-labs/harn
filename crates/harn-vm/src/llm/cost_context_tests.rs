@@ -12,6 +12,31 @@ fn segment_tokens(breakdown: &LlmContextTokenBreakdown, id: &'static str) -> Opt
 }
 
 #[test]
+fn current_context_matches_ollama_request_overrides() {
+    let _guard = crate::llm::env_guard();
+    let _env = crate::llm::test_env::ScopedEnvVar::set("HARN_OLLAMA_NUM_CTX", "32768");
+    let mut opts = crate::llm::api::options::base_opts("ollama");
+    opts.model = "context-override-control".into();
+    let baseline = project_llm_call_context_breakdown(&opts);
+    assert_eq!(baseline.context_window, Some(32768));
+    for (overrides, expected) in [
+        (serde_json::json!({"num_ctx": 8192}), 8192),
+        (serde_json::json!({"options": {"num_ctx": 16384}}), 16384),
+    ] {
+        opts.provider_overrides = Some(overrides);
+        let payload = crate::llm::api::LlmRequestPayload::from(&opts);
+        let wire = crate::llm::providers::OllamaProvider::build_request_body(&payload);
+        let actual = wire["options"]["num_ctx"].as_u64().unwrap() as usize;
+        assert_eq!(actual, expected);
+        assert_ne!(actual, baseline.context_window.unwrap());
+        assert_eq!(
+            project_llm_call_context_breakdown(&opts).context_window,
+            Some(actual)
+        );
+    }
+}
+
+#[test]
 fn current_context_uses_resident_input_and_preserves_unknown_capacity() {
     let _guard = crate::llm::env_guard();
     let mut opts = crate::llm::api::options::base_opts("openai");
