@@ -165,7 +165,9 @@ code=200
 respond() {
   case "$1 $2" in
     "api repos/acme/widget-host") echo main ;;
-    "api repos/acme/widget-host/pulls/"*) cat "$STUB/pull" ;;
+    "api repos/acme/widget-host/pulls/"*)
+      if [[ "$*" == *"--jq .head.sha"* ]]; then cat "$STUB/head-${2##*/}"; else cat "$STUB/pull"; fi ;;
+    "api repos/acme/widget-host/compare/"*) cat "$STUB/compare-${2##*/}" ;;
     "api repos/acme/widget-host/actions/runs/"*)
       if [[ "$*" == *"--jq .head_sha"* && -f "$STUB/run-head" ]]; then cat "$STUB/run-head"; return 0; fi
       if [[ "${GH_TOKEN:-}" == fixture-expired ]]; then
@@ -444,7 +446,27 @@ canary '' 1.2.4-dev 7
 grep -q -- '--ref fix-flag ' "$scratch/dispatched"
 grep -q "ref=pull-7" "$scratch/out"
 canary 'Pairs-with: consumer#7' 1.2.4-dev 7
-CONSUMER_PULL_REQUEST=7 refuses pairing_ambiguous 'Pairs-with: consumer#8'
+# An explicit pull supersedes a different trailer only when its head contains
+# that trailer's head, so one rehearsal still measures every pairing.
+explicit=$(printf 'a%.0s' {1..40}) named=$(printf 'b%.0s' {1..40})
+echo "open acme/widget-host fix-flag false main $explicit" > "$scratch/pull"
+echo "$named" > "$scratch/head-8"
+echo "ahead $named" > "$scratch/compare-$named...$explicit"
+CONSUMER_PULL_REQUEST=7 canary 'Pairs-with: consumer#8'
+grep -q -- '--ref fix-flag ' "$scratch/dispatched"
+grep -q 'pairing pull=7 superseded=8 decision=superset_verified' "$scratch/out"
+# Falsifier: a head the explicit pull does not contain refuses, naming it.
+echo "diverged $(printf 'c%.0s' {1..40})" > "$scratch/compare-$named...$explicit"
+rm -f "$scratch/dispatched"
+CONSUMER_PULL_REQUEST=7 refuses pairing_superset_missing 'Pairs-with: consumer#8'
+grep -q 'pull=7 missing=8' "$scratch/out"
+[[ ! -e "$scratch/dispatched" ]]
+# An unreadable superseded head is unmeasured, never a pass.
+rm "$scratch/head-8"
+CONSUMER_PULL_REQUEST=7 refuses pairing_superset_unmeasured 'Pairs-with: consumer#8'
+# Without an explicit pull, two trailers still refuse.
+refuses pairing_ambiguous $'Pairs-with: consumer#7\nPairs-with: consumer#8'
+echo "open acme/widget-host fix-flag" > "$scratch/pull"
 CONSUMER_PULL_REQUEST=0 refuses pairing_unrecognized
 CONSUMER_PULL_REQUEST=01 refuses pairing_unrecognized
 echo "closed acme/widget-host fix-flag false main" > "$scratch/pull"
@@ -606,6 +628,16 @@ binding_refuses() {
 for invalid in CANARY_RELEASE_PRODUCER_RUN_ID= CANARY_RELEASE_PRODUCER_RUN_ATTEMPT= CANARY_RECORD_RUN= SOURCE_REVISION= CANARY_PAIRED_PULL=invalid; do
   binding_refuses binding_identity_unmeasured "$invalid"
 done
+# Superseded pulls are rechecked against the revision the run tested, since the
+# branch may move after dispatch, and the binding names them.
+echo "$named" > "$scratch/head-8"
+echo "ahead $named" > "$scratch/compare-$named...$consumer_revision"
+bind env CANARY_SUPERSEDED_PULLS=8
+jq -e '.declared_pull == "7" and .superseded_pulls == ["8"]' "$scratch/binding.json" > /dev/null
+grep -q 'consumer=pull-7 superseded=8' "$scratch/out"
+echo "diverged $named" > "$scratch/compare-$named...$consumer_revision"
+binding_refuses pairing_superset_missing CANARY_SUPERSEDED_PULLS=8
+binding_refuses binding_identity_unmeasured CANARY_SUPERSEDED_PULLS=8 CANARY_DECLARED_PULL=
 printf '\n' > "$scratch/run-head"
 binding_refuses binding_identity_unmeasured
 printf '%s\n' "$consumer_revision" > "$scratch/run-head"
