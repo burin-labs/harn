@@ -4,6 +4,19 @@ fn step_named(job: dict, name: string) -> dict? {
   return (job?.steps ?? []).find({ step -> step?.name == name })
 }
 
+fn dist_preparation_precedes_build(job: dict, build_name: string) -> bool {
+  let prepared = false
+  for step in job?.steps ?? [] {
+    if step?.name == "Prepare dist build environment" {
+      prepared = true
+    }
+    if step?.name == build_name {
+      return prepared
+    }
+  }
+  return false
+}
+
 /**
  * Release smoke runs inside the release candidate's own run, on archives it
  * verifies against the candidate manifest, and on a schedule from source.
@@ -29,6 +42,24 @@ fn release_smoke_workflow_errors(workflow: dict, caller: dict) -> list<string> {
     errors = errors + ["release-smoke must be callable with a required candidate-commit input"]
   }
   const smoke = workflow?.jobs?.smoke ?? {}
+  const prepare = step_named(smoke, "Prepare dist build environment")
+  if prepare?.if != "steps.runtime.outputs.mode == 'source'"
+    || prepare?.run != "bash scripts/ci/prepare_dist_build.sh"
+    || !dist_preparation_precedes_build(smoke, "Build release harn binary") {
+    errors = errors + ["source smoke must use the shared dist build environment"]
+  }
+  const release_prepare = step_named(caller?.jobs?.build ?? {}, "Prepare dist build environment")
+  if release_prepare?.run != "bash scripts/ci/prepare_dist_build.sh \"$HARN_RELEASE_TARGET\""
+    || release_prepare?.env?.HARN_RELEASE_TARGET != "$" + "{{ matrix.target }}"
+    || !dist_preparation_precedes_build(caller?.jobs?.build ?? {}, "Build") {
+    errors = errors + ["release builds must configure their matrix target through the shared owner"]
+  }
+  const source_build = step_named(smoke, "Build release harn binary")
+  if source_build?.if != "steps.runtime.outputs.mode == 'source'"
+    || source_build?.run
+      != "bash scripts/ci/run_with_host_telemetry.sh source-smoke-build cargo build --locked --profile dist -p harn-cli --bin harn --features embedded-stdlib" {
+    errors = errors + ["source smoke must stream telemetry around the actual dist compilation"]
+  }
   const trusted_macos_runner = "$"
     + "{{ matrix.platform == 'macos' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && fromJSON('[\"self-hosted\",\"harn-trusted-macos\"]') || matrix.runner }}"
   if smoke?.get("runs-on") != trusted_macos_runner {
@@ -148,6 +179,38 @@ pipeline test_release_smoke_runs_on_the_candidate_archives(harness: Harness) {
     }
   assert(len(release_smoke_workflow_errors(post_publication, caller)) == 1)
   const smoke = workflow.jobs.smoke
+  const unprepared = workflow
+    + {
+      jobs: workflow.jobs
+        + {
+          smoke: smoke
+            + {
+              steps: smoke.steps.filter({ step -> step?.name != "Prepare dist build environment" })
+                .to_list(),
+            },
+        },
+    }
+  assert(
+    join(release_smoke_workflow_errors(unprepared, caller), "\n").contains(
+      "source smoke must use the shared dist build environment",
+    ),
+  )
+  const late_preparation = workflow
+    + {
+      jobs: workflow.jobs
+        + {
+          smoke: smoke
+            + {
+              steps: unprepared.jobs.smoke.steps
+                + [step_named(smoke, "Prepare dist build environment")],
+            },
+        },
+    }
+  assert(
+    join(release_smoke_workflow_errors(late_preparation, caller), "\n").contains(
+      "source smoke must use the shared dist build environment",
+    ),
+  )
   const unverified = workflow
     + {
       jobs: workflow.jobs
