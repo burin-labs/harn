@@ -84,6 +84,8 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/green_checkpoint.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/sha256.sh"
 # shellcheck source=scripts/lib/consumer_pairing_superset.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/consumer_pairing_superset.sh"
+# shellcheck source=scripts/lib/release_pairing_source.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/release_pairing_source.sh"
 
 # The consumer's repository name, which no output line may contain.
 CANARY_SECRET_NAME=
@@ -374,7 +376,7 @@ canary_require_superset() {
 # reads its own commit message. A range it cannot measure refuses rather than
 # reading less.
 canary_pairing_text() {
-  local revision=$1 version=$2 scope=${3:-commit} source=${CANARY_PAIRING_SOURCE:-} base count
+  local revision=$1 version=$2 scope=${3:-commit} source=${CANARY_PAIRING_SOURCE:-} base count measured
   case "$scope" in commit|release) ;; *) canary_fail pairing_scope_invalid ;; esac
   if [[ -n "${CANARY_PULL_REQUEST_CLI_RUN:-}" ]]; then
     # The pin job supplies its current authenticated selection alongside the
@@ -391,12 +393,13 @@ canary_pairing_text() {
   CANARY_PAIRING_TEXT=${PAIRING_TEXT:-}
   [[ -z "$CANARY_PAIRING_TEXT" && -n "$source" ]] || return 0
   if [[ "$scope" == release ]] && release_version_is_canonical "$version" && ! release_version_is_prerelease "$version"; then
-    base=$(release_previous_stable_tag "$version" "$source") \
-      || canary_fail pairing_range_unmeasured "version=$version read=previous_stable_tag"
-    count=$(git -C "$source" rev-list --count "$base..$revision" 2> /dev/null) \
-      || canary_fail pairing_range_unmeasured "base=$base"
-    CANARY_PAIRING_TEXT=$(git -C "$source" log --format='%B' "$base..$revision") \
-      || canary_fail pairing_range_unmeasured "base=$base"
+    measured=$(release_pairing_source_json "$source" "$revision") \
+      || canary_fail pairing_range_unmeasured "version=$version read=original_source_range"
+    [[ "$(jq -r .version <<< "$measured")" == "$version" ]] \
+      || canary_fail pairing_range_unmeasured "version=$version read=original_source_version"
+    base=$(jq -r .base_tag <<< "$measured")
+    count=$(jq -r .commit_count <<< "$measured")
+    CANARY_PAIRING_TEXT=$(jq -r .text <<< "$measured")
     canary_say "CONSUMER_CANARY pairing range=$base..$revision commits=$count"
   else
     CANARY_PAIRING_TEXT=$(git -C "$source" log -1 --format='%B' "$revision" 2> /dev/null) \

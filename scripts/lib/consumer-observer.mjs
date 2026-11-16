@@ -6,6 +6,9 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as pause } from 'node:timers/promises';
 import { assessConsumerObservation, unmeasuredConsumerTiming, consumerObservationBudget } from './consumer-observation-budget.mjs';
+import {qualifyRepairPairing} from './consumer-repair-pairing.mjs';
+import {consumerPairing, consumerPairingClaim} from './consumer-pairing.mjs';
+export {consumerPairing, consumerPairingClaim};
 
 const parentRepository = 'burin-labs/harn';
 export {parentRepository as observerParentRepository};
@@ -1009,45 +1012,6 @@ export async function dispatchObserverConsumer(parentToken, consumerToken, conte
   return {dispatched:true};
 }
 
-/** Pairing is declared in public source; private branch identity stays inside
- * the authenticated source selector and dispatcher. */
-/** The pull to rehearse, and the trailer-named pulls an explicit request
- * supersedes. Superseding is only a claim: the caller must prove the requested
- * pull's head contains each superseded pull's head before rehearsing it. */
-export function consumerPairingClaim(text, requestedPull = '') {
-  const lines=String(text??'').split(/\r?\n/).filter(line=>/^\s*Pairs-with:/.test(line));
-  const named=new Set();
-  for(const line of lines){
-    const match=/^\s*Pairs-with:\s*consumer#([1-9][0-9]*)\s*$/.exec(line);
-    if(!match) refuse('consumer_pairing_invalid');
-    named.add(match[1]);
-  }
-  const byNumber=(left,right)=>Number(left)-Number(right);
-  if(requestedPull !== '') {
-    if(typeof requestedPull !== 'string' || !id.test(requestedPull)) refuse('consumer_pairing_invalid');
-    named.delete(requestedPull);
-    return {pull:requestedPull,superseded:[...named].sort(byNumber)};
-  }
-  if(named.size>1){
-    // Pull numbers are already public in the trailers; naming them says which to reconcile.
-    const error=new Error('CONSUMER_OBSERVER reason=consumer_pairing_ambiguous');
-    error.pulls=[...named].sort(byNumber);
-    throw error;
-  }
-  return {pull:named.size===1?[...named][0]:null,superseded:[]};
-}
-
-/** One pairing, for callers that cannot prove containment: any second pull refuses. */
-export function consumerPairing(text, requestedPull = '') {
-  const claim=consumerPairingClaim(text, requestedPull);
-  if(claim.superseded.length){
-    const error=new Error('CONSUMER_OBSERVER reason=consumer_pairing_ambiguous');
-    error.pulls=[claim.pull,...claim.superseded].sort((left,right)=>Number(left)-Number(right));
-    throw error;
-  }
-  return claim.pull;
-}
-
 /** Read the current declaration only for the same open pull head under test. */
 export async function githubPullPairing(token, repository, pullNumber, headSha, fetchRecord = fetch) {
   if(typeof token!=='string'||!token||repository!==parentRepository
@@ -1133,7 +1097,8 @@ export async function readConsumerParentProduct(token, selection, expected, fetc
 /** A supplied public context selects its already-issued custody. It grants no
  * new dispatch or cleanup ownership. Both live and completed parents require
  * final identity and source eligibility before accepting a reached decision. */
-export async function readConsumerContextDecision(token, context, expected, fetchRecord = fetch, extract = artifactJsonFromZip) {
+export async function readConsumerContextDecision(token, context, expected, fetchRecord = fetch, extract = artifactJsonFromZip,
+  qualifySource = async()=>{}) {
   const observer=observerContext(context);
   if(typeof expected.requireCurrentDefault!=='boolean') refuse('parent_selection_unproven');
   if(expected.completedAfter!==undefined&&(!Number.isSafeInteger(expected.completedAfter)||expected.completedAfter<1)){
@@ -1148,6 +1113,8 @@ export async function readConsumerContextDecision(token, context, expected, fetc
   if(expected.requireCurrentDefault && expected.pairedPull!=null) refuse('parent_selection_unproven');
   const scoped=expected.requireCurrentDefault || expected.pairedPull!=null;
   const source=scoped?await githubConsumerSource(token,expected.repository,expected.pairedPull??null,fetchRecord):{};
+  let sourceRefusal;
+  let sourceFailed=false;
   const reading=await readConsumerProduct(token,observer,{...expected,...source},fetchRecord,extract,async()=>{
     const finalParent=await githubRecord(token,observer.parent_repository,observer.parent_run_id,fetchRecord);
     qualifyObserverParent(observer,finalParent);
@@ -1155,10 +1122,13 @@ export async function readConsumerContextDecision(token, context, expected, fetc
       refuse('parent_state_changed');
     }
     if(scoped){
+      try { await qualifySource(source); }
+      catch(error) { sourceFailed=true;sourceRefusal=error;throw error; }
       const finalSource=await githubConsumerSource(token,expected.repository,expected.pairedPull??null,fetchRecord);
       if(finalSource.headSha!==source.headSha||finalSource.branch!==source.branch) refuse('child_source_no_longer_eligible');
     }
   });
+  if(sourceFailed) throw sourceRefusal;
   if(reading.discovered!==1||reading.owned!==1||reading.pending!==0||reading.refused!==0||reading.product===null){
     refuse('product_decision_unmeasured');
   }
@@ -1180,8 +1150,15 @@ export async function readConsumerRepairDecision(token, request, expected, fetch
       || parent.status==='completed' && ['success','failure'].includes(parent.conclusion))) refuse('consumer_repair_parent_unproven');
   const producer=await githubArchiveProducer(token,{sourceRevision:context.source_revision,
     runId:request.producer_run,attempt:request.producer_attempt},fetchRecord);
+  const readPairing=async suffix=>{
+    const response=await githubRead(token,`https://api.github.com/repos/${expected.repository}${suffix}`,fetchRecord);
+    if(!response.ok) refuse('pairing_superset_unmeasured',refusalDiagnostic(response));
+    return response.json();
+  };
   const result=await readConsumerContextDecision(token,context,{...expected,
-    producerBinding:archiveProducerBinding(producer),pairedPull:request.consumer_pull,requireCurrentDefault:false},fetchRecord,extract);
+    producerBinding:archiveProducerBinding(producer),pairedPull:request.consumer_pull,requireCurrentDefault:false},fetchRecord,extract,
+    source=>qualifyRepairPairing({sourceRevision:context.source_revision,consumerPull:request.consumer_pull,
+      testedHead:source.headSha,repository:expected.repository},{read:readPairing}));
   if(result.reading.product.verdict!=='pass') refuse('product_decision_unmeasured');
   return {...result,schema:'harn.release.consumer_repair_decision.v1',producer,consumer_pull:request.consumer_pull};
 }

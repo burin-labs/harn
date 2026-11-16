@@ -350,6 +350,13 @@ requires full-suite CI at its own source, so a red source never publishes.
   successful child, then rechecks the original producer, artifact identities,
   and current pull-request head. A changed, closed, failed, or unmeasured repair
   refuses rather than borrowing the old result.
+  Reuse also derives every required consumer pull from the original producer's
+  source range. That source's workspace version fixes the previous stable tag
+  across retries. The authorizer and pinned publication reader require complete
+  source history and measured tag identities, and ignore local replacement or
+  graft views. Every required pull's current head must be contained in the exact
+  commit the child tested. An already-contained advance remains valid; missing,
+  unreadable or uncontained requirements refuse reuse.
 - The consumer observer reached its deadline, but its exact dispatched child
   later succeeded: after the completed-child recovery policy is on main,
   dispatch the normal promoter with the same producer and source plus

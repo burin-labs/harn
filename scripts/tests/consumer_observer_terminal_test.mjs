@@ -5,21 +5,56 @@ import os from 'node:os';
 import path from 'node:path';
 import {execFileSync,spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath,pathToFileURL} from 'node:url';
 import {observerDeadlineName,observerDeadlineStep,observerWindowSteps} from '../lib/consumer-observer-window.mjs';
 import {admitChild, createTerminalReceipt, qualifyOwnedChild, observerDeclarationName, observerDeclarationStep, observerPublicationWitness, observerDispatchActor, observerRunName, observerTerminalName} from '../lib/consumer-observer.mjs';
 import {archiveFile, archiveJson} from './fixtures/artifact_archive.mjs';
+import {consumerPairingRepositories} from './fixtures/consumer_pairing_repositories.mjs';
+
+test('original source ranges distinguish measured empty claims from incomplete or replaced tags', () => {
+  const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-pairing-source-'));
+  try {
+    for(const required of [true,false]){
+      const directory=path.join(scratch,required?'required':'empty');fs.mkdirSync(directory);
+      const pairing=consumerPairingRepositories(directory,{required});
+      const entry=path.join(pairing.policy,'scripts/ci/pairing-source-probe.mjs');
+      fs.writeFileSync(entry,
+        "import {readReleasePairingSource} from '../lib/consumer-repair-pairing.mjs';\n"
+        + "import {consumerPairingClaim,observerRefusal} from '../lib/consumer-observer.mjs';\n"
+        + "try { const source=readReleasePairingSource(process.argv[2]); console.log(JSON.stringify({source,claim:consumerPairingClaim(source.text,'7')})); }\n"
+        + "catch(error) { console.log(JSON.stringify(observerRefusal(error,'pairing_source_unmeasured'))); process.exitCode=1; }\n");
+      const read=()=>spawnSync(process.execPath,[entry,pairing.sourceRevision],{encoding:'utf8',env:{PATH:process.env.PATH,HOME:process.env.HOME}});
+      const complete=read();assert.equal(complete.status,0,complete.stderr);
+      const record=JSON.parse(complete.stdout);
+      assert.equal(record.source.source_sha,pairing.sourceRevision);
+      assert.equal(record.source.version,'0.10.202','the later working tree and publication must not choose the range');
+      assert.equal(record.source.base_tag,'v0.10.201');
+      assert.equal(record.source.commit_count,2);
+      assert.deepEqual(record.claim,{pull:'7',superseded:required?['8']:[]});
+      execFileSync('git',['--git-dir',pairing.remote,'update-ref','refs/tags/v0.10.201',pairing.sourceRevision]);
+      const changedTag=read();assert.equal(changedTag.status,1);
+      assert.equal(JSON.parse(changedTag.stdout).reason,'pairing_source_unmeasured');
+      execFileSync('git',['--git-dir',pairing.remote,'update-ref','refs/tags/v0.10.201',pairing.previous]);
+      pairing.sourceGit(['config','remote.origin.url',path.join(directory,'unavailable.git')]);
+      const absentInventory=read();assert.equal(absentInventory.status,1);
+      assert.equal(JSON.parse(absentInventory.stdout).reason,'pairing_source_unmeasured');
+      pairing.sourceGit(['config','remote.origin.url',pairing.remote]);
+      assert.equal(read().status,0,'restored tag custody still measures the original range');
+    }
+  } finally {fs.rmSync(scratch,{recursive:true,force:true});}
+});
 
 test('the terminal entrypoint records only an authenticated reached product decision', () => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'harn-observer-terminal-'));
   try {
+    const pairing = consumerPairingRepositories(scratch);
     const context = {schema:'harn.consumer_observer.v2',parent_repository:'burin-labs/harn',
       parent_run_id:'42',parent_run_attempt:2,parent_head_sha:'a'.repeat(40),
-      source_revision:'b'.repeat(40),dispatch_nonce:'01234567-89ab-4cde-8fab-0123456789ab',started_at:1000};
+      source_revision:pairing.sourceRevision,dispatch_nonce:'01234567-89ab-4cde-8fab-0123456789ab',started_at:1000};
     const parent = {id:42,run_attempt:2,head_sha:context.parent_head_sha,
       head_repository:{full_name:context.parent_repository},path:'.github/workflows/consumer-canary.yml',
       status:'in_progress'};
-    const child = {id:73,run_attempt:1,head_sha:'c'.repeat(40),head_repository:{full_name:'acme/widget-host'},
+    const child = {id:73,run_attempt:1,head_sha:pairing.tested,head_repository:{full_name:'acme/widget-host'},
       path:'.github/workflows/rehearsal.yml',head_branch:'main',event:'workflow_dispatch',status:'in_progress',
       actor:{login:observerDispatchActor,type:'Bot'},display_title:observerRunName(context)};
     const expected={repository:'acme/widget-host',workflow:child.path,runId:'73',attempt:1,
@@ -124,14 +159,16 @@ test('the terminal entrypoint records only an authenticated reached product deci
     const lastRead=path.join(scratch,'last-read.json');
     fs.writeFileSync(observerPreload,`import fs from 'node:fs';
       import {readRetry} from ${JSON.stringify(new URL('../lib/consumer-observer.mjs', import.meta.url).href)};
+      import {readRetry as policyRetry} from ${JSON.stringify(pathToFileURL(path.join(pairing.policy,'scripts/lib/consumer-observer.mjs')).href)};
       const fixture=JSON.parse(fs.readFileSync(${JSON.stringify(fixture)},'utf8'));
-      let censusReads=0,childReads=0,parentReads=0,sourceReads=0,pullReads=0;
+      let censusReads=0,childReads=0,parentReads=0,sourceReads=0,pullReads=0,componentReads=0;
       if(fixture.recordedClock){
         let seconds=fixture.clockStart??1000;
         Date.now=()=>seconds*1000;
         globalThis.setTimeout=(callback,milliseconds)=>{seconds+=milliseconds/1000;queueMicrotask(callback);};
       }else{
         readRetry.backoffMs=0;
+        policyRetry.backoffMs=0;
       }
       globalThis.fetch=async(url,options={})=>{
         if(options.method==='POST')throw new Error('unexpected-private-post');
@@ -161,8 +198,15 @@ test('the terminal entrypoint records only an authenticated reached product deci
           jobs:fixture.childJobs};
         else if(p.endsWith('/42'))record=++parentReads>(fixture.ordinaryObservation?0:1)&&fixture.finalParent?fixture.finalParent:fixture.parent;
         else if(p==='/repos/acme/widget-host')record={full_name:'acme/widget-host',default_branch:'main'};
-        else if(p.endsWith('/commits/main'))record={sha:++sourceReads>1&&fixture.finalSource?fixture.finalSource:fixture.source??'c'.repeat(40)};
+        else if(p.endsWith('/commits/main'))record={sha:++sourceReads>1&&fixture.finalSource?fixture.finalSource:fixture.source??${JSON.stringify(pairing.tested)}};
         else if(p.endsWith('/pulls/7'))record=++pullReads>1&&fixture.finalPull?fixture.finalPull:fixture.pull;
+        else if(p.endsWith('/pulls/8')){
+          componentReads++;
+          if(fixture.componentStatus)return {ok:false,status:fixture.componentStatus,headers:new Headers()};
+          record={head:{sha:componentReads>1&&Object.hasOwn(fixture,'componentFinal')?fixture.componentFinal:
+            Object.hasOwn(fixture,'component')?fixture.component:${JSON.stringify(pairing.component)}}};
+        }else if(p.includes('/compare/'))record=Object.hasOwn(fixture,'componentComparison')?fixture.componentComparison:{
+          status:'ahead',merge_base_commit:{sha:${JSON.stringify(pairing.component)}}};
         else if(p.endsWith('/'+fixture.child.id))record=++childReads>1&&fixture.finalChild?fixture.finalChild:fixture.child;
         else if(p.endsWith('/rehearsal.yml/runs')){
           const rows=++censusReads>1&&fixture.finalRuns?fixture.finalRuns:fixture.runs;
@@ -309,7 +353,7 @@ test('the terminal entrypoint records only an authenticated reached product deci
       assert.equal(staleWait.fields.observation_outcome,'refused');
       assert.equal(staleWait.fields.verdict,undefined);
     }
-    const pairedPull={state:'open',head:{repo:{full_name:'acme/widget-host'},ref:'paired-work',sha:'c'.repeat(40)}};
+    const pairedPull={state:'open',head:{repo:{full_name:'acme/widget-host'},ref:'paired-work',sha:child.head_sha}};
     const pairedChild={...completed,head_branch:'paired-work'};
     const pairedWait=observe({recordedClock:true,pull:pairedPull,child:pairedChild,runs:[pairedChild]},true,{CANARY_PAIRED_PULL:'7'});
     assert.equal(pairedWait.run.status,0,pairedWait.run.stderr);assert.equal(pairedWait.fields.verdict,'pass');
@@ -324,13 +368,14 @@ test('the terminal entrypoint records only an authenticated reached product deci
 
     const readParentEntry=fileURLToPath(new URL('../ci/consumer-observer-read-parent.mjs',import.meta.url));
     const readDecisionEntry=fileURLToPath(new URL('../ci/consumer-observer-read-decision.mjs',import.meta.url));
+    const repairDecisionEntry=path.join(pairing.policy,'scripts/ci/consumer-observer-read-decision.mjs');
     const selectEntry=fileURLToPath(new URL('../ci/consumer-observer-select.mjs',import.meta.url));
     const terminalParent={...parent,status:'completed',conclusion:'success',created_at:'2026-10-11T20:00:00Z'};
     const reusableChild={...completed,head_branch:'main'};
     const readParent=(changes={},extraEnv={},select=false,decision=false,contextDecision=false,recovery=false,repair=false,priorRepair=false)=>{
       const output=path.join(scratch,`reuse-${sequence++}`);
       fs.writeFileSync(fixture,JSON.stringify({parent:terminalParent,child:reusableChild,runs:[reusableChild],archives,...changes}));
-      const run=spawnSync(process.execPath,[contextDecision?readDecisionEntry:select?selectEntry:readParentEntry,
+      const run=spawnSync(process.execPath,[repair||priorRepair?repairDecisionEntry:contextDecision?readDecisionEntry:select?selectEntry:readParentEntry,
         ...(priorRepair?['--prior-repair']:repair?['--repair']:recovery?['--recover']:decision?['--decision']:[])],{encoding:'utf8',env:{PATH:process.env.PATH,
         NODE_OPTIONS:`--import=${observerPreload}`,GH_TOKEN:'fixture-read',PARENT_RUN_ID:'42',PARENT_ROLE:'canary',
         SOURCE_REVISION:context.source_revision,REQUIRE_CURRENT_DEFAULT:'true',CANARY_REPOSITORY:'acme/widget-host',
@@ -423,6 +468,65 @@ test('the terminal entrypoint records only an authenticated reached product deci
     assert.equal(JSON.parse(reusedRepair.run.stdout).reading.product.verdict,'pass');
     assert.match(reusedRepair.text,/^repair_reused=true$/m);
     assert.deepEqual(JSON.parse(/^repair_request=(.+)$/m.exec(reusedRepair.text)[1]),repairRequest);
+    const advancedComponent = priorRepair({component:pairing.advanced,
+      componentComparison:{status:'diverged',merge_base_commit:{sha:pairing.mergeBase}}});
+    console.log('repair-freshness-proof ' + JSON.stringify({source:pairing.sourceRevision,
+      tested:pairing.tested,requiredOriginal:pairing.component,requiredAdvanced:pairing.advanced,
+      mergeBase:pairing.mergeBase,unchangedExit:reusedRepair.run.status,
+      unchangedReading:JSON.parse(reusedRepair.run.stdout).reading,advancedExit:advancedComponent.run.status}));
+    assert.equal(advancedComponent.run.status,1,
+      'an unchanged successful prior child cannot cover a required component that advanced beyond its tested commit');
+    assert.equal(JSON.parse(advancedComponent.run.stdout).reason,'pairing_superset_missing',
+      'the existing containment owner must fire, not an unrelated bootstrap refusal');
+    assert.equal(advancedComponent.text,'','an advanced required component must not authorize publication');
+    const overriddenSource=priorRepair({component:pairing.advanced,
+      componentComparison:{status:'diverged',merge_base_commit:{sha:pairing.mergeBase}}},
+      {PAIRING_TEXT:'',CANARY_PAIRING_SOURCE:path.join(scratch,'untrusted-source')});
+    assert.equal(overriddenSource.run.status,1,'canary environment overrides cannot erase original repair requirements');
+    assert.equal(JSON.parse(overriddenSource.run.stdout).reason,'pairing_superset_missing');
+    const injectedClaim=repair({}, {OBSERVER_CONTEXT:JSON.stringify({...repairRequest,superseded_pulls:[]})});
+    assert.equal(injectedClaim.run.status,1,'v1 accepts no caller-supplied component claim');
+    assert.equal(JSON.parse(injectedClaim.run.stdout).reason,'consumer_repair_request_unproven');
+    const containedAdvance=priorRepair({component:pairing.tested,
+      componentComparison:{status:'identical',merge_base_commit:{sha:pairing.tested}}});
+    assert.equal(containedAdvance.run.status,0,'a current component already contained in the tested commit remains valid');
+    for(const [changes,reason] of [
+      [{component:null},'pairing_superset_unmeasured'],
+      [{componentStatus:403},'pairing_superset_unmeasured'],
+      [{componentComparison:null},'pairing_superset_unmeasured'],
+      [{componentComparison:{status:'ahead',merge_base_commit:{sha:'unmeasured'}}},'pairing_superset_unmeasured'],
+      [{componentFinal:pairing.advanced},'pairing_superset_changed'],
+    ]){
+      const refused=priorRepair(changes);
+      assert.equal(refused.run.status,1);
+      assert.equal(JSON.parse(refused.run.stdout).reason,reason);
+      assert.equal(refused.text,'');
+    }
+    pairing.sourceGit(['tag','-d','v0.10.201']);
+    const missingTag=priorRepair();
+    assert.equal(missingTag.run.status,1);
+    assert.equal(JSON.parse(missingTag.run.stdout).reason,'pairing_source_unmeasured');
+    pairing.sourceGit(['tag','v0.10.201',pairing.previous]);
+    const shallowFile=path.join(pairing.policy,'.git/shallow');
+    fs.writeFileSync(shallowFile,pairing.sourceRevision+'\n');
+    assert.equal(pairing.sourceGit(['rev-parse','--is-shallow-repository']),'true');
+    const shallowSource=priorRepair();
+    assert.equal(shallowSource.run.status,1);
+    assert.equal(JSON.parse(shallowSource.run.stdout).reason,'pairing_source_unmeasured');
+    fs.rmSync(shallowFile);
+    const restored=priorRepair();
+    assert.equal(restored.run.status,0,'restored complete source must still authorize the unchanged reached child');
+    for(const view of ['replace','graft']){
+      pairing.hideRequirement(view);
+      const realSource=priorRepair();
+      assert.equal(realSource.run.status,0,`${view}: original source must remain readable`);
+      const hidden=priorRepair({component:pairing.advanced,
+        componentComparison:{status:'diverged',merge_base_commit:{sha:pairing.mergeBase}}});
+      assert.equal(hidden.run.status,1,`${view}: a local Git view must not erase an authenticated source requirement`);
+      assert.equal(JSON.parse(hidden.run.stdout).reason,'pairing_superset_missing');
+      assert.equal(hidden.text,'');
+      pairing.clearViews();
+    }
     // The repair reader below separately falsifies missing custody, artifacts,
     // and a mismatched producer. These cases exercise the new parent selector.
     for(const [changes,env] of [[{finalPull:{...pairedPull,head:{...pairedPull.head,sha:'d'.repeat(40)}}},{}],
