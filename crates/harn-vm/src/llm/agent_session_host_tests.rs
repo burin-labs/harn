@@ -1,3 +1,4 @@
+use harn_orchestration::agent_inbox;
 use serde_json::json;
 
 use crate::agent_events::AgentEvent;
@@ -26,13 +27,13 @@ mod tool_channel_history;
 #[test]
 fn command_updates_have_one_dedicated_inbox_consumer() {
     let session_id = format!("command-inbox-owner-{}", uuid::Uuid::new_v4());
-    crate::orchestration::agent_inbox::push(
+    agent_inbox::push(
         &session_id,
         "tool_result",
         r#"{"handle_id":"verify-1","status":"completed","exit_code":0}"#,
-        crate::orchestration::agent_inbox::COMMAND_TERMINAL_SOURCE,
+        agent_inbox::COMMAND_TERMINAL_SOURCE,
     );
-    crate::orchestration::agent_inbox::push(
+    agent_inbox::push(
         &session_id,
         "peer_message",
         "continue with the review",
@@ -65,7 +66,7 @@ fn command_updates_have_one_dedicated_inbox_consumer() {
 #[test]
 fn unrelated_tool_result_remains_feedback_not_command_ownership() {
     let session_id = format!("unowned-command-inbox-{}", uuid::Uuid::new_v4());
-    crate::orchestration::agent_inbox::push(
+    agent_inbox::push(
         &session_id,
         "tool_result",
         r#"{"handle_id":"not-a-command","status":"completed","exit_code":0}"#,

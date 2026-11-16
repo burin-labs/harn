@@ -3,6 +3,7 @@
 use super::*;
 #[cfg(test)]
 use crate::NativeBuiltinCtxExt;
+use harn_orchestration::agent_inbox;
 
 /// Deterministic "should the loop auto-continue this truncated turn?" gate.
 ///
@@ -61,8 +62,8 @@ pub(super) fn host_agent_session_drain_feedback_builtin(
             )))
         }
     };
-    let drained = crate::orchestration::agent_inbox::drain_where(&session_id, |entry| {
-        entry.payload.is_none() && !crate::orchestration::agent_inbox::is_command_update(entry)
+    let drained = agent_inbox::drain_where(&session_id, |entry| {
+        entry.payload.is_none() && !agent_inbox::is_command_update(entry)
     })
     .into_iter()
     .map(|entry| {
@@ -112,9 +113,8 @@ pub(super) fn host_agent_session_drain_command_updates_builtin(
             )))
         }
     };
-    let drained = crate::orchestration::agent_inbox::drain_where(&session_id, |entry| {
-        crate::orchestration::agent_inbox::is_command_update(entry)
-    });
+    let drained =
+        agent_inbox::drain_where(&session_id, |entry| agent_inbox::is_command_update(entry));
     let drained = drained
         .into_iter()
         .map(|entry| {
@@ -184,7 +184,7 @@ async fn host_agent_session_await_inbox(
         })?;
         crate::harness::native_harness(handle)?.clock().clone()
     };
-    let woke = crate::orchestration::agent_inbox::wait_async(
+    let woke = agent_inbox::wait_async(
         &session_id,
         std::time::Duration::from_millis(timeout_ms),
         &*clock,
@@ -413,7 +413,7 @@ fn host_agent_session_post_event_builtin(
         Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
         _ => "host.post_event".to_string(),
     };
-    crate::orchestration::agent_inbox::push(&session_id, &kind, &content, &source);
+    agent_inbox::push(&session_id, &kind, &content, &source);
     Ok(VmValue::Nil)
 }
 
