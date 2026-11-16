@@ -86,6 +86,31 @@ test('a mutable request description cannot choose the consumer',async()=>{
   assert.deepEqual(await releaseRequest(f.api,repository,17),request);
 });
 
+test('candidate workflow carries the requested consumer into its actual rehearsal',async()=>{
+  const candidate=load(fs.readFileSync(new URL('../../.github/workflows/build-release-binaries.yml',import.meta.url),'utf8'));
+  const canary=load(fs.readFileSync(new URL('../../.github/workflows/consumer-canary.yml',import.meta.url),'utf8'));
+  const input=candidate.on.workflow_dispatch.inputs.consumer_pull_request;
+  assert.equal(input?.type,'string');
+  assert.equal(input.required,false);
+  assert.equal(input.default,'');
+  assert.equal(canary.on.workflow_call.inputs.consumer_pull_request.type,input.type);
+  const rehearsal=candidate.jobs['consumer-rehearsal'];
+  assert.equal(rehearsal.uses,'./.github/workflows/consumer-canary.yml');
+  for(const selection of ['', '77']) {
+    const f=fixture();
+    const admitted=await releaseRequest(f.api,repository,17,false,selection);
+    const planned=await runRequestedRelease(f.api,admitted,{...f.execution,dryRun:true});
+    const value=planned.dispatch_plan[0].inputs.consumer_pull_request??input.default;
+    const expression=rehearsal.with.consumer_pull_request;
+    assert.match(expression,/^\$\{\{.*\}\}$/s);
+    const tokens=new Lexer(expression.slice(3,-2)).lex();
+    const context=new data.Dictionary({key:'inputs',value:new data.Dictionary(
+      {key:'consumer_pull_request',value:new data.StringData(value)})});
+    const forwarded=new Evaluator(new Parser(tokens.tokens,['inputs'],[]).parse(),context).evaluate().coerceString();
+    assert.equal(forwarded,selection);
+  }
+});
+
 for(const [name,selection] of [
   ['null',null],['object',{}],['numeric',77],['zero','0'],['multiple','77,78'],
 ]) {

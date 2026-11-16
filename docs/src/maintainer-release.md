@@ -15,8 +15,8 @@ only after proving that it contains the requesting merge. The candidate and
 promotion workflows retain all existing qualification and publication gates.
 
 To select an explicit consumer pull, add `-f consumer_pull_request=PR_NUMBER` to
-the request workflow command. The request forwards that selection to the
-candidate, whose existing source-pairing and containment rules still apply.
+the request workflow command. The request forwards that selection through the
+candidate to its consumer rehearsal; existing source-pairing and containment rules still apply.
 An empty input leaves selection to the candidate's source declarations.
 Promotion uses the candidate's qualified binding.
 
