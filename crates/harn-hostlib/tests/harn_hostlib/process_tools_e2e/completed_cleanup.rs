@@ -205,7 +205,7 @@ fn foreground_double_fork_cleanup(deny_subreaper: bool) {
     let _denial =
         deny_subreaper.then(harn_hostlib::process::owner_death::deny_guardian_subreaper_for_test);
     let python = python3().expect("the process fixture requires Python 3");
-    let script = r#"
+    let script = r"
 import os, signal
 r, w = os.pipe()
 if os.fork() == 0:
@@ -223,7 +223,7 @@ grandchild = os.read(r, 32).decode().strip()
 os.close(r)
 os.wait()
 print('GRANDCHILD_PID=' + grandchild, flush=True)
-"#;
+";
     let mut request = dict_map();
     request.insert("argv".into(), vlist_str(&[&python, "-c", script]));
     request.put_int("timeout_ms", 15_000);
