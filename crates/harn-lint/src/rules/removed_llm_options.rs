@@ -199,18 +199,39 @@ pipeline default(task) {
         );
     }
 
-    #[test]
-    fn triggers_on_llm_call_with_llm_backoff_ms() {
-        let diags = lint(
-            r#"
+    #[rstest::rstest]
+    #[case::triggers_on_llm_call_with_llm_backoff_ms(
+        r#"
 pipeline default(task) {
     llm_call("hi", nil, {llm_backoff_ms: 250})
 }
 "#,
-        );
+        "`llm_backoff_ms` was removed in v0.10"
+    )]
+    #[case::triggers_on_migrated_llm_call(
+        r#"
+pipeline p(harness: Harness) {
+    harness.llm.call("hi", nil, {llm_retries: 3})
+}
+"#,
+        "`llm_retries` was removed in v0.10"
+    )]
+    #[case::triggers_on_migrated_registry_removal(
+        r#"
+pipeline p(harness: Harness) {
+    harness.llm.call("hi", nil, {json_schema: "x"})
+}
+"#,
+        "option `json_schema` was removed"
+    )]
+    fn removed_llm_options_report_their_replacement(
+        #[case] case_input: &str,
+        #[case] case_expected: &str,
+    ) {
+        let diags = lint(case_input);
         assert_eq!(count_rule(&diags), 1, "diags: {diags:?}");
         assert!(
-            message_for(&diags, 0).contains("`llm_backoff_ms` was removed in v0.10"),
+            message_for(&diags, 0).contains(case_expected),
             "msg: {}",
             message_for(&diags, 0)
         );
@@ -228,39 +249,53 @@ pipeline default(task) {
         assert_eq!(count_rule(&diags), 2, "diags: {diags:?}");
     }
 
-    #[test]
-    fn triggers_on_llm_call_safe() {
-        let diags = lint(
-            r#"
+    #[rstest::rstest]
+    #[case::triggers_on_llm_call_safe(
+        r#"
 pipeline default(task) {
     llm_call_safe("hi", nil, {llm_retries: 3})
 }
-"#,
-        );
-        assert_eq!(count_rule(&diags), 1, "diags: {diags:?}");
-    }
-
-    #[test]
-    fn triggers_on_llm_call_structured() {
-        let diags = lint(
-            r#"
+"#
+    )]
+    #[case::triggers_on_llm_call_structured(
+        r#"
 pipeline default(task) {
     llm_call_structured("hi", {schema: "x"}, {llm_retries: 3})
 }
-"#,
-        );
-        assert_eq!(count_rule(&diags), 1, "diags: {diags:?}");
-    }
-
-    #[test]
-    fn triggers_on_llm_call_structured_result() {
-        let diags = lint(
-            r#"
+"#
+    )]
+    #[case::triggers_on_llm_call_structured_result(
+        r#"
 pipeline default(task) {
     llm_call_structured_result("hi", {schema: "x"}, {llm_retries: 3})
 }
-"#,
-        );
+"#
+    )]
+    #[case::triggers_on_agent_loop(
+        r#"
+pipeline default(task) {
+    agent_loop("hi", nil, {llm_retries: 3})
+}
+"#
+    )]
+    // Completion options remain at index 3; index 2 is the system prompt.
+    #[case::migrated_completion_reads_its_own_options_index(
+        r#"
+pipeline p(harness: Harness) {
+    harness.llm.completion("hi", nil, nil, {llm_retries: 3})
+}
+"#
+    )]
+    // The ambient stream name resolves through its manifest alias.
+    #[case::triggers_on_migrated_stream(
+        r#"
+pipeline p(harness: Harness) {
+    harness.llm.stream("hi", nil, {llm_retries: 3})
+}
+"#
+    )]
+    fn removed_llm_options_are_rejected(#[case] case_input: &str) {
+        let diags = lint(case_input);
         assert_eq!(count_rule(&diags), 1, "diags: {diags:?}");
     }
 
@@ -279,65 +314,56 @@ pipeline default(task) {
         assert_eq!(count_rule(&diags), 4, "diags: {diags:?}");
     }
 
-    #[test]
-    fn does_not_trigger_on_structured_schema_argument() {
-        let diags = lint(
-            r#"
+    #[rstest::rstest]
+    #[case::does_not_trigger_on_structured_schema_argument(
+        r#"
 pipeline default(task) {
     llm_call_structured("hi", {schema: "x"})
     llm_call_structured_result("hi", {schema: "x"})
 }
-"#,
-        );
-        assert_eq!(count_rule(&diags), 0, "diags: {diags:?}");
-    }
-
-    #[test]
-    fn triggers_on_agent_loop() {
-        let diags = lint(
-            r#"
-pipeline default(task) {
-    agent_loop("hi", nil, {llm_retries: 3})
-}
-"#,
-        );
-        assert_eq!(count_rule(&diags), 1, "diags: {diags:?}");
-    }
-
-    #[test]
-    fn does_not_trigger_on_unrelated_callee() {
-        let diags = lint(
-            r#"
+"#
+    )]
+    #[case::does_not_trigger_on_unrelated_callee(
+        r#"
 pipeline default(task) {
     foo("hi", nil, {llm_retries: 3})
 }
-"#,
-        );
-        assert_eq!(count_rule(&diags), 0, "diags: {diags:?}");
-    }
-
-    #[test]
-    fn does_not_trigger_on_non_literal_opts() {
-        let diags = lint(
-            r#"
+"#
+    )]
+    #[case::does_not_trigger_on_non_literal_opts(
+        r#"
 pipeline default(task) {
     const opts = {llm_retries: 3}
     llm_call("hi", nil, opts)
 }
-"#,
-        );
-        assert_eq!(count_rule(&diags), 0, "diags: {diags:?}");
-    }
-
-    #[test]
-    fn does_not_trigger_on_safe_keys() {
-        let diags = lint(
-            r#"
+"#
+    )]
+    #[case::does_not_trigger_on_safe_keys(
+        r#"
 pipeline default(task) {
     llm_call("hi", nil, {temperature: 0.5})
 }
-"#,
-        );
+"#
+    )]
+    // A same-named method on another receiver must not become a false positive.
+    #[case::does_not_trigger_on_non_harness_receiver(
+        r#"
+pipeline p(proxy: LlmProxy) {
+    proxy.llm.call("hi", nil, {llm_retries: 3})
+}
+"#
+    )]
+    // A local named `harness` carries no host authority.
+    #[case::does_not_trigger_on_local_named_harness(
+        r#"
+pipeline p(task) {
+    const harness = make_proxy()
+    harness.llm.call("hi", nil, {llm_retries: 3})
+}
+"#
+    )]
+    fn current_llm_options_are_accepted(#[case] case_input: &str) {
+        let diags = lint(case_input);
         assert_eq!(count_rule(&diags), 0, "diags: {diags:?}");
     }
 
@@ -361,55 +387,6 @@ pipeline default(task) {
     // above makes, written the way `HARN-LNT-071` asks for it.
 
     #[test]
-    fn triggers_on_migrated_llm_call() {
-        let diags = lint(
-            r#"
-pipeline p(harness: Harness) {
-    harness.llm.call("hi", nil, {llm_retries: 3})
-}
-"#,
-        );
-        assert_eq!(count_rule(&diags), 1, "diags: {diags:?}");
-        assert!(
-            message_for(&diags, 0).contains("`llm_retries` was removed in v0.10"),
-            "msg: {}",
-            message_for(&diags, 0)
-        );
-    }
-
-    #[test]
-    fn triggers_on_migrated_registry_removal() {
-        let diags = lint(
-            r#"
-pipeline p(harness: Harness) {
-    harness.llm.call("hi", nil, {json_schema: "x"})
-}
-"#,
-        );
-        assert_eq!(count_rule(&diags), 1, "diags: {diags:?}");
-        assert!(
-            message_for(&diags, 0).contains("option `json_schema` was removed"),
-            "msg: {}",
-            message_for(&diags, 0)
-        );
-    }
-
-    /// `llm_completion` keeps its options at index 3, not 2. The migration
-    /// forwards arguments unchanged, so the migrated call must read the same
-    /// position — reading index 2 would silently scan the system prompt.
-    #[test]
-    fn migrated_completion_reads_its_own_options_index() {
-        let diags = lint(
-            r#"
-pipeline p(harness: Harness) {
-    harness.llm.completion("hi", nil, nil, {llm_retries: 3})
-}
-"#,
-        );
-        assert_eq!(count_rule(&diags), 1, "diags: {diags:?}");
-    }
-
-    #[test]
     fn triggers_on_migrated_call_safe_and_structured() {
         let diags = lint(
             r#"
@@ -422,52 +399,6 @@ pipeline p(harness: Harness) {
 "#,
         );
         assert_eq!(count_rule(&diags), 4, "diags: {diags:?}");
-    }
-
-    /// `llm_stream` reaches the manifest as an alias of `__cap_llm_stream`, so
-    /// this also pins that an aliased ambient name resolves to its harness
-    /// method rather than falling through to the ambient-only path.
-    #[test]
-    fn triggers_on_migrated_stream() {
-        let diags = lint(
-            r#"
-pipeline p(harness: Harness) {
-    harness.llm.stream("hi", nil, {llm_retries: 3})
-}
-"#,
-        );
-        assert_eq!(count_rule(&diags), 1, "diags: {diags:?}");
-    }
-
-    /// The falsifier for the whole approach: a same-named method on a receiver
-    /// that is not the host handle must stay silent. Without this, teaching
-    /// the rule the migrated spelling would turn every `x.llm.call(...)` into
-    /// a false positive.
-    #[test]
-    fn does_not_trigger_on_non_harness_receiver() {
-        let diags = lint(
-            r#"
-pipeline p(proxy: LlmProxy) {
-    proxy.llm.call("hi", nil, {llm_retries: 3})
-}
-"#,
-        );
-        assert_eq!(count_rule(&diags), 0, "diags: {diags:?}");
-    }
-
-    /// A local that merely spells its name `harness` carries no host
-    /// authority, so its `llm.call` is not the migrated surface.
-    #[test]
-    fn does_not_trigger_on_local_named_harness() {
-        let diags = lint(
-            r#"
-pipeline p(task) {
-    const harness = make_proxy()
-    harness.llm.call("hi", nil, {llm_retries: 3})
-}
-"#,
-        );
-        assert_eq!(count_rule(&diags), 0, "diags: {diags:?}");
     }
 
     /// The walk reaches call sites nested anywhere the AST allows, not just
