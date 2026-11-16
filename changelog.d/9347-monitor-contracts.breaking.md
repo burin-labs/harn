@@ -5,7 +5,7 @@ monitor factories expose named state records. Raw provider values remain
 Linear pollers now handle the initial absent push event instead of rejecting it.
 Refs #9347.
 
-### Migration
+Migration:
 
 Give custom pollers a state contract when static field checking is needed:
 
