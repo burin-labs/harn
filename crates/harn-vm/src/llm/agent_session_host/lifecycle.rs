@@ -504,16 +504,6 @@ pub(super) async fn host_agent_session_finalize(
             crate::agent_sessions::last_withdrawal_reason(&session_id)
                 .unwrap_or_else(|| "the completion adjudicator rejected it".to_string())
         });
-    let budget_ended = crate::agent_events::classify_agent_terminal_with_class(
-        &final_status,
-        &stop_reason,
-        terminal_error.is_some(),
-        None,
-    ) == crate::agent_events::AgentTerminalKind::PolicyBudget;
-    if withdrawal_reason.is_some() && !budget_ended {
-        stop_reason = "turn_withdrawn".to_string();
-    }
-    let terminal_class = agent_terminal_class(&final_status, &stop_reason, terminal_error.as_ref());
     let suspension = crate::agent_events::AgentTerminalSuspension::from_status_value(
         opt_json(&status_dict, "suspension").as_ref(),
     );
@@ -521,15 +511,15 @@ pub(super) async fn host_agent_session_finalize(
     // supplied reason must not survive in the marker, hooks, or legacy result
     // aliases after the typed outcome has declared the cause unknown.
     let terminal_outcome = Box::new(
-        crate::agent_events::terminal_outcome_for_finalize(
+        crate::agent_events::terminal_outcome_for_session_finalize(
             if final_status.is_empty() {
                 "done"
             } else {
                 &final_status
             },
             &stop_reason,
-            terminal_class,
-            terminal_error.is_some(),
+            terminal_error.as_ref(),
+            withdrawal_reason.is_some(),
         )
         .with_error(terminal_error.as_ref())
         .with_suspension(suspension.as_ref()),

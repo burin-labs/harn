@@ -79,6 +79,7 @@ pub use sinks::{
     AgentEventSink, AgentEventSinkError, AgentEventSinkFlush, EventLogSink, JsonlEventSink,
     MultiSink, PersistedAgentEvent,
 };
+pub(crate) use terminal::terminal_outcome_for_session_finalize;
 pub use terminal::{
     classify_agent_terminal, classify_agent_terminal_with_class, terminal_outcome_for_finalize,
     AgentTerminalKind, AgentTerminalOutcome,
