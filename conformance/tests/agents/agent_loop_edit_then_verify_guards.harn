@@ -5,7 +5,7 @@ import { agent_record_compaction, agent_session_await_inbox } from "std/agent/st
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { with_llm_script } from "std/testing"
 
-fn assert_retired_process(events: list) {
+fn assert_retired_process(events: list) -> nil {
   const resolutions = events.filter(
     { event ->
       event?.type == "tool_batch_proposal_resolution" && event?.resolution?.tool_name == "check"
@@ -32,7 +32,7 @@ fn assert_retired_process(events: list) {
     "the retired process must preserve its original call identity without claiming execution"
 }
 
-fn assert_batch_dispositions(events: list, variant: string, released: bool) {
+fn assert_batch_dispositions(events: list, variant: string, released: bool) -> nil {
   const deferred = events.filter(
     { event ->
       event?.type == "tool_batch_disposition"
