@@ -12,7 +12,10 @@ permissions as opaque until decoded. Replace direct field access such as
 
 ```harn,ignore
 type RefreshArguments = {window: string}
-const arguments = schema_expect(call.params.arguments, schema_of(RefreshArguments))
+const arguments = schema_expect(
+  call.params.arguments,
+  schema_of(RefreshArguments),
+)
 harness.stdio.println(arguments.window)
 ```
 

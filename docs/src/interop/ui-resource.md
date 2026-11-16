@@ -184,7 +184,10 @@ values before accessing application fields:
 ```harn,ignore
 type RefreshArguments = {window: string}
 const call = ui_tool_call_envelope("dashboard.refresh", {window: "7d"})
-const arguments = schema_expect(call.params.arguments, schema_of(RefreshArguments))
+const arguments = schema_expect(
+  call.params.arguments,
+  schema_of(RefreshArguments),
+)
 harness.stdio.println(arguments.window)
 ```
 
