@@ -8,8 +8,14 @@
     "name": "CommandWaitOptions.completion_tool",
     "reachability": "unknown",
     "readers": [
-      {"file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn", "reader": "command_wait_normalize"},
-      {"file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn", "reader": "command_ledger_hold"}
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "reader": "command_wait_normalize"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "reader": "command_ledger_hold"
+      }
     ],
     "reason": "Hosts select an existing registered completion handler to preserve their terminal-result contract; this cannot introduce an unregistered host fallback.",
     "verdict": "KEEP-with-expiry"

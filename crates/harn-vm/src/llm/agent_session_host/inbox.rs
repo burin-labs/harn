@@ -113,8 +113,7 @@ pub(super) fn host_agent_session_drain_command_updates_builtin(
             )))
         }
     };
-    let drained =
-        agent_inbox::drain_where(&session_id, |entry| agent_inbox::is_command_update(entry));
+    let drained = agent_inbox::drain_where(&session_id, agent_inbox::is_command_update);
     let drained = drained
         .into_iter()
         .map(|entry| {
