@@ -6,6 +6,23 @@ set -euo pipefail
   echo '::error::Consumer authorization has no valid release source.' >&2
   exit 1
 }
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Recovery outputs do not authenticate a composition's current private graph.
+# Read the immutable release range even on these routes, rather than trusting
+# a caller-provided declaration or the current checkout's commit messages.
+if ! pairing_text=$(bash "$root/scripts/lib/consumer_pairing_source.sh" \
+    --release-source "${SOURCE_CHECKOUT:-}" "$SOURCE_SHA") \
+  || ! declaration=$(printf '%s' "$pairing_text" | node "$root/scripts/ci/consumer-pairing.mjs" --declaration) \
+  || ! kind=$(jq -er '.kind | select(. == "ordinary" or . == "composition")' <<< "$declaration"); then
+  echo '::error::CONSUMER_OBSERVER reason=authorization_source_unmeasured' >&2
+  exit 1
+fi
+if [[ "$kind" == composition ]] && [[ "${REQUIRES_REHEARSAL:-}" == true \
+  || "${REQUIRES_ATTACHED_CONSUMER:-false}" == true \
+  || "${REQUIRES_CONSUMER_REPAIR:-false}" == true || "${REPAIR_REUSED:-false}" == true ]]; then
+  echo '::error::CONSUMER_OBSERVER reason=composition_recovery_unsupported' >&2
+  exit 1
+fi
 case "${REQUIRES_ATTACHED_CONSUMER:-false}" in
   true)
     [[ "${REQUIRES_REHEARSAL:-}" == false && "${REHEARSAL_RESULT:-}" == skipped &&

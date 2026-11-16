@@ -206,6 +206,10 @@ Follow the runs for the commit you named in
    the composition, every component head, and its manifest before accepting v2.
    The release-request scheduler checks the producer, artifacts and declared
    identities; publication owns the private eligibility checks.
+   Compositions require the original producer's v2 binding. Fresh recovery
+   rehearsals, completed-child recovery and prepared or reused consumer repairs
+   refuse a source that declares composition. Those recovery routes do not
+   authenticate the composition graph at final authorization.
    Promotion checks the version as [above](#publish-a-release), waits for
    `green`, and verifies the manifest, digests, and attestations. Planning and
    authorization each re-read the candidate's rehearsal

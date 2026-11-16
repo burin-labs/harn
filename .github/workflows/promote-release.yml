@@ -432,6 +432,7 @@ jobs:
         id: authorize
         env:
           SOURCE_SHA: ${{ needs.plan.outputs.source_sha }}
+          SOURCE_CHECKOUT: ${{ github.workspace }}/release-source
           REQUIRES_REHEARSAL: ${{ needs.plan.outputs.requires_rehearsal }}
           REHEARSAL_RESULT: ${{ needs.consumer-rehearsal.result }}
           REHEARSAL_VERDICT: ${{ needs.consumer-rehearsal.outputs.verdict }}
