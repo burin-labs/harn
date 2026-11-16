@@ -3,7 +3,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-git init -q "$tmp/source"
+git init -q -b main "$tmp/source"
 git -C "$tmp/source" config user.name 'Release fixture'
 git -C "$tmp/source" config user.email 'release-fixture@example.invalid'
 printf '[workspace.package]\nversion = "1.0.1"\n' > "$tmp/source/Cargo.toml"
