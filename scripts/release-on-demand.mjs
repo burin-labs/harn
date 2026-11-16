@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import {execFile} from 'node:child_process';
 import {realpathSync} from 'node:fs';
 import {pathToFileURL} from 'node:url';
-import {ghRead,rehearsalBinding} from './lib/release-candidate-state.mjs';
+import {ghRead,rehearsalBinding,releaseSourceDeclaration} from './lib/release-candidate-state.mjs';
 import {releaseRequest,requestsForMainPush,runRequestedRelease,reportRequestedRelease,releaseObservation} from './lib/release-on-demand.mjs';
 
 export function releaseApi(repository) {
@@ -20,7 +20,13 @@ export function releaseApi(repository) {
   return {token,fetch:ghRead,read,write,
     dispatch:(workflow,inputs)=>write(`repos/${repository}/actions/workflows/${workflow}/dispatches`,
       {ref:'main',inputs,return_run_details:true}),
-    qualify:(id,source)=>rehearsalBinding(token,repository,id,source,ghRead),
+    async qualify(id,source){
+      if(!/^[0-9a-f]{40}$/.test(source))throw new Error('source_identity_invalid');
+      await new Promise((resolve,reject)=>execFile('git',['fetch','--no-tags','origin',source],
+        {timeout:30000,maxBuffer:1024*1024},error=>error?reject(new Error('source_checkout_unmeasured')):resolve()));
+      const declaration=await releaseSourceDeclaration(source);
+      return rehearsalBinding(token,repository,id,source,ghRead,{declaration});
+    },
     async ensureBlockedLabel(){
       const labels=await this.list(`repos/${repository}/labels`);
       if (!labels.some(label=>label.name==='release-blocked')) await write(`repos/${repository}/labels`,

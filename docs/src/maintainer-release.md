@@ -190,13 +190,22 @@ Follow the runs for the commit you named in
    commit's pairing selects that consumer pull request without a manual
    repair. Ordinary scheduled canaries and pull requests read only their own
    commit or explicit pull request description, even when the workspace version
-   is stable. Two distinct pairings refuse and name both pulls. A paired pull
+   is stable. Multiple pairings require an explicit `Consumer-composition:`
+   trailer and a qualified composition pull; see [Consumer compositions](dev/consumer-composition.md).
+   Without that declaration, two distinct pairings refuse and name both pulls. A paired pull
    already merged into the consumer's default branch rehearses that branch and
    logs `decision=rehearse_default`; a pull closed without merging refuses.
    A passing release rehearsal must retain `consumer-rehearsal-binding-<attempt>`;
    an unavailable manifest or consumer revision fails its recorder. The binding
    records the source SHA, producer run, candidate manifest digest, consumer
    run, rehearsed pull, and a digest of the consumer revision it tested.
+   A composition uses binding v2, which also records its closed composition
+   identity and an opaque digest of the exact manifest bytes. Binding v1 can't
+   authorize a source that declares a composition. Planning and final
+   authorization each read the exact release range and freshly authenticate
+   the composition, every component head, and its manifest before accepting v2.
+   The release-request scheduler checks the producer, artifacts and declared
+   identities; publication owns the private eligibility checks.
    Promotion checks the version as [above](#publish-a-release), waits for
    `green`, and verifies the manifest, digests, and attestations. Planning and
    authorization each re-read the candidate's rehearsal

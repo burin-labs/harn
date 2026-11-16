@@ -27,3 +27,26 @@ consumer_release_pairing_source() {
   fi
   CONSUMER_PAIRING_TEXT=$text CONSUMER_PAIRING_BASE=$base CONSUMER_PAIRING_COUNT=$count
 }
+
+consumer_release_source_text() {
+  local checkout=${1:-} revision=${2:-} cargo version
+  [[ -n "$checkout" && "$revision" =~ ^[0-9a-f]{40}$ ]] || {
+    echo 'CONSUMER_OBSERVER reason=pairing_range_unmeasured' >&2
+    return 1
+  }
+  cargo=$(git -C "$checkout" show "$revision:Cargo.toml" 2>/dev/null) || {
+    echo 'CONSUMER_OBSERVER reason=pairing_range_unmeasured' >&2
+    return 1
+  }
+  version=$(release_workspace_version <<< "$cargo")
+  consumer_release_pairing_source "$checkout" "$revision" "$version" || return 1
+  printf '%s' "$CONSUMER_PAIRING_TEXT"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  [[ $# == 3 && "$1" == --release-source ]] || {
+    echo 'CONSUMER_OBSERVER reason=pairing_source_invocation_invalid' >&2
+    exit 2
+  }
+  consumer_release_source_text "$2" "$3"
+fi

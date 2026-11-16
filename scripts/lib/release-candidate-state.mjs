@@ -1,17 +1,30 @@
 import {execFile} from 'node:child_process';
 import {realpathSync} from 'node:fs';
-import {pathToFileURL} from 'node:url';
+import {createHash} from 'node:crypto';
+import {fileURLToPath,pathToFileURL} from 'node:url';
 import {
   admitObserver, archiveProducerBinding, githubArchiveProducer, githubArtifactCensus,
   githubArtifactJson, githubChildCensus, githubRecord, githubRunJobs, githubWorkflowRuns,
   observeConsumerTiming, observerConclusionIsKnown, observerContext, observerDeclarationName,
   observerParentRepository, observerParentWorkflows, observerRefusal, observerRunIsLive,
-  observerRunName, qualifyObserverPublisher,
+  observerRunName, qualifyObserverPublisher, githubConsumerSelection,
 } from './consumer-observer.mjs';
+import {consumerCompositionIdentity,consumerSourceDeclaration,consumerSourceDeclarationValue} from './consumer-source.mjs';
 
 const shaPattern=/^[0-9a-f]{40}$/;
 const cliAuthority='gh-cli-authenticated-read';
 function refuse(reason){throw new Error(`CONSUMER_OBSERVER reason=${reason}`);}
+
+/** Local Git is the authenticated source checkout, never an ambient body override. */
+export async function releaseSourceDeclaration(source,checkout=fileURLToPath(new URL('../../',import.meta.url))){
+  if(!shaPattern.test(source))refuse('source_identity_invalid');
+  const text=await new Promise((resolve,reject)=>{
+    execFile('bash',[fileURLToPath(new URL('./consumer_pairing_source.sh',import.meta.url)),
+      '--release-source',checkout,source],{encoding:'utf8',maxBuffer:16*1024*1024,timeout:30000},
+    (error,stdout)=>error?reject(new Error('CONSUMER_OBSERVER reason=pairing_range_unmeasured')):resolve(stdout));
+  });
+  return consumerSourceDeclaration(text);
+}
 function livePromotion(parent,repository,runId,expected){
   if(String(parent.id)!==runId||parent.path!==observerParentWorkflows.promotion||parent.head_branch!=='main'
     ||!shaPattern.test(parent.head_sha)||parent.repository?.full_name!==repository
@@ -154,8 +167,7 @@ export async function reusableSourceCandidate(token,repository,source,targets,fe
   return '';
 }
 
-/** A rehearsal is bound to the exact settled producer, manifest and attempt. */
-export async function rehearsalBinding(token,repository,runId,source,fetchRecord=fetch){
+async function settledRehearsalBinding(token,repository,runId,source,fetchRecord,options,publication){
   if(!shaPattern.test(source))refuse('source_identity_invalid');
   const snapshot=await settledProducer(token,repository,runId,source,fetchRecord);
   const {run,artifacts}=snapshot;
@@ -171,15 +183,56 @@ export async function rehearsalBinding(token,repository,runId,source,fetchRecord
   const {artifact:manifestArtifact}=await candidateManifest(token,repository,runId,source,snapshot,fetchRecord);
   const binding=await githubArtifactJson(token,repository,bindingArtifact,{runId,headSha:source,
     name:bindingName,filename:'consumer-rehearsal-binding.json'},fetchRecord);
-  if(binding?.schema!=='harn.release.consumer_rehearsal_binding.v1'||binding.verdict!=='pass'
+  const compositionBinding=binding?.schema==='harn.release.consumer_rehearsal_binding.v2';
+  if(!(compositionBinding||binding?.schema==='harn.release.consumer_rehearsal_binding.v1')||binding.verdict!=='pass'
     ||binding.source_sha!==source||binding.producer_run!==runId||binding.producer_attempt!==run.run_attempt
     ||binding.manifest_digest!==manifestArtifact.digest){
     refuse('rehearsal_binding_identity_mismatch');
   }
+  const declaration=Object.hasOwn(options,'declaration')?consumerSourceDeclarationValue(options.declaration):null;
+  if(!compositionBinding&&declaration?.kind==='composition')refuse('rehearsal_composition_binding_required');
+  let composition;
+  if(compositionBinding){
+    const keys=['schema','verdict','source_sha','producer_run','producer_attempt','manifest_digest',
+      'consumer_run','consumer_head_sha256','consumer_pull','declared_pull','composition'];
+    if(Object.keys(binding).sort().join(',')!==keys.sort().join(',')
+      ||typeof binding.consumer_run!=='string'||!/^[1-9][0-9]*$/.test(binding.consumer_run)
+      ||typeof binding.consumer_head_sha256!=='string'||!/^[0-9a-f]{64}$/.test(binding.consumer_head_sha256)){
+      refuse('rehearsal_binding_identity_mismatch');
+    }
+    if(declaration?.kind!=='composition')refuse('rehearsal_source_declaration_unmeasured');
+    composition=consumerCompositionIdentity(binding.composition);
+    if(composition.pull!==declaration.pull||binding.consumer_pull!==composition.pull
+      ||binding.declared_pull!==composition.pull
+      ||JSON.stringify(composition.requiredPulls)!==JSON.stringify(declaration.requiredPulls)){
+      refuse('rehearsal_composition_identity_mismatch');
+    }
+    if(publication){
+      if(!publication.token||!publication.repository)refuse('consumer_read_authority_missing');
+      const selected=await githubConsumerSelection(publication.token,publication.repository,declaration,fetchRecord);
+      if(!shaPattern.test(selected.headSha??'')
+        ||createHash('sha256').update(selected.headSha).digest('hex')!==binding.consumer_head_sha256
+        ||JSON.stringify(consumerCompositionIdentity(selected.composition))!==JSON.stringify(composition)){
+        refuse('rehearsal_composition_identity_mismatch');
+      }
+    }
+  }
   await snapshot.recheck();
-  return {...binding,evidence:{producer_attempt:run.run_attempt,
+  return {...binding,...(composition?{composition}:{}),evidence:{producer_attempt:run.run_attempt,
     manifest:{id:manifestArtifact.id,digest:manifestArtifact.digest},
     binding:{id:bindingArtifact.id,digest:bindingArtifact.digest}}};
+}
+
+/** Scheduling evidence binds artifacts and source intent, not private eligibility. */
+export async function rehearsalBinding(token,repository,runId,source,fetchRecord=fetch,options={}){
+  return settledRehearsalBinding(token,repository,runId,source,fetchRecord,options,null);
+}
+
+/** Publication additionally reauthenticates every private composition component. */
+export async function publicationRehearsalBinding(token,repository,runId,source,consumer,fetchRecord=fetch,options={}){
+  if(!Object.hasOwn(options,'declaration'))refuse('rehearsal_source_declaration_unmeasured');
+  return settledRehearsalBinding(token,repository,runId,source,fetchRecord,options,
+    {token:consumer?.token,repository:consumer?.repository});
 }
 export async function successfulCandidate(token,repository,source,fetchRecord=fetch){
   for(const run of await successfulCandidateRuns(token,repository,source,fetchRecord)){
@@ -314,8 +367,16 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(realpathSync(process.argv[1]
     }
     else if(operation==='producer-identity')console.log(JSON.stringify(await qualifiedProducerIdentity(token,repository,
       sourceOrSelf,process.argv[5],ghRead)));
-    else if(operation==='rehearsal-binding')console.log(JSON.stringify(await rehearsalBinding(token,repository,
-      sourceOrSelf,process.argv[5],ghRead)));
+    else if(operation==='rehearsal-binding'){
+      const source=process.argv[5];
+      const args=process.argv.slice(6);
+      if(args.length!==0&&(args.length!==2||args[0]!=='--source-checkout'||!args[1])){
+        refuse('operation_invalid');
+      }
+      const declaration=await releaseSourceDeclaration(source,args[1]);
+      console.log(JSON.stringify(await publicationRehearsalBinding(token,repository,sourceOrSelf,source,
+        {token:process.env.CONSUMER_READ_TOKEN,repository:process.env.CANARY_REPOSITORY},ghRead,{declaration})));
+    }
     else if(operation==='promotions')console.log(JSON.stringify(await activePromotions(token,
       process.env.RELEASE_RECOVERY_READ_TOKEN,repository,sourceOrSelf,{repository:process.env.CANARY_REPOSITORY,
         workflow:`.github/workflows/${process.env.CANARY_WORKFLOW}`},ghRead)));
