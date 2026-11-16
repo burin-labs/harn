@@ -45,7 +45,7 @@ fn render_schema(schema: &Value, language: Language) -> Result<String, String> {
     let definitions = schema["$defs"]
         .as_object()
         .ok_or("provider catalog schema is missing $defs")?;
-    render_record(&mut output, &schema, "", language)?;
+    render_record(&mut output, schema, "", language)?;
     for (key, definition) in definitions {
         let path = format!("/$defs/{key}");
         if definition.get("properties").is_some() && !projections::inline_record(&path, language) {
