@@ -65,7 +65,7 @@ test('the actual CI recipe re-reads a pairing edited after the original event',t
 test('removing a pairing and cosmetic edits use the measured current declaration',t=>{
   const removed=execute(t,{capturedBody:'Pairs-with: consumer#7',body:''});
   assert.equal(removed.run.status,0,removed.run.stderr);
-  assert.equal(removed.pinned,`sha=${mainSha}\npaired_pull=\n`);
+  assert.equal(removed.pinned,`sha=${mainSha}\npaired_pull=default\n`);
   const cosmetic=execute(t,{capturedBody:'Pairs-with: consumer#7',body:'Updated prose.\n\nPairs-with: consumer#7\n'});
   assert.equal(cosmetic.run.status,0,cosmetic.run.stderr);
   assert.equal(cosmetic.pinned,`sha=${repairSha}\npaired_pull=7\n`);
@@ -94,13 +94,13 @@ for(const [name,change] of [
 test('an explicitly null current body is a measured unpaired declaration',t=>{
   const result=execute(t,{capturedBody:'Pairs-with: consumer#7',parentChange:{body:null}});
   assert.equal(result.run.status,0,result.run.stderr);
-  assert.equal(result.pinned,`sha=${mainSha}\npaired_pull=\n`);
+  assert.equal(result.pinned,`sha=${mainSha}\npaired_pull=default\n`);
 });
 
 test('the same CI recipe pins a measured default head when unpaired',t=>{
   const {run,pinned}=execute(t);
   assert.equal(run.status,0,run.stderr);
-  assert.equal(pinned,`sha=${mainSha}\npaired_pull=\n`);
+  assert.equal(pinned,`sha=${mainSha}\npaired_pull=default\n`);
 });
 
 for(const [name,change] of [

@@ -71,7 +71,7 @@ on:
         required: false
         type: string
       consumer_pull_request:
-        description: Explicit consumer repair for maintainer release recovery
+        description: Explicit consumer repair, or the pin's numeric/default selection for a pull request CLI
         required: false
         default: ''
         type: string

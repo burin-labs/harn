@@ -11,8 +11,9 @@ the parent repository's read token. The record must name the same open pull,
 repository and source head captured by the CI event. A missing, unreadable or
 moved record refuses selection before the consumer App reads a target.
 
-The pin contains the consumer revision and selected consumer pull number.
-Both candidate attempts use that same selection. A pinned pull request
+The pin contains the consumer revision and selected consumer pull number,
+or `default` for a measured unpaired declaration. Both candidate attempts use
+that same selection; a missing selection refuses dispatch. A pinned pull request
 rehearsal ignores the older event body's declaration; release and scheduled
 canaries retain their existing source-message selection. Rerunning the pin
 job can refresh a declaration while retaining the run's authenticated CLI

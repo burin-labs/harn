@@ -351,25 +351,32 @@ fi
 grep -q 'reason=release_producer_identity_invalid' "$scratch/out"
 [[ ! -e "$scratch/dispatched" ]]
 pin=cccccccccccccccccccccccccccccccccccccccc
-CANARY_PULL_REQUEST_CLI_RUN=123 CANARY_PULL_REQUEST_BASE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb CANARY_CONSUMER_REVISION=$pin canary
+for selection in '' unknown 0 01; do
+  rm -f "$scratch/dispatched"
+  CANARY_PULL_REQUEST_CLI_RUN=123 CANARY_PULL_REQUEST_BASE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+    CANARY_CONSUMER_REVISION=$pin CONSUMER_PULL_REQUEST=$selection \
+    refuses consumer_pairing_selection_unmeasured
+  [[ ! -e "$scratch/dispatched" ]]
+done
+CONSUMER_PULL_REQUEST=default CANARY_PULL_REQUEST_CLI_RUN=123 CANARY_PULL_REQUEST_BASE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb CANARY_CONSUMER_REVISION=$pin canary
 grep -q -- "-f harn_cli_run=123 -f harn_base=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb -f consumer_revision=$pin" "$scratch/dispatched"
 grep -q -- 'release_producer_run_' "$scratch/dispatched" && exit 1
 grep -q -- 'harn_cli_artifact' "$scratch/dispatched" && exit 1
 # A pull request check never rehearses whatever the consumer's branch holds.
 rm -f "$scratch/dispatched"
 CANARY_PULL_REQUEST_CLI_RUN=123 CANARY_PULL_REQUEST_BASE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
-  refuses consumer_revision_invalid
+  CONSUMER_PULL_REQUEST=default refuses consumer_revision_invalid
 [[ ! -e "$scratch/dispatched" ]]
 # The base CLI is rehearsed only at the base itself, on the same pinned consumer.
 pr_base=0123456789abcdef0123456789abcdef01234567
 CANARY_PULL_REQUEST_CLI_RUN=123 CANARY_PULL_REQUEST_BASE=$pr_base CANARY_CONSUMER_REVISION=$pin \
-  CANARY_PULL_REQUEST_CLI_ARTIFACT=harn-base-cli.tar.zst canary
+  CANARY_PULL_REQUEST_CLI_ARTIFACT=harn-base-cli.tar.zst CONSUMER_PULL_REQUEST=default canary
 grep -q -- "-f harn_base=$pr_base -f consumer_revision=$pin -f harn_cli_artifact=harn-base-cli.tar.zst" "$scratch/dispatched"
 for mismatch in "harn-base-cli.tar.zst bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" "harn-cli.tar.zst $pr_base"; do
   read -r artifact base <<< "$mismatch"
   rm -f "$scratch/dispatched"
   CANARY_PULL_REQUEST_CLI_RUN=123 CANARY_PULL_REQUEST_BASE=$base CANARY_CONSUMER_REVISION=$pin \
-    CANARY_PULL_REQUEST_CLI_ARTIFACT=$artifact refuses pull_request_identity_invalid
+    CANARY_PULL_REQUEST_CLI_ARTIFACT=$artifact CONSUMER_PULL_REQUEST=default refuses pull_request_identity_invalid
   [[ ! -e "$scratch/dispatched" ]]
 done
 
@@ -447,7 +454,7 @@ CANARY_PULL_REQUEST_CLI_RUN=123 \
 grep -q -- '--ref fix-flag ' "$scratch/dispatched"
 CANARY_PULL_REQUEST_CLI_RUN=123 \
   CANARY_PULL_REQUEST_BASE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
-  CANARY_CONSUMER_REVISION=$pin canary 'Pairs-with: consumer#7'
+  CANARY_CONSUMER_REVISION=$pin CONSUMER_PULL_REQUEST=default canary 'Pairs-with: consumer#7'
 grep -q -- '--ref main ' "$scratch/dispatched"
 
 # Recovery selects the same registered open pull without changing the source
@@ -560,7 +567,7 @@ grep -q 'pairing range=' "$scratch/out" && exit 1
 CANARY_PULL_REQUEST_CLI_RUN=123 \
   CANARY_PULL_REQUEST_BASE=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
   CANARY_CONSUMER_REVISION=cccccccccccccccccccccccccccccccccccccccc \
-  range_canary 1.2.4 '' ordinary || {
+  CONSUMER_PULL_REQUEST=default range_canary 1.2.4 '' ordinary || {
   echo 'empty-body pull request inherited historical release pairings' >&2
   cat "$scratch/out" >&2
   exit 1

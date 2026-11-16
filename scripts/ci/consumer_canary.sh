@@ -384,6 +384,12 @@ canary_pairing_text() {
   if [[ -n "${CANARY_PULL_REQUEST_CLI_RUN:-}" ]]; then
     # The pin job supplies its current authenticated selection alongside the
     # exact consumer revision. The triggering event body may predate an edit.
+    if [[ "${CONSUMER_PULL_REQUEST:-}" == default ]]; then
+      CONSUMER_PULL_REQUEST=''
+    else
+      [[ "${CONSUMER_PULL_REQUEST:-}" =~ ^[1-9][0-9]*$ ]] \
+        || canary_fail consumer_pairing_selection_unmeasured
+    fi
     CANARY_PAIRING_TEXT=''
     return 0
   fi
