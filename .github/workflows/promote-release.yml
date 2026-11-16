@@ -234,7 +234,7 @@ jobs:
                 exit 1
               fi
               release_require_consumer_verdict "$GITHUB_REPOSITORY" "$candidate_run" "$HEAD_SHA"
-              release_require_rehearsal_binding "$GITHUB_REPOSITORY" "$candidate_run" "$HEAD_SHA" "$GITHUB_WORKSPACE/release-source"
+              release_require_rehearsal_binding "$GITHUB_REPOSITORY" "$candidate_run" "$HEAD_SHA" "$source_directory"
             fi
           fi
           # Capture the exact settled producer before launching a fresh
