@@ -4,13 +4,12 @@
 /// The classifier is intentionally precision-over-recall and is NOT a complete
 /// sandbox; it catches the obvious irreversible-destruction shapes (fork bomb,
 /// `git reset --hard` / `git clean -fd` / force-push, `rm -rf` escaping the
-/// workspace root or wiping it in place, `dd of=`, `mkfs`, `chmod -R 000`,
-/// `truncate -s 0` of a tracked project file, and `>`/`>>` redirection onto a
-/// tracked project file) through adversarial quoting, chained-command splitting, `bash -c`
+/// workspace root or wiping it in place, `dd of=`, `mkfs`, `chmod -R 000`)
+/// through adversarial quoting, chained-command splitting, `bash -c`
 /// recursion, and the `sudo`/`env`/`nice`/`nohup`/`time`/`timeout`/`command`/
 /// `builtin`/`exec` wrapper family. Executable identity and nesting come from
 /// the shared shell AST; the remaining text checks only inspect syntax that is
-/// not an executable command (fork-bomb grammar and tracked-file redirects).
+/// not an executable command (fork-bomb grammar and unresolved write targets).
 use std::path::Path;
 
 mod command_shape;
@@ -18,7 +17,7 @@ mod find_delete;
 mod project_delete;
 mod semantic_shell;
 mod shell;
-mod tracked_writes;
+mod unresolved_writes;
 
 pub(crate) use command_shape::shell_command_shape;
 use project_delete::argv_deletes_project;
@@ -163,11 +162,9 @@ fn reason_from_analysis(
     for redirect in &analysis.redirects {
         if redirect.writes_file() && !redirect.dynamic {
             if let Some(destination) = redirect.destination.as_deref() {
-                if let Some(reason) = tracked_writes::redirect_target_over_tracked_reason(
-                    destination,
-                    active_cwd,
-                    roots,
-                ) {
+                if let Some(reason) =
+                    unresolved_writes::redirect_target_reason(destination, active_cwd)
+                {
                     return Some(reason);
                 }
             }
@@ -224,7 +221,7 @@ fn invocation_catastrophe(
             "`{command}` (filesystem format) is blocked: it would destroy a device"
         )),
         "chmod" => chmod_catastrophe(args),
-        "truncate" => tracked_writes::truncate_catastrophe(args, active_cwd, roots),
+        "truncate" => unresolved_writes::truncate_catastrophe(args, active_cwd),
         _ => None,
     }
 }

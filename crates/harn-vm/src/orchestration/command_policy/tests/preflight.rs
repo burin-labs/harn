@@ -69,14 +69,8 @@ fn universal_catastrophic_reason_blocks_full_floor() {
     assert!(cmake_setup.is_none(), "unexpected block: {cmake_setup:?}");
 }
 
-/// Both directions of the non-Git floor decision, in one test.
-///
-/// The floor exists to make erasing reviewed project state impossible. Without
-/// Git there is nothing to point at, and the file has usually just been written
-/// by this run, so existence alone must not produce a never-approvable denial.
-/// Positive Git evidence still must.
 #[test]
-fn existing_file_without_git_is_not_the_never_approvable_floor() {
+fn existing_files_are_not_the_never_approvable_floor() {
     let s = |parts: &[&str]| parts.iter().map(|p| p.to_string()).collect::<Vec<_>>();
 
     // No Git anywhere above this directory.
@@ -109,8 +103,7 @@ fn existing_file_without_git_is_not_the_never_approvable_floor() {
         "existence alone must not be never-approvable without Git: {after:?}"
     );
 
-    // NEGATIVE CONTROL. Without this the change could pass by allowing
-    // everything, which is the failure mode worth guarding.
+    // Tracking does not change command-write authority.
     let repo = tempfile::TempDir::new().expect("temp dir");
     let repo_root = std::fs::canonicalize(repo.path()).expect("canonical temp dir");
     let git = |args: &[&str]| {
@@ -136,8 +129,8 @@ fn existing_file_without_git_is_not_the_never_approvable_floor() {
             &repo_roots,
             &repo_root,
         )
-        .is_some(),
-        "a Git-tracked file must still hold the never-approvable floor"
+        .is_none(),
+        "a Git-tracked file follows ordinary write policy"
     );
     // An untracked file beside it is not reviewed state either.
     std::fs::write(repo_root.join("scratch.txt"), b"x").expect("write untracked file");
@@ -149,8 +142,15 @@ fn existing_file_without_git_is_not_the_never_approvable_floor() {
             &repo_root,
         )
         .is_none(),
-        "an untracked file in a Git workspace is not reviewed project state"
+        "an untracked file follows the same write policy"
     );
+    assert!(universal_catastrophic_reason(
+        "git",
+        &s(&["reset", "--hard"]),
+        &repo_roots,
+        &repo_root
+    )
+    .is_some());
 }
 
 #[tokio::test]
