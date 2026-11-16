@@ -13,6 +13,52 @@ import {admitChild,archiveProducerBinding,qualifyArchiveProducer,observerRunName
   observerDispatchActor} from '../lib/consumer-observer.mjs';
 
 const source='a'.repeat(40),policy='b'.repeat(40),head='c'.repeat(40);
+
+test('release pairing reads the complete exact source range without ambient overrides', () => {
+  const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-pairing-source-'));
+  try {
+    const git=(...args)=>execFileSync('git',['-C',scratch,...args],{encoding:'utf8',
+      env:{...process.env,GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_SYSTEM:'/dev/null'}}).trim();
+    git('init','-q');
+    git('config','user.name','Fixture');
+    git('config','user.email','fixture@example.invalid');
+    const commit=message=>{git('-c','commit.gpgsign=false','commit','-q','--allow-empty','-m',message);return git('rev-parse','HEAD');};
+    commit('Prior release\n\nPairs-with: consumer#1');
+    git('tag','v0.10.0');
+    commit('First adaptation\n\nPairs-with: consumer#7');
+    git('tag','v0.10.1-rc.1');
+    const selected=commit('Second adaptation\n\nPairs-with: consumer#8\nConsumer-composition: consumer#9');
+    commit('Later unrelated work\n\nPairs-with: consumer#10');
+    const script=path.join(scratch,'read.sh');
+    fs.writeFileSync(script,'set -euo pipefail\nsource "$1"\nconsumer_release_pairing_source "$2" "$3" "$4"\nprintf "%s\\0%s\\0%s" "$CONSUMER_PAIRING_BASE" "$CONSUMER_PAIRING_COUNT" "$CONSUMER_PAIRING_TEXT"\n');
+    const helper=fileURLToPath(new URL('../lib/consumer_pairing_source.sh',import.meta.url));
+    const read=(revision=selected,version='0.10.1',directory=scratch)=>spawnSync('bash',[script,helper,directory,revision,version],
+      {encoding:'utf8',env:{...process.env,PAIRING_TEXT:'Pairs-with: consumer#99',CANARY_PAIRING_SOURCE:'/missing'}});
+    const result=read();
+    assert.equal(result.status,0,result.stderr);
+    const [base,count,text]=result.stdout.split('\0');
+    assert.equal(base,'v0.10.0');
+    assert.equal(count,'2');
+    assert.match(text,/Pairs-with: consumer#7/);
+    assert.match(text,/Pairs-with: consumer#8/);
+    assert.match(text,/Consumer-composition: consumer#9/);
+    assert.doesNotMatch(text,/consumer#(?:1|10|99)(?:\D|$)/);
+    assert.equal(result.stderr,'');
+    for(const [revision,version,directory] of [['bad','0.10.1',scratch],['f'.repeat(40),'0.10.1',scratch],
+      [selected,'0.10.1-rc.1',scratch],[selected,'0.10.1','/missing']]) {
+      const refused=read(revision,version,directory);
+      assert.notEqual(refused.status,0);
+      assert.equal(refused.stdout,'');
+      assert.match(refused.stderr,/reason=pairing_range_unmeasured/);
+    }
+    git('tag','-d','v0.10.0');
+    const tagless=read();
+    assert.notEqual(tagless.status,0);
+    assert.equal(tagless.stdout,'');
+    assert.match(tagless.stderr,/reason=pairing_range_unmeasured/);
+  } finally {fs.rmSync(scratch,{recursive:true,force:true});}
+});
+
 const repository='burin-labs/harn';
 const consumer={repository:'acme/widget-host',workflow:'.github/workflows/rehearsal.yml'};
 const context={schema:'harn.consumer_observer.v2',parent_repository:repository,parent_run_id:'900',
