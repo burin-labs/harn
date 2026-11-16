@@ -35,7 +35,12 @@ fn __monitor_duration(value: unknown) -> Result<duration, string> {
   return type_of(value) == "duration" ? Ok(value) : Err("monitor timing expects a duration")
 }
 
-/** Attach a typed source after validating the wait's timing options. */
+/**
+ * Attach a typed source after validating the wait's timing options.
+ *
+ * @effects: []
+ * @errors: ["schema validation failure", "monitor timing expects a duration"]
+ */
 pub fn monitor_wait_options<T>(
   options: unknown,
   source: MonitorSource<T>,
@@ -76,7 +81,12 @@ pub type MonitorEventReference = {
   ...dict<string, unknown>,
 }
 
-/** Read the event carried by a monitor log record, preserving provider extensions. */
+/**
+ * Read the event carried by a monitor log record, preserving provider extensions.
+ *
+ * @effects: []
+ * @errors: ["schema validation failure"]
+ */
 pub fn monitor_event(log_event: unknown) -> MonitorEventReference? {
   const log = schema_expect(log_event, schema_of(MonitorLogReference))
   const raw_payload = log.payload

@@ -37,6 +37,12 @@ pub type GitHubPullRequestState = {
   state: unknown,
 }
 
+/**
+ * Decode record fields consumed by GitHub monitor callbacks.
+ *
+ * @effects: []
+ * @errors: []
+ */
 pub fn github_monitor_reference(value: unknown) -> GitHubMonitorReference? {
   const kind = type_of(value)
   return kind == "dict" || kind == "struct" ? schema_expect(
