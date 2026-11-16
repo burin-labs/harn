@@ -523,7 +523,8 @@
       "managed_allowance_unavailable"
     ],
     "promptResultExtensionFields": [
-      "terminal"
+      "terminal",
+      "goal_outcome"
     ],
     "schemaCompatibility": "agentclientprotocol/agent-client-protocol schema v1.26.0",
     "sessionUpdateVariants": [

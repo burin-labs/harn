@@ -404,6 +404,7 @@ export interface HarnACPPromptResult {
   _meta?: {
     harn: {
       terminal?: HarnAgentTerminalOutcome
+      goal_outcome?: ACPValue
     }
   }
 }

@@ -755,10 +755,15 @@ impl AcpServer {
                 if !output.is_empty() {
                     bridge.send_update(&output);
                 }
-                let (stop_reason, terminal) =
-                    host_bridge_for_response.take_prompt_outcome().map_or_else(
+                let (stop_reason, meta) = host_bridge_for_response
+                    .take_prompt_terminal_receipt()
+                    .map_or_else(
                         || ("end_turn".to_string(), None),
-                        |(reason, terminal)| (reason, Some(terminal)),
+                        |receipt| {
+                            let meta = AcpMeta::terminal(receipt.terminal)
+                                .with_goal_outcome(receipt.goal_outcome);
+                            (receipt.stop_reason, Some(meta))
+                        },
                     );
                 if stop_reason != "cancelled" {
                     #[cfg(feature = "hostlib")]
@@ -785,11 +790,8 @@ impl AcpServer {
                     id,
                     &session_id,
                     reply,
-                    serde_json::to_value(AcpSessionPromptResult {
-                        stop_reason,
-                        meta: terminal.map(AcpMeta::terminal),
-                    })
-                    .expect("ACP prompt result serializes"),
+                    serde_json::to_value(AcpSessionPromptResult { stop_reason, meta })
+                        .expect("ACP prompt result serializes"),
                 );
             }
             Err(e) => {

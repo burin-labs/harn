@@ -551,6 +551,7 @@ HARN_CONTENT_EXTENSION_FIELDS: tuple = (
 )
 HARN_PROMPT_RESULT_EXTENSION_FIELDS: tuple = (
     "terminal",
+    "goal_outcome",
 )
 A2A_METHODS: tuple = (
     "message/send",
@@ -1147,6 +1148,7 @@ class HarnAgentTerminalOutcome(_HarnDataclass):
 @dataclass
 class HarnACPPromptResultHarnMetadata(_HarnDataclass):
     terminal: Optional[HarnAgentTerminalOutcome] = None
+    goal_outcome: Optional[JsonValue] = None
 
 
 @dataclass

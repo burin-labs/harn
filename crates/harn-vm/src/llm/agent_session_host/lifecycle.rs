@@ -680,7 +680,11 @@ pub(super) async fn host_agent_session_finalize(
     }
     if finalization_stage < super::AgentFinalizationStage::PromptOutcomeProjected {
         if let Some(bridge) = crate::llm::agent_runtime::current_host_bridge() {
-            bridge.set_prompt_outcome(acp_stop_reason, &terminal_outcome);
+            bridge.set_prompt_terminal_receipt(crate::bridge::PromptTerminalReceipt {
+                stop_reason: acp_stop_reason.to_owned(),
+                terminal: terminal_outcome.as_ref().clone(),
+                goal_outcome: Some(goal_outcome.clone()),
+            });
         }
         session.advance_finalization_to(super::AgentFinalizationStage::PromptOutcomeProjected);
     }

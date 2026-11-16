@@ -3177,9 +3177,10 @@ impl std::fmt::Display for HarnLlmErrorReason {
 }
 
 pub const HARN_PROMPT_RESULT_EXTENSION_FIELD_TERMINAL: &str = "terminal";
+pub const HARN_PROMPT_RESULT_EXTENSION_FIELD_GOAL_OUTCOME: &str = "goal_outcome";
 
 /// `_meta.harn` extension keys on successful ACP prompt results.
-pub const HARN_PROMPT_RESULT_EXTENSION_FIELDS: &[&str] = &["terminal"];
+pub const HARN_PROMPT_RESULT_EXTENSION_FIELDS: &[&str] = &["terminal", "goal_outcome"];
 
 pub const HARN_CONTENT_EXTENSION_FIELD_PERMISSION_PREVIEW: &str = "permission_preview";
 pub const HARN_CONTENT_EXTENSION_FIELD_VISIBLE_DELTA: &str = "visible_delta";
