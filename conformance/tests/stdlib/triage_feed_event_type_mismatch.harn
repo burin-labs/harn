@@ -1,0 +1,15 @@
+import { triage_start_my_day } from "std/triage"
+
+fn invalid_provider(obs: HarnessObs) -> int {
+  const feed = triage_start_my_day(obs, [])
+  const event = feed.events[0]
+  if event != nil {
+    const wrong_provider: int = event.provider
+    return wrong_provider
+  }
+  return 0
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(type_of(invalid_provider))
+}

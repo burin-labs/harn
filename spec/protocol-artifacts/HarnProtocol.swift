@@ -165,6 +165,7 @@ public enum HarnProtocolConstants {
     ]
     public static let promptResultExtensionFields: [String] = [
         "terminal",
+        "goal_outcome",
     ]
     public static let toolCallReceiptStatuses: [String] = [
         "ok",
@@ -1447,6 +1448,10 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
     case currentModeUpdate = "current_mode_update"
     case configOptionUpdate = "config_option_update"
     case sessionInfoUpdate = "session_info_update"
+    case usageUpdate = "usage_update"
+    case notice = "notice"
+    case compactionUpdate = "compaction_update"
+    case compactionSummaryChunk = "compaction_summary_chunk"
     case sessionRedo = "session_redo"
     case sessionRollback = "session_rollback"
     case sessionTruncated = "session_truncated"
@@ -1484,6 +1489,10 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
         "current_mode_update",
         "config_option_update",
         "session_info_update",
+        "usage_update",
+        "notice",
+        "compaction_update",
+        "compaction_summary_chunk",
         "session_redo",
         "session_rollback",
         "session_truncated",
@@ -2105,6 +2114,7 @@ public struct HarnAgentTerminalOutcome: Codable, Sendable, Equatable {
 
 public struct HarnACPPromptResultHarnMetadata: Codable, Sendable, Equatable {
     public var terminal: HarnAgentTerminalOutcome?
+    public var goal_outcome: HarnACPValue?
 }
 
 public struct HarnACPPromptResultMetadata: Codable, Sendable, Equatable {

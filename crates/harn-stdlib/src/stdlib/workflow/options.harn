@@ -2,6 +2,88 @@ import { StallDiagnostics } from "std/agent/options_types"
 import { pick_keys } from "std/collections"
 import { WorkflowJoinPolicy } from "std/workflow/schedule"
 
+pub type WorkflowVerificationCheck = {kind: "assert_text", ok: bool, expected: string} \
+  | {kind: "expect_status", ok: bool, expected: int, actual: int?}
+
+pub type WorkflowVerificationResult = {
+  kind: string,
+  ok: bool,
+  findings?: list<string>,
+  checks?: list<WorkflowVerificationCheck>,
+}
+
+pub type WorkflowConditionResult = {matched: bool, consumed_artifact_ids: list<string>}
+
+pub type WorkflowStageOutcome = {outcome: string, branch: string}
+
+pub type WorkflowStageAttemptOutcome = {outcome: string, branch: string, verification: unknown}
+
+pub type WorkflowPreparedArtifact = {
+  _type: "artifact",
+  kind: string,
+  title: string,
+  text: string?,
+  data: unknown,
+  source: string,
+  freshness: "fresh",
+  relevance: float,
+  lineage: list<string>,
+  stage: string,
+  metadata: {index: int},
+}
+
+pub type WorkflowStagePayload = {status: string, text: unknown, ...dict<string, unknown>}
+
+pub type WorkflowPreparedStage = {
+  handled: bool,
+  result: WorkflowStagePayload,
+  artifacts: list<WorkflowPreparedArtifact>,
+  outcome: string,
+  branch: string,
+}
+
+pub type WorkflowStaticStageResult = {
+  handled: bool,
+  result?: WorkflowStagePayload,
+  artifacts?: list<WorkflowPreparedArtifact>,
+  outcome?: string,
+  branch?: string,
+}
+
+pub type WorkflowStageExecutionResult = {
+  status: string,
+  outcome: string,
+  branch: string?,
+  result: unknown,
+  artifacts: list<unknown>,
+  transcript: unknown,
+  verification: unknown,
+  usage: dict<string, unknown>,
+  error: string?,
+  attempts: list<dict<string, unknown>>,
+  consumed_artifact_ids: list<string>,
+}
+
+pub type WorkflowFlattenedAgentOptions = {
+  session_id: string,
+  tool_format: string,
+  policy: unknown,
+  approval_policy: unknown,
+  _nested_kind: string,
+  _nested_label: string,
+  ...dict<string, unknown>,
+}
+
+pub type WorkflowStageRetryContext = {
+  task: string,
+  attempt: int,
+  findings: list<string>,
+  verification: unknown,
+  error: unknown,
+  prior_text: string,
+  stage: unknown,
+}
+
 // -------------------------------------------------------------------------------------------------
 
 // Typed option aliases (the documented way to build workflow stage specs).

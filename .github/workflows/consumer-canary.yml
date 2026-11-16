@@ -71,7 +71,7 @@ on:
         required: false
         type: string
       consumer_pull_request:
-        description: Explicit consumer repair for maintainer release recovery
+        description: Explicit consumer repair, or the pin's numeric/default selection for a pull request CLI
         required: false
         default: ''
         type: string
@@ -370,6 +370,7 @@ jobs:
           CANARY_RELEASE_PRODUCER_RUN_ATTEMPT: ${{ inputs.release_producer_run_attempt }}
           CANARY_PAIRED_PULL: ${{ steps.canary.outputs.paired_pull }}
           CANARY_DECLARED_PULL: ${{ steps.canary.outputs.declared_pull }}
+          CANARY_SUPERSEDED_PULLS: ${{ steps.canary.outputs.superseded_pulls }}
         run: |
           if [[ -n "$CANARY_BINDING_FILE" ]]; then mkdir -p "$(dirname "$CANARY_BINDING_FILE")"; fi
           CANARY_REPOSITORY="$CANARY_OWNER/$CANARY_NAME" bash scripts/ci/consumer_canary.sh --record

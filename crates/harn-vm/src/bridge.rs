@@ -7,6 +7,7 @@ mod host_boundaries;
 mod injection_lifecycle;
 mod outbound;
 mod pending_call;
+mod prompt_outcome;
 mod remind;
 mod response_deadline;
 pub use authority::leading_authority_param_count;
@@ -20,6 +21,7 @@ pub use host_boundaries::{
 };
 pub use injection_lifecycle::UserMessageDeliveryOwner;
 pub use outbound::{OutboundRequests, RequestError};
+pub use prompt_outcome::PromptTerminalReceipt;
 use remind::queued_session_remind_from_params;
 #[cfg(test)]
 use response_deadline::bridge_call_timeout;
@@ -103,7 +105,7 @@ pub struct HostBridge {
     daemon_idle: DaemonIdleState,
     /// Canonical ACP stop reason and producer-owned terminal outcome recorded
     /// by the most recent `agent_loop` finalize during this prompt.
-    prompt_outcome: std::sync::Mutex<Option<(String, crate::agent_events::AgentTerminalOutcome)>>,
+    prompt_outcome: prompt_outcome::PromptOutcomeSlot,
     /// Per-call visible assistant text state for call_progress notifications.
     visible_call_states: std::sync::Mutex<HashMap<String, VisibleTextState>>,
     /// Whether an LLM call's deltas should be exposed to end users while streaming.
@@ -669,7 +671,7 @@ impl HostBridge {
             resume_requested,
             skills_reload_requested,
             daemon_idle,
-            prompt_outcome: std::sync::Mutex::new(None),
+            prompt_outcome: Default::default(),
             visible_call_states: std::sync::Mutex::new(HashMap::new()),
             visible_call_streams: std::sync::Mutex::new(HashMap::new()),
             in_process: None,
@@ -740,7 +742,7 @@ impl HostBridge {
             resume_requested: Arc::new(AtomicBool::new(false)),
             skills_reload_requested: Arc::new(AtomicBool::new(false)),
             daemon_idle: DaemonIdleState::default(),
-            prompt_outcome: std::sync::Mutex::new(None),
+            prompt_outcome: Default::default(),
             visible_call_states: std::sync::Mutex::new(HashMap::new()),
             visible_call_streams: std::sync::Mutex::new(HashMap::new()),
             in_process: None,
@@ -766,7 +768,7 @@ impl HostBridge {
             resume_requested: Arc::new(AtomicBool::new(false)),
             skills_reload_requested: Arc::new(AtomicBool::new(false)),
             daemon_idle: DaemonIdleState::default(),
-            prompt_outcome: std::sync::Mutex::new(None),
+            prompt_outcome: Default::default(),
             visible_call_states: std::sync::Mutex::new(HashMap::new()),
             visible_call_streams: std::sync::Mutex::new(HashMap::new()),
             in_process: Some(InProcessHost {
@@ -916,29 +918,39 @@ impl HostBridge {
     pub fn signal_resume(&self) {
         self.resume_requested.store(true, Ordering::SeqCst);
     }
-    /// Record the current prompt's canonical ACP stop reason and typed terminal
-    /// outcome atomically. The last writer wins because the outer `agent_loop`
-    /// finalizes after any inner loops it spawned.
+    /// Record terminal authority and the goal assessment as one prompt receipt.
+    /// The outer loop finalizes last and replaces any inner loop's receipt.
+    pub fn set_prompt_terminal_receipt(&self, receipt: PromptTerminalReceipt) {
+        self.prompt_outcome.set(receipt);
+    }
+
+    /// Consume the current prompt's receipt, if an agent session finalized.
+    pub fn take_prompt_terminal_receipt(&self) -> Option<PromptTerminalReceipt> {
+        self.prompt_outcome.take()
+    }
+
+    /// Record a terminal without a measured goal assessment.
+    #[deprecated(note = "use set_prompt_terminal_receipt to retain the goal assessment")]
     pub fn set_prompt_outcome(
         &self,
         stop_reason: &str,
         terminal: &crate::agent_events::AgentTerminalOutcome,
     ) {
-        *self
-            .prompt_outcome
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = Some((stop_reason.to_string(), terminal.clone()));
+        self.set_prompt_terminal_receipt(PromptTerminalReceipt {
+            stop_reason: stop_reason.to_string(),
+            terminal: terminal.clone(),
+            goal_outcome: None,
+        });
     }
 
     /// Consume the prompt outcome after the pipeline returns. Pipelines that
     /// did not run an `agent_loop` leave this absent.
+    #[deprecated(note = "use take_prompt_terminal_receipt to retain the goal assessment")]
     pub fn take_prompt_outcome(
         &self,
     ) -> Option<(String, crate::agent_events::AgentTerminalOutcome)> {
-        self.prompt_outcome
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take()
+        self.take_prompt_terminal_receipt()
+            .map(|receipt| (receipt.stop_reason, receipt.terminal))
     }
 
     /// Consume any pending `skills/update` signal the host has sent.

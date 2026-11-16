@@ -37,31 +37,25 @@ type CanonRawReminder = {
   ...dict,
 }
 
-fn __canon_optional_record(value: unknown) -> dict? {
-  if type_of(value) != "dict" {
-    return nil
-  }
-  return value
+fn __canon_is_record(value: unknown) -> bool {
+  const kind = type_of(value)
+  return kind == "dict" || kind == "struct"
 }
 
 fn __canon_raw_carrier(value: unknown) -> CanonRawCarrier? {
-  const record = __canon_optional_record(value)
-  return record == nil ? nil : schema_expect(record, schema_of(CanonRawCarrier))
+  return __canon_is_record(value) ? schema_expect(value, schema_of(CanonRawCarrier)) : nil
 }
 
 fn __canon_raw_function(value: unknown) -> CanonRawFunction? {
-  const record = __canon_optional_record(value)
-  return record == nil ? nil : schema_expect(record, schema_of(CanonRawFunction))
+  return __canon_is_record(value) ? schema_expect(value, schema_of(CanonRawFunction)) : nil
 }
 
 fn __canon_raw_slice(value: unknown) -> CanonRawSlice? {
-  const record = __canon_optional_record(value)
-  return record == nil ? nil : schema_expect(record, schema_of(CanonRawSlice))
+  return __canon_is_record(value) ? schema_expect(value, schema_of(CanonRawSlice)) : nil
 }
 
 fn __canon_raw_reminder(value: unknown) -> CanonRawReminder? {
-  const record = __canon_optional_record(value)
-  return record == nil ? nil : schema_expect(record, schema_of(CanonRawReminder))
+  return __canon_is_record(value) ? schema_expect(value, schema_of(CanonRawReminder)) : nil
 }
 
 fn __canon_manifest_schema() -> Schema<CanonManifest> {

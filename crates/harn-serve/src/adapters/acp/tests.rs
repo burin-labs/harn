@@ -89,10 +89,7 @@ async fn recv_response_with_id(
     panic!("timed out waiting for response {id}");
 }
 
-/// Only the hostlib-gated rollback/redo test builds transcript
-/// messages by hand; gate the helper identically so a featureless
-/// `clippy --all-targets -D warnings` run stays clean.
-#[cfg(feature = "hostlib")]
+/// Build one transcript message for ACP lifecycle fixtures.
 fn make_acp_test_message(role: &str, content: &str) -> VmValue {
     VmValue::dict(BTreeMap::from([
         (
@@ -1127,6 +1124,8 @@ mod session_recap;
 mod session_restore;
 mod session_spend;
 mod sessions;
+mod stable_compaction;
+mod stable_usage;
 #[cfg(feature = "hostlib")]
 mod staged_writes;
 mod stop_controls;

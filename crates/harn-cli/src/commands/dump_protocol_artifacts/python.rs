@@ -517,6 +517,7 @@ class HarnAgentTerminalOutcome(_HarnDataclass):
 @dataclass
 class HarnACPPromptResultHarnMetadata(_HarnDataclass):
     terminal: Optional[HarnAgentTerminalOutcome] = None
+    goal_outcome: Optional[JsonValue] = None
 
 
 @dataclass

@@ -751,6 +751,8 @@ public struct HarnRunViewUsage: Codable, Sendable, Equatable {
     public var knownCostUsd: Double = 0.0
     public var models: [String] = []
     public var outputTokens: Int = 0
+    public var providerCallCount: Int? = nil
+    public var reportedCache: HarnReportedCacheTotals? = nil
     public var totalCost: Double = 0.0
     public var totalDurationMs: Int? = nil
     public var unpricedCalls: Int = 0
@@ -765,6 +767,8 @@ public struct HarnRunViewUsage: Codable, Sendable, Equatable {
         case knownCostUsd = "known_cost_usd"
         case models
         case outputTokens = "output_tokens"
+        case providerCallCount = "provider_call_count"
+        case reportedCache = "reported_cache"
         case totalCost = "total_cost"
         case totalDurationMs = "total_duration_ms"
         case unpricedCalls = "unpriced_calls"
@@ -781,6 +785,8 @@ public struct HarnRunViewUsage: Codable, Sendable, Equatable {
         if values.contains(.knownCostUsd) { knownCostUsd = try values.decode(Double.self, forKey: .knownCostUsd) }
         if values.contains(.models) { models = try values.decode([String].self, forKey: .models) }
         if values.contains(.outputTokens) { outputTokens = try values.decode(Int.self, forKey: .outputTokens) }
+        if values.contains(.providerCallCount) { providerCallCount = try values.decode(Int?.self, forKey: .providerCallCount) }
+        if values.contains(.reportedCache) { reportedCache = try values.decode(HarnReportedCacheTotals?.self, forKey: .reportedCache) }
         if values.contains(.totalCost) { totalCost = try values.decode(Double.self, forKey: .totalCost) }
         if values.contains(.totalDurationMs) { totalDurationMs = try values.decode(Int?.self, forKey: .totalDurationMs) }
         if values.contains(.unpricedCalls) { unpricedCalls = try values.decode(Int.self, forKey: .unpricedCalls) }

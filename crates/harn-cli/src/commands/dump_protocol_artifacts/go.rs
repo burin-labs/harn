@@ -491,6 +491,7 @@ type HarnAgentTerminalOutcome struct {
 
 // HarnACPPromptResultHarnMetadata contains Harn prompt-result extensions.
 type HarnACPPromptResultHarnMetadata struct {
+	GoalOutcome JSONValue `json:"goal_outcome,omitempty"`
 	Terminal *HarnAgentTerminalOutcome `json:"terminal,omitempty"`
 }
 

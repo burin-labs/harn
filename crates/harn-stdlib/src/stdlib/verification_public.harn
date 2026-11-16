@@ -210,7 +210,7 @@ pub fn verification_hud_model(
   runtime: HarnessRuntime,
   state: dict,
   options: dict? = nil,
-) -> dict {
+) -> VerificationHudModel {
   const opts = __verification_opts(options)
   if type_of(state) != "dict" {
     return {
@@ -526,7 +526,7 @@ pub fn verification_gate_input(
   const delta = verification_diagnostic_delta(agent, previous_delta, current_delta, opts)
   const status = __verification_gate_status(delta, current_classification)
   const feeds_gates = current_classification?.feedsGates ? true : false
-  const gate_bearing_failure = feeds_gates && len(delta?.current?.signatures ?? []) > 0
+  const gate_bearing_failure = feeds_gates && len(delta.current.signatures) > 0
     && status
       != "cleared"
   return {
@@ -536,7 +536,7 @@ pub fn verification_gate_input(
     feedsGates: feeds_gates,
     feeds_gates: feeds_gates,
     advisory: !feeds_gates,
-    progress_credit: feeds_gates && delta?.progress_credit ? true : false,
+    progress_credit: feeds_gates && delta.progress_credit ? true : false,
     no_progress: feeds_gates && status == "unchanged",
     gate_bearing_failure: gate_bearing_failure,
     blocks_completion: gate_bearing_failure,
@@ -652,7 +652,8 @@ pub fn verification_run_check(
   options: dict? = nil,
 ) -> VerificationRecordedCheck {
   const opts = __verification_opts(options)
-  if opts?.command_options?.background == true {
+  const command_options = __verification_reference(opts?.command_options)
+  if command_options?.background == true {
     throw "verification_run_check: background command_options are not supported; use verification_start_check"
   }
   const reuse: VerificationReuse? = opts?.reuse
@@ -739,6 +740,7 @@ pub fn verification_finish_check(
   options: dict? = nil,
 ) -> VerificationRecordedCheck {
   const opts = __verification_opts(options)
+  const observation_defaults = __verification_reference(started_check?.observation_options)
   const row_id = opts?.row_id ?? started_check?.row_id
   if row_id == nil || trim(to_string(row_id)) == "" {
     throw "verification_finish_check: row_id must be supplied in the receipt or options"
@@ -755,7 +757,7 @@ pub fn verification_finish_check(
     observation_options,
   )
   let row = nil
-  if opts?.record != false && started_check?.observation_options?.record != false {
+  if opts?.record != false && observation_defaults?.record != false {
     row = harness.runtime.verification_profile_record_run(
       to_string(row_id),
       observation,

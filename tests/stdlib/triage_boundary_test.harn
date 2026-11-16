@@ -1,0 +1,240 @@
+import { triage_normalize, triage_start_my_day } from "std/triage"
+
+struct TriageTestIssue {
+  html_url: string
+  node_id: string
+  title: string
+  number: int
+}
+
+struct TriageTestRepository {
+  html_url: string
+  full_name: string
+}
+
+struct TriageTestSender {
+  login: string
+  html_url: string
+}
+
+struct TriageTestPayload {
+  issue: TriageTestIssue
+  repository: TriageTestRepository
+  sender: TriageTestSender
+}
+
+struct TriageTestEnvelope {
+  provider: string
+  provider_payload: TriageTestPayload
+}
+
+pipeline test_triage_struct_envelope_payload_and_references() {
+  const issue = TriageTestIssue {
+    html_url: "https://example.test/issue/7",
+    node_id: "issue-7",
+    title: "Struct issue",
+    number: 7,
+  }
+  const repository = TriageTestRepository {
+    html_url: "https://example.test/repo",
+    full_name: "owner/repo",
+  }
+  const sender = TriageTestSender {login: "mona", html_url: "https://example.test/mona"}
+  const payload = TriageTestPayload {issue: issue, repository: repository, sender: sender}
+  const input = TriageTestEnvelope {provider: "github", provider_payload: payload}
+  assert_eq(type_of(input), "struct")
+  assert_eq(type_of(payload), "struct")
+  assert_eq(type_of(issue), "struct")
+  const event = triage_normalize(input)
+  assert_eq(event.source_url, issue.html_url)
+  assert_eq(event.source_id, issue.node_id)
+  assert_eq(event.summary, "owner/repo: Issue #7: Struct issue")
+  assert_eq(
+    event.actors,
+    [{kind: "user", id: "mona", display_name: "mona", url: "https://example.test/mona"}],
+  )
+  assert_eq(event.raw_payload, payload)
+}
+
+pipeline test_triage_reference_views_preserve_raw_fields_and_text_coercion() {
+  const payload = {
+    repository: {full_name: "owner/repo", html_url: "https://example.test/repo", extension: true},
+    issue: {
+      number: 7,
+      node_id: "issue-7",
+      title: 42,
+      html_url: nil,
+      user: {login: "mona", html_url: nil, extension: true},
+      updated_at: "2026-01-02T03:04:05Z",
+      extension: {keep: [1, 2]},
+    },
+    extension: {keep: true},
+  }
+  const event = triage_normalize({provider: "github", provider_payload: payload})
+  assert_eq(event.source_url, "https://example.test/repo")
+  assert_eq(event.source_id, "issue-7")
+  assert_eq(event.summary, "owner/repo: Issue #7: 42")
+  assert_eq(event.source_timestamp, "2026-01-02T03:04:05Z")
+  assert_eq(event.actors, [{kind: "user", id: "mona", display_name: "mona"}])
+  assert_eq(event.raw_payload, payload)
+}
+
+pipeline test_triage_container_refusal_depends_on_consumption() {
+  const summaries = {
+    issue: "Issue #:",
+    pull_request: "PR #:",
+    comment: "Comment:",
+    workflow_run: "Workflow item",
+    repository: "GitHub item",
+    raw: "GitHub item",
+    sender: "GitHub item",
+  }
+  for entry in summaries {
+    for value in [false, 7, "legacy", []] {
+      for explicit_summary in [false, true] {
+        const payload = {[entry.key]: value}
+        const options = explicit_summary ? {summary: "explicit"} : {}
+        const result = try {
+          triage_normalize(
+            {provider: "github", source_url: "https://example.test/item", payload: payload},
+            options,
+          )
+        }
+        const consumed = ["issue", "pull_request", "comment", "workflow_run"].contains(entry.key)
+        const refused = consumed && !explicit_summary && ["bool", "int"].contains(type_of(value))
+        assert_eq(
+          is_err(result),
+          refused,
+          "unused or historically supported values must not tighten",
+        )
+        if is_ok(result) {
+          const event = unwrap(result)
+          assert_eq(event.summary, explicit_summary ? "explicit" : entry.value)
+          assert_eq(event.raw_payload, payload)
+        }
+      }
+    }
+  }
+}
+
+pipeline test_triage_slack_and_polled_views_keep_nested_precedence() {
+  const payload = {
+    user: "U1",
+    raw: {permalink: "https://example.test/message", text: 42, extension: true},
+    polled: {high_water_mark: nil, after: {last_edited_time: "2026-01-02", extension: true}},
+    extension: {keep: true},
+  }
+  const event = triage_normalize({provider: "slack", payload: payload})
+  assert_eq(event.source_url, "https://example.test/message")
+  assert_eq(event.summary, "Slack: 42")
+  assert_eq(event.source_timestamp, "2026-01-02")
+  assert_eq(event.actors, [{kind: "user", id: "U1", display_name: "U1"}])
+  assert_eq(event.raw_payload, payload)
+}
+
+pipeline test_triage_overrides_preserve_false_empty_and_unused_values() {
+  const payload = {sender: {login: 7}}
+  const event = triage_normalize(
+    {
+      provider: "github",
+      source_url: "https://example.test/item",
+      payload: payload,
+      privacy: {redacted: true, contains_sensitive: true, flags: ["raw"]},
+    },
+    {actors: [], related_refs: [], redacted: false, contains_sensitive: false, privacy_flags: []},
+  )
+  assert_eq(event.actors, [])
+  assert_eq(event.related_refs, [])
+  assert_eq(event.privacy.redacted, false)
+  assert_eq(event.privacy.contains_sensitive, false)
+  assert_eq(event.privacy.flags, [])
+  assert_eq(event.raw_payload, payload)
+}
+
+pipeline test_triage_keeps_record_actor_and_write_intent_refusals() {
+  assert(
+    is_err(
+      try {
+        triage_normalize(nil)
+      },
+    ),
+  )
+  const absent_payload = {
+    provider: "github",
+    source_url: "https://example.test/item",
+    provider_payload: nil,
+  }
+  assert_eq(triage_normalize(absent_payload).raw_payload, absent_payload)
+  for input in [false, 7, "legacy", []] {
+    assert(
+      is_err(
+        try {
+          triage_normalize(input)
+        },
+      ),
+    )
+    assert(
+      is_err(
+        try {
+          triage_normalize(
+            {provider: "github", source_url: "https://example.test/item", provider_payload: input},
+          )
+        },
+      ),
+    )
+  }
+  assert(
+    is_err(
+      try {
+        triage_normalize(
+          {provider: "github", source_url: "https://example.test/item", sender: {login: 7}},
+        )
+      },
+    ),
+  )
+  const intent = {
+    kind: "write",
+    label: "Write",
+    target: {},
+    effect: "host_write",
+    requires_approval: false,
+  }
+  const input = {provider: "github", source_url: "https://example.test/item"}
+  assert(
+    is_err(
+      try {
+        triage_normalize(input, {action_intents: [intent]})
+      },
+    ),
+  )
+  const accepted = triage_normalize(input, {action_intents: [intent + {requires_approval: true}]})
+  assert_eq(len(accepted.action_intents), 1)
+}
+
+pipeline test_triage_feed_preserves_custom_metadata_and_typed_contents(harness: Harness) {
+  const input = {provider: "github", source_url: "https://example.test/item"}
+  const metadata = {title: {extension: true}, generated_at: [1, 2]}
+  const feed = triage_start_my_day(harness.obs, [input, input], metadata)
+  assert_eq(feed.title, metadata.title)
+  assert_eq(feed.generated_at, metadata.generated_at)
+  assert_eq(len(feed.events), 1)
+  const event = feed.events[0]
+  if event == nil {
+    throw "the normalized event must remain available"
+  }
+  const provider: string = event.provider
+  assert_eq(provider, "github")
+  assert_eq(feed.receipts, [])
+  const empty = triage_start_my_day(harness.obs, [])
+  assert_eq(empty.title, "Start My Day")
+  assert_eq(empty.generated_at, nil)
+  assert_eq(empty.events, [])
+  assert_eq(empty.receipts, [])
+  const emitted = triage_start_my_day(harness.obs, [input], {emit: true})
+  const receipt = emitted.receipts[0]
+  if receipt == nil {
+    throw "the emitted feed must contain its receipt"
+  }
+  const event_log_id: int = receipt.event_log_id
+  assert(event_log_id > 0)
+}

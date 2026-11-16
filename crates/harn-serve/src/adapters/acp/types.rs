@@ -912,6 +912,14 @@ impl AcpMeta {
             extra: BTreeMap::new(),
         }
     }
+    /// Carry the completion owner's assessment without interpreting task success.
+    pub fn with_goal_outcome(mut self, goal_outcome: Option<serde_json::Value>) -> Self {
+        match goal_outcome {
+            Some(outcome) => self.harn.extra.insert("goal_outcome".to_string(), outcome),
+            None => self.harn.extra.remove("goal_outcome"),
+        };
+        self
+    }
 }
 
 /// Harn-owned ACP `_meta.harn` extension fields.
@@ -1105,6 +1113,27 @@ mod tests {
         let restored: AcpSessionPromptResult =
             serde_json::from_value(wire).expect("deserialize prompt result");
         assert_eq!(restored, result);
+    }
+
+    #[test]
+    fn prompt_metadata_preserves_goal_values_and_unmeasured_absence() {
+        for goal in [
+            Some(serde_json::json!({"kind":"not_achieved", "evidence_id":"assessment"})),
+            Some(serde_json::json!({"kind":"unknown", "future_detail":{"retained":true}})),
+            Some(serde_json::Value::Null),
+            None,
+        ] {
+            let meta = AcpMeta::terminal(harn_vm::agent_events::AgentTerminalOutcome::new(
+                harn_vm::agent_events::AgentTerminalKind::Natural,
+                "finished",
+            ))
+            .with_goal_outcome(goal.clone());
+            let wire = serde_json::to_value(&meta).expect("metadata serializes");
+            assert_eq!(wire["harn"].get("goal_outcome").cloned(), goal);
+            assert_eq!(serde_json::from_value::<AcpMeta>(wire).unwrap(), meta);
+            let cleared = serde_json::to_value(meta.with_goal_outcome(None)).unwrap();
+            assert!(cleared["harn"].get("goal_outcome").is_none());
+        }
     }
 
     #[test]

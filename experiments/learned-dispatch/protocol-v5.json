@@ -1,0 +1,48 @@
+{
+  "contract": "harn.learned_dispatch_study.v5",
+  "predecessors": ["results-v1.json", "results-v2.json", "results-v3.json", "results-v4.json"],
+  "purpose": "Prospectively validate the released runtime and integrated consumer with explicit native-ledger cost certainty. Preserve the complete strict-collector refusal from v4 and use fresh case identifiers and workspaces.",
+  "population": "The same small Python HTTP application and reviewed standard-resource generator. One new lowercase resource identifier and three distinct non-reserved field identifiers with string, integer, and boolean roles. Excludes persistence, authorization, extra operations, existing-resource edits, and test-command execution.",
+  "candidate": {
+    "source": "candidate-v4.json",
+    "unchanged": "Reviewed executable, output rules, enforced read-only preflight, semantic binding question, evaluator and binder routes and effort, 0.9 threshold, authored tests, and independent grader.",
+    "integration": "Use the actual published CLI and a clean native consumer containing the compatible owning integration repairs. Record their exact identities and freeze every external pipeline source."
+  },
+  "qualification": {
+    "corpus": "corpus-v5.json",
+    "positive_cases": 120,
+    "negative_cases": 30,
+    "repetitions": 1,
+    "thresholds": [0.9],
+    "target_error": 0.1,
+    "delta": 0.05,
+    "freeze": "Freeze both executable hashes, external pipeline sources, promoted capability, project, configuration, candidate, protocol, corpus, grader, accounting reader, launcher, collector, and controls before the first qualification call.",
+    "evidence": "Require one canonical committed or abstained disposition for every fixed case. A commitment must link its applicability receipt, separate binding receipt, selected mutation, completed verification, and independent execution grade. Missing or contradictory evidence refuses the report.",
+    "errors": "Every committed incompatible request, wrong binding, wrong output, failed or missing execution, or failed independent grade is an accepted error. Never credit ordinary fallback work as learned execution.",
+    "owner": "Convert typed observations through learned_trial and admit only through learned_qualify and learned_qualification_issue. Do not implement another risk policy in the runner."
+  },
+  "accounting": {
+    "policy": "explicit_unknown_ancillary_v1",
+    "reader": "accounting.py",
+    "native_judgments": "Applicability and binding receipts must retain one physical attempt, settled accounting, a known charge, and correlation to the canonical provider-call record.",
+    "ancillary_calls": "An ancillary call may have explicitly unknown usage or pricing. Preserve its null total cost and known subtotal. Require a complete, unique physical-call census, exact native-ledger totals, and consistent per-call certainty; reject missing or contradictory records.",
+    "budget": "Retain the full 0.12 USD run reservation for any unknown charge. Never release it using only a known subtotal, and never count unknown cost as zero.",
+    "report": "Report known cost, nullable total cost, unknown call count, unpriced call count, affected run identifiers, and retained budget reservations separately.",
+    "reason": "The complete v4 cohort was refused because one ancillary classification attempt had no response and unknown billing. Its native decision and abstention were fully measured. No v4 observation is replaced or added to this fresh cohort."
+  },
+  "execution": {
+    "max_concurrent": 6,
+    "max_provider_spend_usd_session": 4.0,
+    "qualification_runner_budget_usd": 1.0,
+    "workspace": "One fresh isolated workspace and unique trial identifier per observation.",
+    "recovery": "Preserve every observed result and failed collection. Previously unstarted cases may resume only with an infrastructure-recovery receipt; do not rerun failed cases to replace them.",
+    "controls": [
+      "Tampered freeze digest is refused while the correct manifest passes.",
+      "Canonical accounting reader rejects missing calls, incorrect totals, unknown decision accounting, and unknown cost presented as settled.",
+      "Ordinary qualified execution references the exact admitted report and passes independent request checks and real HTTP checks.",
+      "Approval, stop, and steer reach an actual parked learned mutation; correlate the ask with its generation and binding receipts.",
+      "An older artifact's report refuses before learned inference and retains ordinary fallback."
+    ]
+  },
+  "interpretation": "A bounded synthetic study with related templates, fresh compatible resource and field identifiers, and repeated incompatible task classes. Not an IID deployment sample or production reliability guarantee. Unknown ancillary billing remains unknown and is not evidence of a free call."
+}

@@ -138,13 +138,12 @@
 # count   17  crates/harn-stdlib/src/stdlib/stdlib_text.harn
 # count    4  crates/harn-stdlib/src/stdlib/stdlib_tool_hooks.harn
 # count    8  crates/harn-stdlib/src/stdlib/stdlib_tool_hooks_catalogues.harn
-# count    2  crates/harn-stdlib/src/stdlib/stdlib_triage.harn
 # count    1  crates/harn-stdlib/src/stdlib/stdlib_tui.harn
 # count    8  crates/harn-stdlib/src/stdlib/stdlib_web.harn
 # count    5  crates/harn-stdlib/src/stdlib/stdlib_worktree.harn
 # count    1  crates/harn-stdlib/src/stdlib/stdlib_xml.harn
-# count   19  crates/harn-stdlib/src/stdlib/verification_core.harn
-# count    6  crates/harn-stdlib/src/stdlib/verification_ladder.harn
+# count   13  crates/harn-stdlib/src/stdlib/verification_core.harn
+# count    3  crates/harn-stdlib/src/stdlib/verification_ladder.harn
 # count   13  crates/harn-stdlib/src/stdlib/verification_targets.harn
 # count    1  crates/harn-stdlib/src/stdlib/workflow/checkpoints.harn
 # count    4  crates/harn-stdlib/src/stdlib/workflow/context.harn
@@ -152,7 +151,6 @@
 # count    6  crates/harn-stdlib/src/stdlib/workflow/map.harn
 # count    6  crates/harn-stdlib/src/stdlib/workflow/patterns.harn
 # count    6  crates/harn-stdlib/src/stdlib/workflow/prompts.harn
-# count    8  crates/harn-stdlib/src/stdlib/workflow/stage.harn
 
 crates/harn-stdlib/src/stdlib/agent/action_graph.harn::action_graph
 crates/harn-stdlib/src/stdlib/agent/action_graph.harn::action_graph_batches
@@ -1095,8 +1093,6 @@ crates/harn-stdlib/src/stdlib/stdlib_tool_hooks_catalogues.harn::tool_hooks_cata
 crates/harn-stdlib/src/stdlib/stdlib_tool_hooks_catalogues.harn::tool_hooks_catalogue_typescript
 crates/harn-stdlib/src/stdlib/stdlib_tool_hooks_catalogues.harn::tool_hooks_catalogue_universal
 crates/harn-stdlib/src/stdlib/stdlib_tool_hooks_catalogues.harn::tool_hooks_seed_registry
-crates/harn-stdlib/src/stdlib/stdlib_triage.harn::triage_dedupe_key
-crates/harn-stdlib/src/stdlib/stdlib_triage.harn::triage_start_my_day
 crates/harn-stdlib/src/stdlib/stdlib_tui.harn::clear
 crates/harn-stdlib/src/stdlib/stdlib_web.harn::html_json_ld
 crates/harn-stdlib/src/stdlib/stdlib_web.harn::html_links
@@ -1113,27 +1109,18 @@ crates/harn-stdlib/src/stdlib/stdlib_worktree.harn::worktree_shell
 crates/harn-stdlib/src/stdlib/stdlib_worktree.harn::worktree_status
 crates/harn-stdlib/src/stdlib/stdlib_xml.harn::from_xml
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_capture_snapshot
-crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_delta_direct_count
-crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_exit
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_failure_signature
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_gate_embedded_classification
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_snapshot_map
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_toolchain_probe
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_toolchain_probe_options
-crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_warm_state_expected_delta_ms
-crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_warm_state_first_fact
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_warm_state_mode
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_warm_state_probe
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_warm_state_probe_options
-crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_warm_state_receipt_handle
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_warm_state_start_options
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_warm_state_start_spec
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_warm_state_teardown_options
 crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_warm_state_teardown_spec
-crates/harn-stdlib/src/stdlib/verification_core.harn::__verification_warm_state_timings
-crates/harn-stdlib/src/stdlib/verification_ladder.harn::__verification_hud_entry
-crates/harn-stdlib/src/stdlib/verification_ladder.harn::__verification_hud_last_check
-crates/harn-stdlib/src/stdlib/verification_ladder.harn::__verification_ladder_candidate
 crates/harn-stdlib/src/stdlib/verification_ladder.harn::__verification_row_command
 crates/harn-stdlib/src/stdlib/verification_ladder.harn::__verification_rung_rank
 crates/harn-stdlib/src/stdlib/verification_ladder.harn::__verification_warm_state_fact_for
@@ -1174,11 +1161,3 @@ crates/harn-stdlib/src/stdlib/workflow/prompts.harn::workflow_render_artifacts_c
 crates/harn-stdlib/src/stdlib/workflow/prompts.harn::workflow_render_verification_context
 crates/harn-stdlib/src/stdlib/workflow/prompts.harn::workflow_stage_prompt
 crates/harn-stdlib/src/stdlib/workflow/prompts.harn::workflow_verification_context_intro
-crates/harn-stdlib/src/stdlib/workflow/stage.harn::workflow_classify_stage_outcome
-crates/harn-stdlib/src/stdlib/workflow/stage.harn::workflow_evaluate_condition
-crates/harn-stdlib/src/stdlib/workflow/stage.harn::workflow_evaluate_verification
-crates/harn-stdlib/src/stdlib/workflow/stage.harn::workflow_execute_stage_attempts
-crates/harn-stdlib/src/stdlib/workflow/stage.harn::workflow_flatten_agent_loop_options
-crates/harn-stdlib/src/stdlib/workflow/stage.harn::workflow_prepare_static_stage
-crates/harn-stdlib/src/stdlib/workflow/stage.harn::workflow_stage_attempt_outcome
-crates/harn-stdlib/src/stdlib/workflow/stage.harn::workflow_stage_retry_task

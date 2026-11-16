@@ -303,6 +303,10 @@ ACP_SESSION_UPDATES: tuple = (
     "current_mode_update",
     "config_option_update",
     "session_info_update",
+    "usage_update",
+    "notice",
+    "compaction_update",
+    "compaction_summary_chunk",
     "session_redo",
     "session_rollback",
     "session_truncated",
@@ -551,6 +555,7 @@ HARN_CONTENT_EXTENSION_FIELDS: tuple = (
 )
 HARN_PROMPT_RESULT_EXTENSION_FIELDS: tuple = (
     "terminal",
+    "goal_outcome",
 )
 A2A_METHODS: tuple = (
     "message/send",
@@ -697,6 +702,10 @@ class ACPSessionUpdate(str, Enum):
     CURRENT_MODE_UPDATE = "current_mode_update"
     CONFIG_OPTION_UPDATE = "config_option_update"
     SESSION_INFO_UPDATE = "session_info_update"
+    USAGE_UPDATE = "usage_update"
+    NOTICE = "notice"
+    COMPACTION_UPDATE = "compaction_update"
+    COMPACTION_SUMMARY_CHUNK = "compaction_summary_chunk"
     SESSION_REDO = "session_redo"
     SESSION_ROLLBACK = "session_rollback"
     SESSION_TRUNCATED = "session_truncated"
@@ -1147,6 +1156,7 @@ class HarnAgentTerminalOutcome(_HarnDataclass):
 @dataclass
 class HarnACPPromptResultHarnMetadata(_HarnDataclass):
     terminal: Optional[HarnAgentTerminalOutcome] = None
+    goal_outcome: Optional[JsonValue] = None
 
 
 @dataclass

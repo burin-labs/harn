@@ -2250,6 +2250,10 @@ pub const ACP_SESSION_UPDATE_AVAILABLE_COMMANDS_UPDATE: &str = "available_comman
 pub const ACP_SESSION_UPDATE_CURRENT_MODE_UPDATE: &str = "current_mode_update";
 pub const ACP_SESSION_UPDATE_CONFIG_OPTION_UPDATE: &str = "config_option_update";
 pub const ACP_SESSION_UPDATE_SESSION_INFO_UPDATE: &str = "session_info_update";
+pub const ACP_SESSION_UPDATE_USAGE_UPDATE: &str = "usage_update";
+pub const ACP_SESSION_UPDATE_NOTICE: &str = "notice";
+pub const ACP_SESSION_UPDATE_COMPACTION_UPDATE: &str = "compaction_update";
+pub const ACP_SESSION_UPDATE_COMPACTION_SUMMARY_CHUNK: &str = "compaction_summary_chunk";
 pub const ACP_SESSION_UPDATE_SESSION_REDO: &str = "session_redo";
 pub const ACP_SESSION_UPDATE_SESSION_ROLLBACK: &str = "session_rollback";
 pub const ACP_SESSION_UPDATE_SESSION_TRUNCATED: &str = "session_truncated";
@@ -2288,6 +2292,10 @@ pub const ACP_SESSION_UPDATES: &[&str] = &[
     "current_mode_update",
     "config_option_update",
     "session_info_update",
+    "usage_update",
+    "notice",
+    "compaction_update",
+    "compaction_summary_chunk",
     "session_redo",
     "session_rollback",
     "session_truncated",
@@ -3177,9 +3185,10 @@ impl std::fmt::Display for HarnLlmErrorReason {
 }
 
 pub const HARN_PROMPT_RESULT_EXTENSION_FIELD_TERMINAL: &str = "terminal";
+pub const HARN_PROMPT_RESULT_EXTENSION_FIELD_GOAL_OUTCOME: &str = "goal_outcome";
 
 /// `_meta.harn` extension keys on successful ACP prompt results.
-pub const HARN_PROMPT_RESULT_EXTENSION_FIELDS: &[&str] = &["terminal"];
+pub const HARN_PROMPT_RESULT_EXTENSION_FIELDS: &[&str] = &["terminal", "goal_outcome"];
 
 pub const HARN_CONTENT_EXTENSION_FIELD_PERMISSION_PREVIEW: &str = "permission_preview";
 pub const HARN_CONTENT_EXTENSION_FIELD_VISIBLE_DELTA: &str = "visible_delta";

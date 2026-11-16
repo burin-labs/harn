@@ -87,6 +87,10 @@ export const ACP_SESSION_UPDATES = [
   "current_mode_update",
   "config_option_update",
   "session_info_update",
+  "usage_update",
+  "notice",
+  "compaction_update",
+  "compaction_summary_chunk",
   "session_redo",
   "session_rollback",
   "session_truncated",
@@ -243,6 +247,7 @@ export type LlmErrorReason = (typeof LLM_ERROR_REASONS)[number]
 
 export const HARN_PROMPT_RESULT_EXTENSION_FIELDS = [
   "terminal",
+  "goal_outcome",
 ] as const
 export type HarnPromptResultExtensionField = (typeof HARN_PROMPT_RESULT_EXTENSION_FIELDS)[number]
 
@@ -1116,6 +1121,7 @@ export interface HarnACPPromptResult {
   _meta?: {
     harn: {
       terminal?: HarnAgentTerminalOutcome
+      goal_outcome?: ACPValue
     }
   }
 }
