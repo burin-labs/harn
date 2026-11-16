@@ -140,6 +140,7 @@ fn run_case(harness: Harness, variant: string) {
     require len(resolutions) == 1
       && resolutions[0]?.resolution?.resolution == "invalidated"
       && resolutions[0]?.resolution?.reason == "context_compacted"
+      && resolutions[0]?.resolution?.source_tool_call_id == "check"
       && resolutions[0]?.resolution?.pending_count == 0,
       "compaction must explicitly invalidate the proposal and leave no pending work"
     const receipts = captured.events.filter(
@@ -149,6 +150,7 @@ fn run_case(harness: Harness, variant: string) {
       && receipts[0]?.receipt?.disposition == "resolved"
       && receipts[0]?.receipt?.reason == "control_changed"
       && receipts[0]?.receipt?.call_index == 1
+      && receipts[0]?.receipt?.tool_call_id == "check"
       && receipts[0]?.receipt?.tool_call_id == resolutions[0]?.resolution?.source_tool_call_id
       && receipts[0]?.receipt?.started_at_ms == nil
       && receipts[0]?.receipt?.finished_at_ms == nil
