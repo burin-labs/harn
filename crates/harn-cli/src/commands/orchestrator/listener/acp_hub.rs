@@ -351,24 +351,6 @@ impl AcpWebSocketHub {
     pub(super) async fn sweep_expired_once_for_test(&self) {
         self.sweep_expired_once().await;
     }
-
-    #[cfg(test)]
-    pub(super) fn session_is_detached_for_test(&self, session_id: &str) -> bool {
-        let worker = self
-            .state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .workers_by_session
-            .get(session_id)
-            .cloned();
-        worker.is_some_and(|worker| {
-            worker
-                .detached_at
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .is_some()
-        })
-    }
 }
 
 impl AcpSessionSummary {
