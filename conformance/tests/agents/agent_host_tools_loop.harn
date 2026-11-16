@@ -47,7 +47,9 @@ pipeline main(harness: Harness) {
       harness.stdio.println(len(calls) >= 2)
       harness.stdio.println(!contains(calls[0].system, "##DONE##"))
       harness.stdio.println(!contains(calls[1].system, "##DONE##"))
-      harness.stdio.println(contains(calls[0].system, "no more tool calls"))
+      harness.stdio.println(
+        contains(calls[0].system, "answer in plain assistant text and stop calling tools"),
+      )
       const second_turn = json_stringify(calls[1].messages)
       harness.stdio.println(contains(second_turn, "byte_count"))
       harness.stdio.println(contains(second_turn, "tool"))
