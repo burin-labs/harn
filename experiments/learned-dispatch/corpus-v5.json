@@ -1,0 +1,1605 @@
+{
+  "contract": "harn.learned_dispatch_corpus.v5",
+  "development": [
+    {
+      "id": "development-positive-00",
+      "resource": "widgets",
+      "fields": {
+        "label": "string",
+        "quantity": "integer",
+        "active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard widgets resource with label (string), quantity (integer), active (boolean). Add the resource module, dispatch tests and API documentation using this application's existing App conventions."
+    },
+    {
+      "id": "development-positive-01",
+      "resource": "reading_groups",
+      "fields": {
+        "display_name": "string",
+        "member_count": "integer",
+        "is_open": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add a repository-standard in-memory reading_groups resource: is_open (boolean), member_count (integer), display_name (string). Generate its auto-mounted module, request tests, and API documentation. Preserve the host and dependencies."
+    },
+    {
+      "id": "development-positive-02",
+      "resource": "sensors",
+      "fields": {
+        "location": "string",
+        "revision": "integer",
+        "enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold sensors, including its module, tests and documentation. Its fields are location (string), revision (integer), enabled (boolean). Use the existing standard POST/GET App pattern with strict payload validation and per-App storage."
+    },
+    {
+      "id": "development-positive-03",
+      "resource": "stock_items",
+      "fields": {
+        "description": "string",
+        "remaining": "integer",
+        "available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need a standard stock_items resource for this App: available (boolean), remaining (integer), description (string). Create app/resources/stock_items.py, tests/test_stock_items.py and docs/stock_items.md, following the current in-memory resource contract."
+    },
+    {
+      "id": "development-positive-04",
+      "resource": "projects",
+      "fields": {
+        "title": "string",
+        "priority": "integer",
+        "archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard projects resource with title (string), priority (integer), archived (boolean). Add the resource module, dispatch tests and API documentation using this application's existing App conventions."
+    },
+    {
+      "id": "development-positive-05",
+      "resource": "tickets",
+      "fields": {
+        "summary": "string",
+        "severity": "integer",
+        "resolved": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add a repository-standard in-memory tickets resource: resolved (boolean), severity (integer), summary (string). Generate its auto-mounted module, request tests, and API documentation. Preserve the host and dependencies."
+    },
+    {
+      "id": "development-positive-06",
+      "resource": "notebooks",
+      "fields": {
+        "owner": "string",
+        "page_count": "integer",
+        "shared": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold notebooks, including its module, tests and documentation. Its fields are owner (string), page_count (integer), shared (boolean). Use the existing standard POST/GET App pattern with strict payload validation and per-App storage."
+    },
+    {
+      "id": "development-positive-07",
+      "resource": "locations",
+      "fields": {
+        "address": "string",
+        "capacity": "integer",
+        "accessible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need a standard locations resource for this App: accessible (boolean), capacity (integer), address (string). Create app/resources/locations.py, tests/test_locations.py and docs/locations.md, following the current in-memory resource contract."
+    },
+    {
+      "id": "development-negative-00",
+      "expected": "",
+      "request": "Explain how I could create a standard widgets resource with label string, quantity integer, and active boolean. Do not edit files."
+    },
+    {
+      "id": "development-negative-01",
+      "expected": "",
+      "request": "Create a widgets resource with label string, quantity integer, active boolean, and SQLite persistence."
+    },
+    {
+      "id": "development-negative-02",
+      "expected": "",
+      "request": "Create both widgets and labels resources, each with name string, count integer and enabled boolean."
+    },
+    {
+      "id": "development-negative-03",
+      "expected": "",
+      "request": "Modify the existing books resource to add an enabled boolean field."
+    },
+    {
+      "id": "development-negative-04",
+      "expected": "",
+      "request": "Create a widgets resource with label string, quantity integer and active boolean, and remove /health."
+    },
+    {
+      "id": "development-negative-05",
+      "expected": "",
+      "request": "Create a widgets resource with label string, description string and active boolean."
+    },
+    {
+      "id": "development-negative-06",
+      "expected": "",
+      "request": "Create a measurements resource with label string, value float and active boolean."
+    },
+    {
+      "id": "development-negative-07",
+      "expected": "",
+      "request": "Create a widgets resource with label string, quantity integer and active boolean, protected by authentication."
+    }
+  ],
+  "qualification": [
+    {
+      "id": "qualification-v5-000",
+      "resource": "harvest_release_members",
+      "fields": {
+        "entry_record_display_label": "string",
+        "entry_record_capacity": "integer",
+        "entry_record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard harvest_release_members resource with entry_record_display_label (string), entry_record_capacity (integer), and entry_record_is_enabled (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v5-001",
+      "resource": "harvest_release_workers",
+      "fields": {
+        "entry_record_reference_code": "string",
+        "entry_record_sequence_number": "integer",
+        "entry_record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named harvest_release_workers. Fields: entry_record_is_visible boolean, entry_record_reference_code string, entry_record_sequence_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v5-002",
+      "resource": "harvest_release_rooms",
+      "fields": {
+        "entry_record_short_title": "string",
+        "entry_record_revision_number": "integer",
+        "entry_record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold harvest_release_rooms: entry_record_revision_number is an integer, entry_record_is_ready is a boolean, and entry_record_short_title is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v5-003",
+      "resource": "harvest_release_prompts",
+      "fields": {
+        "entry_record_description_text": "string",
+        "entry_record_priority_level": "integer",
+        "entry_record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/harvest_release_prompts.py, tests/test_prompts.py, and docs/harvest_release_prompts.md for a new standard harvest_release_prompts resource. Its exact fields are entry_record_description_text: string, entry_record_priority_level: integer, entry_record_is_archived: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v5-004",
+      "resource": "harvest_release_periods",
+      "fields": {
+        "entry_record_owner_name": "string",
+        "entry_record_total_count": "integer",
+        "entry_record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add harvest_release_periods with the string field entry_record_owner_name, integer field entry_record_total_count, and boolean field entry_record_is_public. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v5-005",
+      "resource": "harvest_release_platforms",
+      "fields": {
+        "entry_record_category_name": "string",
+        "entry_record_sort_rank": "integer",
+        "entry_record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new harvest_release_platforms resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly entry_record_is_available (boolean), entry_record_sort_rank (integer), and entry_record_category_name (string), with strict types."
+    },
+    {
+      "id": "qualification-v5-006",
+      "resource": "harvest_release_browsers",
+      "fields": {
+        "entry_record_external_key": "string",
+        "entry_record_retry_limit": "integer",
+        "entry_record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard harvest_release_browsers resource with entry_record_external_key (string), entry_record_retry_limit (integer), and entry_record_is_active (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v5-007",
+      "resource": "harvest_release_requests",
+      "fields": {
+        "entry_record_summary_text": "string",
+        "entry_record_version_number": "integer",
+        "entry_record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named harvest_release_requests. Fields: entry_record_is_complete boolean, entry_record_summary_text string, entry_record_version_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v5-008",
+      "resource": "harvest_release_desks",
+      "fields": {
+        "entry_record_display_label": "string",
+        "entry_record_capacity": "integer",
+        "entry_record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold harvest_release_desks: entry_record_capacity is an integer, entry_record_is_enabled is a boolean, and entry_record_display_label is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v5-009",
+      "resource": "harvest_release_cycles",
+      "fields": {
+        "entry_record_reference_code": "string",
+        "entry_record_sequence_number": "integer",
+        "entry_record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/harvest_release_cycles.py, tests/test_cycles.py, and docs/harvest_release_cycles.md for a new standard harvest_release_cycles resource. Its exact fields are entry_record_reference_code: string, entry_record_sequence_number: integer, entry_record_is_visible: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v5-010",
+      "resource": "harvest_release_contracts",
+      "fields": {
+        "entry_record_short_title": "string",
+        "entry_record_revision_number": "integer",
+        "entry_record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add harvest_release_contracts with the string field entry_record_short_title, integer field entry_record_revision_number, and boolean field entry_record_is_ready. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v5-011",
+      "resource": "harvest_release_ranges",
+      "fields": {
+        "entry_record_description_text": "string",
+        "entry_record_priority_level": "integer",
+        "entry_record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new harvest_release_ranges resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly entry_record_is_archived (boolean), entry_record_priority_level (integer), and entry_record_description_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v5-012",
+      "resource": "harvest_release_cameras",
+      "fields": {
+        "entry_record_owner_name": "string",
+        "entry_record_total_count": "integer",
+        "entry_record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard harvest_release_cameras resource with entry_record_owner_name (string), entry_record_total_count (integer), and entry_record_is_public (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v5-013",
+      "resource": "harvest_release_editions",
+      "fields": {
+        "entry_record_category_name": "string",
+        "entry_record_sort_rank": "integer",
+        "entry_record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named harvest_release_editions. Fields: entry_record_is_available boolean, entry_record_category_name string, entry_record_sort_rank integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v5-014",
+      "resource": "harvest_release_nodes",
+      "fields": {
+        "entry_record_external_key": "string",
+        "entry_record_retry_limit": "integer",
+        "entry_record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold harvest_release_nodes: entry_record_retry_limit is an integer, entry_record_is_active is a boolean, and entry_record_external_key is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v5-015",
+      "resource": "harvest_release_frames",
+      "fields": {
+        "entry_record_summary_text": "string",
+        "entry_record_version_number": "integer",
+        "entry_record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/harvest_release_frames.py, tests/test_frames.py, and docs/harvest_release_frames.md for a new standard harvest_release_frames resource. Its exact fields are entry_record_summary_text: string, entry_record_version_number: integer, entry_record_is_complete: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v5-016",
+      "resource": "harvest_release_skills",
+      "fields": {
+        "entry_record_display_label": "string",
+        "entry_record_capacity": "integer",
+        "entry_record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add harvest_release_skills with the string field entry_record_display_label, integer field entry_record_capacity, and boolean field entry_record_is_enabled. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v5-017",
+      "resource": "harvest_release_leases",
+      "fields": {
+        "entry_record_reference_code": "string",
+        "entry_record_sequence_number": "integer",
+        "entry_record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new harvest_release_leases resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly entry_record_is_visible (boolean), entry_record_sequence_number (integer), and entry_record_reference_code (string), with strict types."
+    },
+    {
+      "id": "qualification-v5-018",
+      "resource": "harvest_release_estimates",
+      "fields": {
+        "entry_record_short_title": "string",
+        "entry_record_revision_number": "integer",
+        "entry_record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard harvest_release_estimates resource with entry_record_short_title (string), entry_record_revision_number (integer), and entry_record_is_ready (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v5-019",
+      "resource": "harvest_release_assets",
+      "fields": {
+        "entry_record_description_text": "string",
+        "entry_record_priority_level": "integer",
+        "entry_record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named harvest_release_assets. Fields: entry_record_is_archived boolean, entry_record_description_text string, entry_record_priority_level integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v5-020",
+      "resource": "harvest_release_cards",
+      "fields": {
+        "entry_record_owner_name": "string",
+        "entry_record_total_count": "integer",
+        "entry_record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold harvest_release_cards: entry_record_total_count is an integer, entry_record_is_public is a boolean, and entry_record_owner_name is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v5-021",
+      "resource": "harvest_release_tags",
+      "fields": {
+        "entry_record_category_name": "string",
+        "entry_record_sort_rank": "integer",
+        "entry_record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/harvest_release_tags.py, tests/test_tags.py, and docs/harvest_release_tags.md for a new standard harvest_release_tags resource. Its exact fields are entry_record_category_name: string, entry_record_sort_rank: integer, entry_record_is_available: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v5-022",
+      "resource": "harvest_release_cabinets",
+      "fields": {
+        "entry_record_external_key": "string",
+        "entry_record_retry_limit": "integer",
+        "entry_record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add harvest_release_cabinets with the string field entry_record_external_key, integer field entry_record_retry_limit, and boolean field entry_record_is_active. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v5-023",
+      "resource": "harvest_release_departments",
+      "fields": {
+        "entry_record_summary_text": "string",
+        "entry_record_version_number": "integer",
+        "entry_record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new harvest_release_departments resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly entry_record_is_complete (boolean), entry_record_version_number (integer), and entry_record_summary_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v5-024",
+      "resource": "harvest_release_rules",
+      "fields": {
+        "entry_record_display_label": "string",
+        "entry_record_capacity": "integer",
+        "entry_record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard harvest_release_rules resource with entry_record_display_label (string), entry_record_capacity (integer), and entry_record_is_enabled (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v5-025",
+      "resource": "harvest_release_sequences",
+      "fields": {
+        "entry_record_reference_code": "string",
+        "entry_record_sequence_number": "integer",
+        "entry_record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named harvest_release_sequences. Fields: entry_record_is_visible boolean, entry_record_reference_code string, entry_record_sequence_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v5-026",
+      "resource": "harvest_release_courses",
+      "fields": {
+        "entry_record_short_title": "string",
+        "entry_record_revision_number": "integer",
+        "entry_record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold harvest_release_courses: entry_record_revision_number is an integer, entry_record_is_ready is a boolean, and entry_record_short_title is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v5-027",
+      "resource": "harvest_release_maps",
+      "fields": {
+        "entry_record_description_text": "string",
+        "entry_record_priority_level": "integer",
+        "entry_record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/harvest_release_maps.py, tests/test_maps.py, and docs/harvest_release_maps.md for a new standard harvest_release_maps resource. Its exact fields are entry_record_description_text: string, entry_record_priority_level: integer, entry_record_is_archived: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v5-028",
+      "resource": "harvest_release_sections",
+      "fields": {
+        "entry_record_owner_name": "string",
+        "entry_record_total_count": "integer",
+        "entry_record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add harvest_release_sections with the string field entry_record_owner_name, integer field entry_record_total_count, and boolean field entry_record_is_public. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v5-029",
+      "resource": "harvest_release_magazines",
+      "fields": {
+        "entry_record_category_name": "string",
+        "entry_record_sort_rank": "integer",
+        "entry_record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new harvest_release_magazines resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly entry_record_is_available (boolean), entry_record_sort_rank (integer), and entry_record_category_name (string), with strict types."
+    },
+    {
+      "id": "qualification-v5-030",
+      "resource": "harvest_release_funds",
+      "fields": {
+        "entry_record_external_key": "string",
+        "entry_record_retry_limit": "integer",
+        "entry_record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard harvest_release_funds resource with entry_record_external_key (string), entry_record_retry_limit (integer), and entry_record_is_active (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v5-031",
+      "resource": "harvest_release_moments",
+      "fields": {
+        "entry_record_summary_text": "string",
+        "entry_record_version_number": "integer",
+        "entry_record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named harvest_release_moments. Fields: entry_record_is_complete boolean, entry_record_summary_text string, entry_record_version_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v5-032",
+      "resource": "harvest_release_destinations",
+      "fields": {
+        "entry_record_display_label": "string",
+        "entry_record_capacity": "integer",
+        "entry_record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold harvest_release_destinations: entry_record_capacity is an integer, entry_record_is_enabled is a boolean, and entry_record_display_label is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v5-033",
+      "resource": "harvest_release_printers",
+      "fields": {
+        "entry_record_reference_code": "string",
+        "entry_record_sequence_number": "integer",
+        "entry_record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/harvest_release_printers.py, tests/test_printers.py, and docs/harvest_release_printers.md for a new standard harvest_release_printers resource. Its exact fields are entry_record_reference_code: string, entry_record_sequence_number: integer, entry_record_is_visible: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v5-034",
+      "resource": "harvest_release_farms",
+      "fields": {
+        "entry_record_short_title": "string",
+        "entry_record_revision_number": "integer",
+        "entry_record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add harvest_release_farms with the string field entry_record_short_title, integer field entry_record_revision_number, and boolean field entry_record_is_ready. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v5-035",
+      "resource": "harvest_release_brands",
+      "fields": {
+        "entry_record_description_text": "string",
+        "entry_record_priority_level": "integer",
+        "entry_record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new harvest_release_brands resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly entry_record_is_archived (boolean), entry_record_priority_level (integer), and entry_record_description_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v5-036",
+      "resource": "harvest_release_positions",
+      "fields": {
+        "entry_record_owner_name": "string",
+        "entry_record_total_count": "integer",
+        "entry_record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard harvest_release_positions resource with entry_record_owner_name (string), entry_record_total_count (integer), and entry_record_is_public (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v5-037",
+      "resource": "harvest_release_tasks",
+      "fields": {
+        "entry_record_category_name": "string",
+        "entry_record_sort_rank": "integer",
+        "entry_record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named harvest_release_tasks. Fields: entry_record_is_available boolean, entry_record_category_name string, entry_record_sort_rank integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v5-038",
+      "resource": "harvest_release_quotas",
+      "fields": {
+        "entry_record_external_key": "string",
+        "entry_record_retry_limit": "integer",
+        "entry_record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold harvest_release_quotas: entry_record_retry_limit is an integer, entry_record_is_active is a boolean, and entry_record_external_key is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v5-039",
+      "resource": "harvest_release_modules",
+      "fields": {
+        "entry_record_summary_text": "string",
+        "entry_record_version_number": "integer",
+        "entry_record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/harvest_release_modules.py, tests/test_modules.py, and docs/harvest_release_modules.md for a new standard harvest_release_modules resource. Its exact fields are entry_record_summary_text: string, entry_record_version_number: integer, entry_record_is_complete: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v5-040",
+      "resource": "harvest_release_dimensions",
+      "fields": {
+        "entry_record_display_label": "string",
+        "entry_record_capacity": "integer",
+        "entry_record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add harvest_release_dimensions with the string field entry_record_display_label, integer field entry_record_capacity, and boolean field entry_record_is_enabled. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v5-041",
+      "resource": "harvest_release_keys",
+      "fields": {
+        "entry_record_reference_code": "string",
+        "entry_record_sequence_number": "integer",
+        "entry_record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new harvest_release_keys resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly entry_record_is_visible (boolean), entry_record_sequence_number (integer), and entry_record_reference_code (string), with strict types."
+    },
+    {
+      "id": "qualification-v5-042",
+      "resource": "harvest_release_levels",
+      "fields": {
+        "entry_record_short_title": "string",
+        "entry_record_revision_number": "integer",
+        "entry_record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard harvest_release_levels resource with entry_record_short_title (string), entry_record_revision_number (integer), and entry_record_is_ready (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v5-043",
+      "resource": "harvest_release_entities",
+      "fields": {
+        "entry_record_description_text": "string",
+        "entry_record_priority_level": "integer",
+        "entry_record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named harvest_release_entities. Fields: entry_record_is_archived boolean, entry_record_description_text string, entry_record_priority_level integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v5-044",
+      "resource": "harvest_release_players",
+      "fields": {
+        "entry_record_owner_name": "string",
+        "entry_record_total_count": "integer",
+        "entry_record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold harvest_release_players: entry_record_total_count is an integer, entry_record_is_public is a boolean, and entry_record_owner_name is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v5-045",
+      "resource": "harvest_release_containers",
+      "fields": {
+        "entry_record_category_name": "string",
+        "entry_record_sort_rank": "integer",
+        "entry_record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/harvest_release_containers.py, tests/test_containers.py, and docs/harvest_release_containers.md for a new standard harvest_release_containers resource. Its exact fields are entry_record_category_name: string, entry_record_sort_rank: integer, entry_record_is_available: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v5-046",
+      "resource": "harvest_release_readers",
+      "fields": {
+        "entry_record_external_key": "string",
+        "entry_record_retry_limit": "integer",
+        "entry_record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add harvest_release_readers with the string field entry_record_external_key, integer field entry_record_retry_limit, and boolean field entry_record_is_active. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v5-047",
+      "resource": "harvest_release_airports",
+      "fields": {
+        "entry_record_summary_text": "string",
+        "entry_record_version_number": "integer",
+        "entry_record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new harvest_release_airports resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly entry_record_is_complete (boolean), entry_record_version_number (integer), and entry_record_summary_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v5-048",
+      "resource": "harvest_release_houses",
+      "fields": {
+        "entry_record_display_label": "string",
+        "entry_record_capacity": "integer",
+        "entry_record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard harvest_release_houses resource with entry_record_display_label (string), entry_record_capacity (integer), and entry_record_is_enabled (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v5-049",
+      "resource": "harvest_release_languages",
+      "fields": {
+        "entry_record_reference_code": "string",
+        "entry_record_sequence_number": "integer",
+        "entry_record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named harvest_release_languages. Fields: entry_record_is_visible boolean, entry_record_reference_code string, entry_record_sequence_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v5-050",
+      "resource": "harvest_release_numbers",
+      "fields": {
+        "entry_record_short_title": "string",
+        "entry_record_revision_number": "integer",
+        "entry_record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold harvest_release_numbers: entry_record_revision_number is an integer, entry_record_is_ready is a boolean, and entry_record_short_title is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v5-051",
+      "resource": "harvest_release_streets",
+      "fields": {
+        "entry_record_description_text": "string",
+        "entry_record_priority_level": "integer",
+        "entry_record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/harvest_release_streets.py, tests/test_streets.py, and docs/harvest_release_streets.md for a new standard harvest_release_streets resource. Its exact fields are entry_record_description_text: string, entry_record_priority_level: integer, entry_record_is_archived: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v5-052",
+      "resource": "harvest_release_services",
+      "fields": {
+        "entry_record_owner_name": "string",
+        "entry_record_total_count": "integer",
+        "entry_record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add harvest_release_services with the string field entry_record_owner_name, integer field entry_record_total_count, and boolean field entry_record_is_public. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v5-053",
+      "resource": "harvest_release_residents",
+      "fields": {
+        "entry_record_category_name": "string",
+        "entry_record_sort_rank": "integer",
+        "entry_record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new harvest_release_residents resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly entry_record_is_available (boolean), entry_record_sort_rank (integer), and entry_record_category_name (string), with strict types."
+    },
+    {
+      "id": "qualification-v5-054",
+      "resource": "harvest_release_rates",
+      "fields": {
+        "entry_record_external_key": "string",
+        "entry_record_retry_limit": "integer",
+        "entry_record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard harvest_release_rates resource with entry_record_external_key (string), entry_record_retry_limit (integer), and entry_record_is_active (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v5-055",
+      "resource": "harvest_release_signals",
+      "fields": {
+        "entry_record_summary_text": "string",
+        "entry_record_version_number": "integer",
+        "entry_record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named harvest_release_signals. Fields: entry_record_is_complete boolean, entry_record_summary_text string, entry_record_version_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v5-056",
+      "resource": "harvest_release_boards",
+      "fields": {
+        "entry_record_display_label": "string",
+        "entry_record_capacity": "integer",
+        "entry_record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold harvest_release_boards: entry_record_capacity is an integer, entry_record_is_enabled is a boolean, and entry_record_display_label is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v5-057",
+      "resource": "harvest_release_records",
+      "fields": {
+        "entry_record_reference_code": "string",
+        "entry_record_sequence_number": "integer",
+        "entry_record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/harvest_release_records.py, tests/test_records.py, and docs/harvest_release_records.md for a new standard harvest_release_records resource. Its exact fields are entry_record_reference_code: string, entry_record_sequence_number: integer, entry_record_is_visible: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v5-058",
+      "resource": "harvest_release_files",
+      "fields": {
+        "entry_record_short_title": "string",
+        "entry_record_revision_number": "integer",
+        "entry_record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add harvest_release_files with the string field entry_record_short_title, integer field entry_record_revision_number, and boolean field entry_record_is_ready. Generate the module, request tests and API documentation, keeping existing harvest_release_files intact."
+    },
+    {
+      "id": "qualification-v5-059",
+      "resource": "harvest_release_billboards",
+      "fields": {
+        "entry_record_description_text": "string",
+        "entry_record_priority_level": "integer",
+        "entry_record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new harvest_release_billboards resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly entry_record_is_archived (boolean), entry_record_priority_level (integer), and entry_record_description_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v5-060",
+      "resource": "harvest_release_plans",
+      "fields": {
+        "entry_record_owner_name": "string",
+        "entry_record_total_count": "integer",
+        "entry_record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard harvest_release_plans resource with entry_record_owner_name (string), entry_record_total_count (integer), and entry_record_is_public (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v5-061",
+      "resource": "harvest_release_tables",
+      "fields": {
+        "entry_record_category_name": "string",
+        "entry_record_sort_rank": "integer",
+        "entry_record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named harvest_release_tables. Fields: entry_record_is_available boolean, entry_record_category_name string, entry_record_sort_rank integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v5-062",
+      "resource": "harvest_release_districts",
+      "fields": {
+        "entry_record_external_key": "string",
+        "entry_record_retry_limit": "integer",
+        "entry_record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold harvest_release_districts: entry_record_retry_limit is an integer, entry_record_is_active is a boolean, and entry_record_external_key is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v5-063",
+      "resource": "harvest_release_operations",
+      "fields": {
+        "entry_record_summary_text": "string",
+        "entry_record_version_number": "integer",
+        "entry_record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/harvest_release_operations.py, tests/test_operations.py, and docs/harvest_release_operations.md for a new standard harvest_release_operations resource. Its exact fields are entry_record_summary_text: string, entry_record_version_number: integer, entry_record_is_complete: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v5-064",
+      "resource": "harvest_release_sites",
+      "fields": {
+        "entry_record_display_label": "string",
+        "entry_record_capacity": "integer",
+        "entry_record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add harvest_release_sites with the string field entry_record_display_label, integer field entry_record_capacity, and boolean field entry_record_is_enabled. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v5-065",
+      "resource": "harvest_release_shifts",
+      "fields": {
+        "entry_record_reference_code": "string",
+        "entry_record_sequence_number": "integer",
+        "entry_record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new harvest_release_shifts resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly entry_record_is_visible (boolean), entry_record_sequence_number (integer), and entry_record_reference_code (string), with strict types."
+    },
+    {
+      "id": "qualification-v5-066",
+      "resource": "harvest_release_units",
+      "fields": {
+        "entry_record_short_title": "string",
+        "entry_record_revision_number": "integer",
+        "entry_record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard harvest_release_units resource with entry_record_short_title (string), entry_record_revision_number (integer), and entry_record_is_ready (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v5-067",
+      "resource": "harvest_release_timings",
+      "fields": {
+        "entry_record_description_text": "string",
+        "entry_record_priority_level": "integer",
+        "entry_record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named harvest_release_timings. Fields: entry_record_is_archived boolean, entry_record_description_text string, entry_record_priority_level integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v5-068",
+      "resource": "harvest_release_writers",
+      "fields": {
+        "entry_record_owner_name": "string",
+        "entry_record_total_count": "integer",
+        "entry_record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold harvest_release_writers: entry_record_total_count is an integer, entry_record_is_public is a boolean, and entry_record_owner_name is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v5-069",
+      "resource": "harvest_release_forums",
+      "fields": {
+        "entry_record_category_name": "string",
+        "entry_record_sort_rank": "integer",
+        "entry_record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/harvest_release_forums.py, tests/test_forums.py, and docs/harvest_release_forums.md for a new standard harvest_release_forums resource. Its exact fields are entry_record_category_name: string, entry_record_sort_rank: integer, entry_record_is_available: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v5-070",
+      "resource": "harvest_release_codes",
+      "fields": {
+        "entry_record_external_key": "string",
+        "entry_record_retry_limit": "integer",
+        "entry_record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add harvest_release_codes with the string field entry_record_external_key, integer field entry_record_retry_limit, and boolean field entry_record_is_active. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v5-071",
+      "resource": "harvest_release_chapters",
+      "fields": {
+        "entry_record_summary_text": "string",
+        "entry_record_version_number": "integer",
+        "entry_record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new harvest_release_chapters resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly entry_record_is_complete (boolean), entry_record_version_number (integer), and entry_record_summary_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v5-072",
+      "resource": "harvest_release_instances",
+      "fields": {
+        "entry_record_display_label": "string",
+        "entry_record_capacity": "integer",
+        "entry_record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard harvest_release_instances resource with entry_record_display_label (string), entry_record_capacity (integer), and entry_record_is_enabled (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v5-073",
+      "resource": "harvest_release_countries",
+      "fields": {
+        "entry_record_reference_code": "string",
+        "entry_record_sequence_number": "integer",
+        "entry_record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named harvest_release_countries. Fields: entry_record_is_visible boolean, entry_record_reference_code string, entry_record_sequence_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v5-074",
+      "resource": "harvest_release_items",
+      "fields": {
+        "entry_record_short_title": "string",
+        "entry_record_revision_number": "integer",
+        "entry_record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold harvest_release_items: entry_record_revision_number is an integer, entry_record_is_ready is a boolean, and entry_record_short_title is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v5-075",
+      "resource": "harvest_release_offices",
+      "fields": {
+        "entry_record_description_text": "string",
+        "entry_record_priority_level": "integer",
+        "entry_record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/harvest_release_offices.py, tests/test_offices.py, and docs/harvest_release_offices.md for a new standard harvest_release_offices resource. Its exact fields are entry_record_description_text: string, entry_record_priority_level: integer, entry_record_is_archived: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v5-076",
+      "resource": "harvest_release_seasons",
+      "fields": {
+        "entry_record_owner_name": "string",
+        "entry_record_total_count": "integer",
+        "entry_record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add harvest_release_seasons with the string field entry_record_owner_name, integer field entry_record_total_count, and boolean field entry_record_is_public. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v5-077",
+      "resource": "harvest_release_objects",
+      "fields": {
+        "entry_record_category_name": "string",
+        "entry_record_sort_rank": "integer",
+        "entry_record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new harvest_release_objects resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly entry_record_is_available (boolean), entry_record_sort_rank (integer), and entry_record_category_name (string), with strict types."
+    },
+    {
+      "id": "qualification-v5-078",
+      "resource": "harvest_release_pages",
+      "fields": {
+        "entry_record_external_key": "string",
+        "entry_record_retry_limit": "integer",
+        "entry_record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard harvest_release_pages resource with entry_record_external_key (string), entry_record_retry_limit (integer), and entry_record_is_active (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v5-079",
+      "resource": "harvest_release_identities",
+      "fields": {
+        "entry_record_summary_text": "string",
+        "entry_record_version_number": "integer",
+        "entry_record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named harvest_release_identities. Fields: entry_record_is_complete boolean, entry_record_summary_text string, entry_record_version_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v5-080",
+      "resource": "harvest_release_reviews",
+      "fields": {
+        "entry_record_display_label": "string",
+        "entry_record_capacity": "integer",
+        "entry_record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold harvest_release_reviews: entry_record_capacity is an integer, entry_record_is_enabled is a boolean, and entry_record_display_label is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v5-081",
+      "resource": "harvest_release_sets",
+      "fields": {
+        "entry_record_reference_code": "string",
+        "entry_record_sequence_number": "integer",
+        "entry_record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/harvest_release_sets.py, tests/test_sets.py, and docs/harvest_release_sets.md for a new standard harvest_release_sets resource. Its exact fields are entry_record_reference_code: string, entry_record_sequence_number: integer, entry_record_is_visible: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v5-082",
+      "resource": "harvest_release_drivers",
+      "fields": {
+        "entry_record_short_title": "string",
+        "entry_record_revision_number": "integer",
+        "entry_record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add harvest_release_drivers with the string field entry_record_short_title, integer field entry_record_revision_number, and boolean field entry_record_is_ready. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v5-083",
+      "resource": "harvest_release_slides",
+      "fields": {
+        "entry_record_description_text": "string",
+        "entry_record_priority_level": "integer",
+        "entry_record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new harvest_release_slides resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly entry_record_is_archived (boolean), entry_record_priority_level (integer), and entry_record_description_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v5-084",
+      "resource": "harvest_release_certificates",
+      "fields": {
+        "entry_record_owner_name": "string",
+        "entry_record_total_count": "integer",
+        "entry_record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard harvest_release_certificates resource with entry_record_owner_name (string), entry_record_total_count (integer), and entry_record_is_public (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v5-085",
+      "resource": "harvest_release_studios",
+      "fields": {
+        "entry_record_category_name": "string",
+        "entry_record_sort_rank": "integer",
+        "entry_record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named harvest_release_studios. Fields: entry_record_is_available boolean, entry_record_category_name string, entry_record_sort_rank integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v5-086",
+      "resource": "harvest_release_columns",
+      "fields": {
+        "entry_record_external_key": "string",
+        "entry_record_retry_limit": "integer",
+        "entry_record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold harvest_release_columns: entry_record_retry_limit is an integer, entry_record_is_active is a boolean, and entry_record_external_key is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v5-087",
+      "resource": "harvest_release_networks",
+      "fields": {
+        "entry_record_summary_text": "string",
+        "entry_record_version_number": "integer",
+        "entry_record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/harvest_release_networks.py, tests/test_networks.py, and docs/harvest_release_networks.md for a new standard harvest_release_networks resource. Its exact fields are entry_record_summary_text: string, entry_record_version_number: integer, entry_record_is_complete: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v5-088",
+      "resource": "harvest_release_parameters",
+      "fields": {
+        "entry_record_display_label": "string",
+        "entry_record_capacity": "integer",
+        "entry_record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add harvest_release_parameters with the string field entry_record_display_label, integer field entry_record_capacity, and boolean field entry_record_is_enabled. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v5-089",
+      "resource": "harvest_release_variables",
+      "fields": {
+        "entry_record_reference_code": "string",
+        "entry_record_sequence_number": "integer",
+        "entry_record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new harvest_release_variables resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly entry_record_is_visible (boolean), entry_record_sequence_number (integer), and entry_record_reference_code (string), with strict types."
+    },
+    {
+      "id": "qualification-v5-090",
+      "resource": "harvest_release_garages",
+      "fields": {
+        "entry_record_short_title": "string",
+        "entry_record_revision_number": "integer",
+        "entry_record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard harvest_release_garages resource with entry_record_short_title (string), entry_record_revision_number (integer), and entry_record_is_ready (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v5-091",
+      "resource": "harvest_release_inspections",
+      "fields": {
+        "entry_record_description_text": "string",
+        "entry_record_priority_level": "integer",
+        "entry_record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named harvest_release_inspections. Fields: entry_record_is_archived boolean, entry_record_description_text string, entry_record_priority_level integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v5-092",
+      "resource": "harvest_release_movies",
+      "fields": {
+        "entry_record_owner_name": "string",
+        "entry_record_total_count": "integer",
+        "entry_record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold harvest_release_movies: entry_record_total_count is an integer, entry_record_is_public is a boolean, and entry_record_owner_name is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v5-093",
+      "resource": "harvest_release_organizations",
+      "fields": {
+        "entry_record_category_name": "string",
+        "entry_record_sort_rank": "integer",
+        "entry_record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/harvest_release_organizations.py, tests/test_organizations.py, and docs/harvest_release_organizations.md for a new standard harvest_release_organizations resource. Its exact fields are entry_record_category_name: string, entry_record_sort_rank: integer, entry_record_is_available: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v5-094",
+      "resource": "harvest_release_visitors",
+      "fields": {
+        "entry_record_external_key": "string",
+        "entry_record_retry_limit": "integer",
+        "entry_record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add harvest_release_visitors with the string field entry_record_external_key, integer field entry_record_retry_limit, and boolean field entry_record_is_active. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v5-095",
+      "resource": "harvest_release_revisions",
+      "fields": {
+        "entry_record_summary_text": "string",
+        "entry_record_version_number": "integer",
+        "entry_record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new harvest_release_revisions resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly entry_record_is_complete (boolean), entry_record_version_number (integer), and entry_record_summary_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v5-096",
+      "resource": "harvest_release_conferences",
+      "fields": {
+        "entry_record_display_label": "string",
+        "entry_record_capacity": "integer",
+        "entry_record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard harvest_release_conferences resource with entry_record_display_label (string), entry_record_capacity (integer), and entry_record_is_enabled (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v5-097",
+      "resource": "harvest_release_systems",
+      "fields": {
+        "entry_record_reference_code": "string",
+        "entry_record_sequence_number": "integer",
+        "entry_record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named harvest_release_systems. Fields: entry_record_is_visible boolean, entry_record_reference_code string, entry_record_sequence_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v5-098",
+      "resource": "harvest_release_entries",
+      "fields": {
+        "entry_record_short_title": "string",
+        "entry_record_revision_number": "integer",
+        "entry_record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold harvest_release_entries: entry_record_revision_number is an integer, entry_record_is_ready is a boolean, and entry_record_short_title is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v5-099",
+      "resource": "harvest_release_payments",
+      "fields": {
+        "entry_record_description_text": "string",
+        "entry_record_priority_level": "integer",
+        "entry_record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/harvest_release_payments.py, tests/test_payments.py, and docs/harvest_release_payments.md for a new standard harvest_release_payments resource. Its exact fields are entry_record_description_text: string, entry_record_priority_level: integer, entry_record_is_archived: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v5-100",
+      "resource": "harvest_release_awards",
+      "fields": {
+        "entry_record_owner_name": "string",
+        "entry_record_total_count": "integer",
+        "entry_record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add harvest_release_awards with the string field entry_record_owner_name, integer field entry_record_total_count, and boolean field entry_record_is_public. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v5-101",
+      "resource": "harvest_release_instruments",
+      "fields": {
+        "entry_record_category_name": "string",
+        "entry_record_sort_rank": "integer",
+        "entry_record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new harvest_release_instruments resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly entry_record_is_available (boolean), entry_record_sort_rank (integer), and entry_record_category_name (string), with strict types."
+    },
+    {
+      "id": "qualification-v5-102",
+      "resource": "harvest_release_crews",
+      "fields": {
+        "entry_record_external_key": "string",
+        "entry_record_retry_limit": "integer",
+        "entry_record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard harvest_release_crews resource with entry_record_external_key (string), entry_record_retry_limit (integer), and entry_record_is_active (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v5-103",
+      "resource": "harvest_release_spaces",
+      "fields": {
+        "entry_record_summary_text": "string",
+        "entry_record_version_number": "integer",
+        "entry_record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named harvest_release_spaces. Fields: entry_record_is_complete boolean, entry_record_summary_text string, entry_record_version_number integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v5-104",
+      "resource": "harvest_release_fields",
+      "fields": {
+        "entry_record_display_label": "string",
+        "entry_record_capacity": "integer",
+        "entry_record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold harvest_release_fields: entry_record_capacity is an integer, entry_record_is_enabled is a boolean, and entry_record_display_label is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v5-105",
+      "resource": "harvest_release_permissions",
+      "fields": {
+        "entry_record_reference_code": "string",
+        "entry_record_sequence_number": "integer",
+        "entry_record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/harvest_release_permissions.py, tests/test_permissions.py, and docs/harvest_release_permissions.md for a new standard harvest_release_permissions resource. Its exact fields are entry_record_reference_code: string, entry_record_sequence_number: integer, entry_record_is_visible: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v5-106",
+      "resource": "harvest_release_purchases",
+      "fields": {
+        "entry_record_short_title": "string",
+        "entry_record_revision_number": "integer",
+        "entry_record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add harvest_release_purchases with the string field entry_record_short_title, integer field entry_record_revision_number, and boolean field entry_record_is_ready. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v5-107",
+      "resource": "harvest_release_stations",
+      "fields": {
+        "entry_record_description_text": "string",
+        "entry_record_priority_level": "integer",
+        "entry_record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new harvest_release_stations resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly entry_record_is_archived (boolean), entry_record_priority_level (integer), and entry_record_description_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v5-108",
+      "resource": "harvest_release_carriers",
+      "fields": {
+        "entry_record_owner_name": "string",
+        "entry_record_total_count": "integer",
+        "entry_record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard harvest_release_carriers resource with entry_record_owner_name (string), entry_record_total_count (integer), and entry_record_is_public (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v5-109",
+      "resource": "harvest_release_series",
+      "fields": {
+        "entry_record_category_name": "string",
+        "entry_record_sort_rank": "integer",
+        "entry_record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named harvest_release_series. Fields: entry_record_is_available boolean, entry_record_category_name string, entry_record_sort_rank integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v5-110",
+      "resource": "harvest_release_stores",
+      "fields": {
+        "entry_record_external_key": "string",
+        "entry_record_retry_limit": "integer",
+        "entry_record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold harvest_release_stores: entry_record_retry_limit is an integer, entry_record_is_active is a boolean, and entry_record_external_key is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v5-111",
+      "resource": "harvest_release_proposals",
+      "fields": {
+        "entry_record_summary_text": "string",
+        "entry_record_version_number": "integer",
+        "entry_record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/harvest_release_proposals.py, tests/test_proposals.py, and docs/harvest_release_proposals.md for a new standard harvest_release_proposals resource. Its exact fields are entry_record_summary_text: string, entry_record_version_number: integer, entry_record_is_complete: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v5-112",
+      "resource": "harvest_release_contacts",
+      "fields": {
+        "entry_record_display_label": "string",
+        "entry_record_capacity": "integer",
+        "entry_record_is_enabled": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add harvest_release_contacts with the string field entry_record_display_label, integer field entry_record_capacity, and boolean field entry_record_is_enabled. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v5-113",
+      "resource": "harvest_release_headlines",
+      "fields": {
+        "entry_record_reference_code": "string",
+        "entry_record_sequence_number": "integer",
+        "entry_record_is_visible": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new harvest_release_headlines resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly entry_record_is_visible (boolean), entry_record_sequence_number (integer), and entry_record_reference_code (string), with strict types."
+    },
+    {
+      "id": "qualification-v5-114",
+      "resource": "harvest_release_currencies",
+      "fields": {
+        "entry_record_short_title": "string",
+        "entry_record_revision_number": "integer",
+        "entry_record_is_ready": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Create the standard harvest_release_currencies resource with entry_record_short_title (string), entry_record_revision_number (integer), and entry_record_is_ready (boolean). Include its auto-mounted module, dispatch tests, and API documentation. Use the existing in-memory App contract; preserve the host."
+    },
+    {
+      "id": "qualification-v5-115",
+      "resource": "harvest_release_facilities",
+      "fields": {
+        "entry_record_description_text": "string",
+        "entry_record_priority_level": "integer",
+        "entry_record_is_archived": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Add one standard in-memory resource named harvest_release_facilities. Fields: entry_record_is_archived boolean, entry_record_description_text string, entry_record_priority_level integer. Scaffold the resource implementation, request tests, and API docs using the repository conventions."
+    },
+    {
+      "id": "qualification-v5-116",
+      "resource": "harvest_release_materials",
+      "fields": {
+        "entry_record_owner_name": "string",
+        "entry_record_total_count": "integer",
+        "entry_record_is_public": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Please scaffold harvest_release_materials: entry_record_total_count is an integer, entry_record_is_public is a boolean, and entry_record_owner_name is a string. Add its module, tests, and documentation for the existing App POST/GET pattern with strict payload types and per-App storage."
+    },
+    {
+      "id": "qualification-v5-117",
+      "resource": "harvest_release_employees",
+      "fields": {
+        "entry_record_category_name": "string",
+        "entry_record_sort_rank": "integer",
+        "entry_record_is_available": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "I need app/resources/harvest_release_employees.py, tests/test_employees.py, and docs/harvest_release_employees.md for a new standard harvest_release_employees resource. Its exact fields are entry_record_category_name: string, entry_record_sort_rank: integer, entry_record_is_available: boolean. Follow the existing auto-mounted, in-memory resource contract."
+    },
+    {
+      "id": "qualification-v5-118",
+      "resource": "harvest_release_resources",
+      "fields": {
+        "entry_record_external_key": "string",
+        "entry_record_retry_limit": "integer",
+        "entry_record_is_active": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Using this application's existing standard resource pattern, add harvest_release_resources with the string field entry_record_external_key, integer field entry_record_retry_limit, and boolean field entry_record_is_active. Generate the module, request tests and API documentation, keeping existing files intact."
+    },
+    {
+      "id": "qualification-v5-119",
+      "resource": "harvest_release_clients",
+      "fields": {
+        "entry_record_summary_text": "string",
+        "entry_record_version_number": "integer",
+        "entry_record_is_complete": "boolean"
+      },
+      "expected": "add-standard-resource",
+      "request": "Scaffold a single new harvest_release_clients resource, its tests and API docs. Keep storage isolated per App and use the normal POST/GET routes. Require exactly entry_record_is_complete (boolean), entry_record_version_number (integer), and entry_record_summary_text (string), with strict types."
+    },
+    {
+      "id": "qualification-v5-120",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Describe a standard medals resource with caption string, ranking integer and visible boolean. Explain the module, tests and docs; do not change files."
+    },
+    {
+      "id": "qualification-v5-121",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Review my idea for a standard mosaics resource with title string, width integer and public boolean. Give feedback without making changes."
+    },
+    {
+      "id": "qualification-v5-122",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Show a plan for standard lanterns with label string, brightness integer and lit boolean. Do not create the implementation, tests or docs."
+    },
+    {
+      "id": "qualification-v5-123",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Add a standard vineyards resource with owner string, area integer and active boolean, persisting every record in SQLite across App restarts."
+    },
+    {
+      "id": "qualification-v5-124",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Scaffold scholarships with title string, amount integer and open boolean, requiring an authorization token on all resource requests."
+    },
+    {
+      "id": "qualification-v5-125",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Create a standard envelopes resource with label string, count integer and sealed boolean, plus a DELETE route to remove records."
+    },
+    {
+      "id": "qualification-v5-126",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Generate the waterfalls resource with title string, height integer and accessible boolean, including a PATCH route for editing records."
+    },
+    {
+      "id": "qualification-v5-127",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Add standard terminals with label string, lanes integer and open boolean. Also replace the health response with a readiness report."
+    },
+    {
+      "id": "qualification-v5-128",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Create both oaks and pines resources, each with label string, age integer and healthy boolean, including both modules, tests and docs."
+    },
+    {
+      "id": "qualification-v5-129",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Scaffold a standard turbines resource with label string, output integer, running boolean and manufacturer string. Include module, tests and docs."
+    },
+    {
+      "id": "qualification-v5-130",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Create standard recipes with title string, servings integer and ingredients list of strings. Add implementation, tests and documentation."
+    },
+    {
+      "id": "qualification-v5-131",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Generate a standard reservoirs resource with label string, volume floating point and open boolean, plus its tests and API docs."
+    },
+    {
+      "id": "qualification-v5-132",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Add standard sculptures with title string and displayed boolean. Generate the resource module, request tests and API documentation."
+    },
+    {
+      "id": "qualification-v5-133",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Create a standard cranes resource, module, tests and docs. Pick the field names and types yourself."
+    },
+    {
+      "id": "qualification-v5-134",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Scaffold standard paddocks with id string, capacity integer and open boolean. Keep the exact names in its module, tests and docs."
+    },
+    {
+      "id": "qualification-v5-135",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Create a standard fountains resource with title string, id integer and running boolean. Preserve these exact field names in all artifacts."
+    },
+    {
+      "id": "qualification-v5-136",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Add a standard piers resource with label string, length integer and id boolean. Include its module, tests and docs without renaming fields."
+    },
+    {
+      "id": "qualification-v5-137",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Create a standard hammocks resource with value string, value integer and occupied boolean. Preserve both value fields in module, tests and docs."
+    },
+    {
+      "id": "qualification-v5-138",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Scaffold standard aquariums with label string, open integer and open boolean. Keep those exact names in the implementation, tests and docs."
+    },
+    {
+      "id": "qualification-v5-139",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Generate standard awnings with name string, span integer and name boolean. Do not rename the fields; add module, tests and docs."
+    },
+    {
+      "id": "qualification-v5-140",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Create the standard UpperShelves resource with label string, slots integer and open boolean. Preserve its exact uppercase spelling in module, tests and docs."
+    },
+    {
+      "id": "qualification-v5-141",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Add a standard 4seasons resource with title string, rank integer and current boolean. Keep that identifier exactly and include module, tests and docs."
+    },
+    {
+      "id": "qualification-v5-142",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Scaffold standard flower-pots with label string, volume integer and full boolean. Retain the hyphenated resource name in module, tests and documentation."
+    },
+    {
+      "id": "qualification-v5-143",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Create the standard ../parent resource with title string, rank integer and enabled boolean. Preserve that exact resource path in its three artifacts."
+    },
+    {
+      "id": "qualification-v5-144",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Add standard sailboats with owner-name string, length integer and moored boolean. Keep the hyphenated field name exactly in module, tests and docs."
+    },
+    {
+      "id": "qualification-v5-145",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Scaffold a standard kayaks resource with label string, 3seats integer and rented boolean. Preserve those exact field names in all three artifacts."
+    },
+    {
+      "id": "qualification-v5-146",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Create standard canoes with title string, seats integer and is-rented boolean. Keep that exact boolean field name in implementation, tests and docs."
+    },
+    {
+      "id": "qualification-v5-147",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Generate standard ladders_v3 with label string, height integer and safe boolean, add tests and docs, then run python3 -m unittest discover -s tests."
+    },
+    {
+      "id": "qualification-v5-148",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Add standard terraces with title string, area integer and public boolean, including module, tests and docs; update the project dependency list too."
+    },
+    {
+      "id": "qualification-v5-149",
+      "expected": "",
+      "request": "Separate task for this existing application: For this separate application request: Migrate the HTTP host to an external framework and create standard gazebos with label string, seats integer and available boolean, tests and docs."
+    }
+  ]
+}
