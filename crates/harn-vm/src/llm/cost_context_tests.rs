@@ -12,6 +12,41 @@ fn segment_tokens(breakdown: &LlmContextTokenBreakdown, id: &'static str) -> Opt
 }
 
 #[test]
+fn current_context_uses_resident_input_and_preserves_unknown_capacity() {
+    let _guard = crate::llm::env_guard();
+    let mut opts = crate::llm::api::options::base_opts("openai");
+    opts.model = "gpt-4o-mini".into();
+    opts.messages = vec![serde_json::json!({"role": "user", "content": "visible context"})];
+    opts.native_tools = Some(vec![serde_json::json!({
+        "type": "function", "defer_loading": true,
+        "function": {"name": "deferred", "description": "not resident ".repeat(20), "parameters": {"type":"object"}}
+    })]);
+    opts.max_tokens = 128;
+    let context = project_llm_call_context_breakdown(&opts);
+    let deferred = segment_tokens(&context, "deferred_tool_schemas").unwrap();
+    assert!(deferred > 0);
+    assert!(context.resident_input_tokens > 0);
+    assert_eq!(
+        context.resident_input_tokens,
+        context.input_tokens - deferred
+    );
+    assert!(context.resident_input_tokens < context.context_tokens);
+    assert_eq!(
+        context.context_window,
+        Some(
+            crate::llm_config::model_catalog_entry_for_route("openai", "gpt-4o-mini")
+                .unwrap()
+                .context_window as usize
+        )
+    );
+    opts.model = "unregistered-context-capacity-control".into();
+    assert_eq!(
+        project_llm_call_context_breakdown(&opts).context_window,
+        None
+    );
+}
+
+#[test]
 fn wire_output_schema_is_counted_but_prompt_validation_is_not_counted_twice() {
     use crate::llm::api::OutputFormat;
     let mut opts = crate::llm::api::options::base_opts("openai");

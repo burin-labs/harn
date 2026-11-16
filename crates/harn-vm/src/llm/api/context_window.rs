@@ -19,19 +19,15 @@ fn context_window_cache() -> &'static ContextWindowCache {
     CACHE.get_or_init(|| StdMutex::new(StdHashMap::new()))
 }
 
-/// Resolve context from the owning provider catalog for hosted models, use
-/// effective request settings for Ollama, or discover other server limits.
-/// Discovery is cached per (provider, base_url, model_id).
-///
-/// Returns `None` when neither discovery nor an applicable catalog limit is
-/// available. Other local routes may fall back only to an explicit runtime
-/// limit, not the model's advertised architecture limit. Ollama's configured
-/// request limit is distinct from an already-loaded runner's observed context.
-pub async fn fetch_provider_max_context(
-    provider: &str,
-    model: &str,
-    api_key: &str,
-) -> Option<usize> {
+enum ContextWindowSource {
+    Configured(Option<usize>),
+    Discovery {
+        catalog_window: Option<usize>,
+        base_url: String,
+    },
+}
+
+fn context_window_source(provider: &str, model: &str) -> ContextWindowSource {
     // Ollama requests always inject num_ctx. Architecture metadata from
     // /api/show does not describe that setting, nor an already-loaded runner.
     // Resolve on each call so environment/catalog changes cannot be cached out.
@@ -39,10 +35,13 @@ pub async fn fetch_provider_max_context(
         .message_wire_format
         .is_ollama()
     {
-        return usize::try_from(
-            super::ollama::OllamaRuntimeSettings::for_route(provider, Some(model), None).num_ctx,
-        )
-        .ok();
+        return ContextWindowSource::Configured(
+            usize::try_from(
+                super::ollama::OllamaRuntimeSettings::for_route(provider, Some(model), None)
+                    .num_ctx,
+            )
+            .ok(),
+        );
     }
     let (local, catalog_window, base_url) = {
         let pdef = crate::llm_config::provider_config(provider);
@@ -67,8 +66,55 @@ pub async fn fetch_provider_max_context(
     // Read the effective catalog on every call. Overlay changes must not be
     // hidden by a discovery cache populated under an earlier configuration.
     if !local && catalog_window.is_some() {
-        return catalog_window;
+        return ContextWindowSource::Configured(catalog_window);
     }
+    ContextWindowSource::Discovery {
+        catalog_window,
+        base_url,
+    }
+}
+
+/// Read the same effective limit without starting provider discovery.
+/// Unknown local/server capacity remains unknown until its owner measures it.
+pub(crate) fn known_provider_max_context(provider: &str, model: &str) -> Option<usize> {
+    match context_window_source(provider, model) {
+        ContextWindowSource::Configured(window) => window,
+        ContextWindowSource::Discovery {
+            catalog_window,
+            base_url,
+        } => context_window_cache()
+            .lock()
+            .ok()
+            .and_then(|cache| {
+                cache
+                    .get(&(provider.to_string(), base_url, model.to_string()))
+                    .copied()
+                    .flatten()
+            })
+            .or(catalog_window),
+    }
+}
+
+/// Resolve context from the owning provider catalog for hosted models, use
+/// effective request settings for Ollama, or discover other server limits.
+/// Discovery is cached per (provider, base_url, model_id).
+///
+/// Returns `None` when neither discovery nor an applicable catalog limit is
+/// available. Other local routes may fall back only to an explicit runtime
+/// limit, not the model's advertised architecture limit. Ollama's configured
+/// request limit is distinct from an already-loaded runner's observed context.
+pub async fn fetch_provider_max_context(
+    provider: &str,
+    model: &str,
+    api_key: &str,
+) -> Option<usize> {
+    let (catalog_window, base_url) = match context_window_source(provider, model) {
+        ContextWindowSource::Configured(window) => return window,
+        ContextWindowSource::Discovery {
+            catalog_window,
+            base_url,
+        } => (catalog_window, base_url),
+    };
     let cache_key = (provider.to_string(), base_url.clone(), model.to_string());
 
     // Fast path: cached (may be Some(n) or a cached None meaning "we tried

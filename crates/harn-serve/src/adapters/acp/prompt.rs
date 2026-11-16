@@ -546,6 +546,7 @@ impl AcpServer {
                     self.concurrent_controls.pending_prompts.clone(),
                     self.output.clone(),
                 ),
+                super::usage::PromptUsage::new(&session_id),
             )
             .with_elicitations(self.elicitations.clone()),
         ));

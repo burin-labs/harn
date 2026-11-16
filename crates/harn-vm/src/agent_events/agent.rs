@@ -351,6 +351,14 @@ pub enum AgentEvent {
         model: String,
         run_usage: Box<crate::llm::usage::ProviderUsage>,
     },
+    /// Current request context, projected once by the request accounting owner.
+    /// Counts are estimates of resident input, not cumulative token usage.
+    ContextUsage {
+        session_id: String,
+        call_id: String,
+        used_tokens: u64,
+        capacity_tokens: Option<u64>,
+    },
     /// Emitted when a first-class agent session is explicitly closed by
     /// `agent_session_close`. This gives event-log consumers a typed
     /// terminal marker even when no final model turn runs.

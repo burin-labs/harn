@@ -294,13 +294,26 @@ impl AcpBridge {
         );
     }
 
-    /// Send a structured `session/update` with log level, message, and
-    /// fields. `log` is a harn vendor-extension; canonical ACP has no
-    /// log channel on the session-update stream, so all vendor fields
-    /// ride under `update._meta.harn`.
+    /// Project user-facing log levels to negotiated notices and preserve the
+    /// structured diagnostic fields on the existing Harn log extension.
     pub(super) fn send_log(&self, level: &str, message: &str, fields: Option<serde_json::Value>) {
         if level == "info" && suppress_default_info_log(message) {
             return;
+        }
+        let severity = match level {
+            "info" => Some("info"),
+            "warn" => Some("warning"),
+            "error" => Some("error"),
+            _ => None,
+        };
+        if let Some(severity) = severity.filter(|_| !message.trim().is_empty()) {
+            self.send_notification(
+                "session/update",
+                serde_json::json!({
+                    "sessionId": self.session_id,
+                    "update": {"sessionUpdate": "notice", "severity": severity, "title": message},
+                }),
+            );
         }
         let mut update = serde_json::json!({
             "sessionUpdate": "log",
