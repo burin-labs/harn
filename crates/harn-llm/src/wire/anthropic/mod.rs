@@ -89,11 +89,6 @@ pub fn encode_request(
     {
         cache_control["ttl"] = json!(ttl);
     }
-    super::prompt_cache::apply_prompt_cache_breakpoint(
-        &mut body,
-        context.prompt_cache,
-        cache_control,
-    );
     let tools: Vec<Value> = opts
         .native_tools
         .iter()
@@ -104,6 +99,11 @@ pub fn encode_request(
     if !tools.is_empty() {
         body["tools"] = Value::Array(tools);
     }
+    super::prompt_cache::apply_prompt_cache_breakpoint(
+        &mut body,
+        context.prompt_cache,
+        cache_control,
+    );
     if let Some(choice) = opts.tool_choice.as_ref().and_then(normalize_tool_choice) {
         body["tool_choice"] = choice;
     }
@@ -174,13 +174,18 @@ fn sanitize_tool(
         }
         object.remove("namespace");
         object.remove("namespaces");
+        let profile = if object.get("strict").and_then(Value::as_bool) == Some(true) {
+            SchemaCompatProfile::AnthropicStrict
+        } else {
+            SchemaCompatProfile::AnthropicLenient
+        };
         if let Some(schema) = object.get("input_schema").cloned() {
             object.insert(
                 "input_schema".to_owned(),
                 super::sanitize_schema_for_provider(
                     &opts.provider,
                     &opts.model,
-                    SchemaCompatProfile::AnthropicStrict,
+                    profile,
                     SchemaSurface::ToolParameters,
                     &schema,
                     audits,

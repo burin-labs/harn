@@ -1,5 +1,5 @@
 pub(super) use crate::llm::test_env::ScopedEnvVar;
-use crate::llm_config::{AuthEnv, ModelAvailability, ModelDef, ProviderDef};
+use crate::llm_config::{AuthEnv, ModelDef, ProviderDef};
 use crate::value::{VmError, VmValue};
 
 pub(super) fn extract_with_options(
@@ -50,49 +50,13 @@ pub(super) fn test_equivalent_model_with_context(
     group: &str,
     context_window: u64,
 ) -> ModelDef {
-    ModelDef {
-        data_controls: None,
-        name: format!("{provider} equivalent model"),
-        display_name: None,
-        blurb: None,
-        provider: provider.to_string(),
-        context_window,
-        reasoning_modes: Vec::new(),
-        logical_model: None,
-        equivalence_group: Some(group.to_string()),
-        served_variant: None,
-        wire_model: None,
-        api_dialect: None,
-        rate_limits: None,
-        performance: None,
-        architecture: None,
-        local_memory: None,
-        runtime_context_window: None,
-        stream_timeout: None,
-        capabilities: Vec::new(),
-        pricing: None,
-        deprecated: false,
-        deprecation_note: None,
-        sunset_date: None,
-        retires_on: None,
-        superseded_by: None,
-        serving_tiers: Vec::new(),
-        quality_tags: Vec::new(),
-        availability: ModelAvailability::Serverless,
-        tier: Some("mid".to_string()),
-        open_weight: Some(true),
-        strengths: Vec::new(),
-        benchmarks: std::collections::BTreeMap::new(),
-        family: Some("test-equivalent-family".to_string()),
-        lineage: None,
-        complementary_with: Vec::new(),
-        avoid_as_reviewer_for: Vec::new(),
-        completion_review: None,
-        released: None,
-        row_kind: None,
-        current_snapshot: None,
-        embedding_dim: None,
-        operations: None,
-        embedding_max_tokens: None,
-    }
+    crate::test_support::decode_fixture::<ModelDef>(serde_json::json!({
+        "name": format!("{provider} equivalent model"),
+        "provider": provider.to_string(),
+        "context_window": context_window,
+        "equivalence_group": Some(group.to_string()),
+        "tier": Some("mid".to_string()),
+        "open_weight": Some(true),
+        "family": Some("test-equivalent-family".to_string())
+    }))
 }

@@ -71,6 +71,7 @@ mod daemon_bridge;
 mod goal_outcome;
 mod inbox;
 mod lifecycle;
+mod loop_budget;
 mod tool_result_messages;
 use crate::agent_session_journal::live as live_transcript_journal;
 use assistant_messages::durable_anthropic_blocks;
@@ -183,6 +184,8 @@ struct AgentHostSession {
     /// caused by hitting the cap (→ ACP `max_turn_requests`) from other
     /// budget paths.
     max_iterations: i64,
+    /// Projection supplied by the Harn loop that owns the counters and grants.
+    loop_budget: Option<loop_budget::LoopBudgetSnapshot>,
     daemon_state: Option<String>,
     daemon_snapshot_path: Option<String>,
     resumed_iterations: usize,
@@ -377,6 +380,7 @@ pub(crate) fn seed_host_session_provider_model(session_id: &str, provider: &str,
         current_session_frame: None,
         started_at: now_id(),
         max_iterations: 0,
+        loop_budget: None,
         daemon_state: None,
         daemon_snapshot_path: None,
         resumed_iterations: 0,
@@ -1309,6 +1313,7 @@ pub fn register_agent_session_host_primitives(vm: &mut Vm) {
     daemon_bridge::register_daemon_bridge_primitives(vm);
     inbox::register_inbox_primitives(vm);
     lifecycle::register_lifecycle_primitives(vm);
+    loop_budget::register_loop_budget_primitives(vm);
     live_transcript_journal::register_live_transcript_journal_primitives(vm);
     crate::agent_session_journal::register_run_preparation(vm);
     message_history::register_message_history_primitives(vm);

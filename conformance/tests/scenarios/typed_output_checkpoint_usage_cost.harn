@@ -60,7 +60,15 @@ pipeline test_typed_output_checkpoint_usage_cost(harness: Harness) {
       assert_eq(success.usage.output_tokens, 1000)
       assert_eq(success.usage.cache_write_tokens, 1000)
       assert_approx(success.usage.cost_usd, 0.01875)
-      assert_eq(captured.events[0].checkpoint.usage, success.usage)
+      const checkpoints = captured.events.filter({ event -> event.type == "typed_checkpoint" })
+      const contexts = captured.events.filter({ event -> event.type == "context_usage" })
+      assert_eq(len(checkpoints), 1)
+      assert_eq(checkpoints[0].checkpoint.name, "usage.success")
+      assert_eq(checkpoints[0].checkpoint.usage, success.usage)
+      assert_eq(len(contexts), 1)
+      assert_eq(contexts[0].session_id, "usage-cost-success")
+      assert(contexts[0].used_tokens > 0)
+      assert(contexts[0].call_id != "")
       const schema_failure = typed_output_checkpoint(
         harness.agent,
         harness.llm,

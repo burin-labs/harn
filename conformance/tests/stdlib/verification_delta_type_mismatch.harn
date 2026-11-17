@@ -1,0 +1,10 @@
+import { VerificationDiagnosticDelta } from "std/verification"
+
+fn wrong_count(value: VerificationDiagnosticDelta) -> string {
+  const count: string = value.current.count
+  return count
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(type_of(wrong_count))
+}

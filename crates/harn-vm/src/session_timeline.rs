@@ -30,7 +30,7 @@ pub const SESSION_TIMELINE_UPDATE_METHOD: &str = "harn.session_timeline.update";
 const DEFAULT_QUERY_LIMIT: usize = 1024;
 const READ_BATCH_SIZE: usize = 256;
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default, rename_all = "camelCase")]
 pub struct SessionTimelineQuery {
     #[serde(alias = "session_id")]
@@ -69,7 +69,7 @@ impl SessionTimelineQuery {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default)]
 pub struct SessionTimelineCursor {
     pub topics: BTreeMap<String, EventId>,
@@ -88,7 +88,7 @@ impl SessionTimelineCursor {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTimelineSnapshot {
     pub schema_version: u32,
@@ -103,7 +103,7 @@ pub struct SessionTimelineSnapshot {
 ///
 /// `available` is exact when Harn exhausted every selected source. It is `None`
 /// when Harn stopped after proving that the requested limit omitted evidence.
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(default, rename_all = "camelCase")]
 pub struct SessionTimelineCoverage {
     pub returned: usize,
@@ -111,7 +111,7 @@ pub struct SessionTimelineCoverage {
     pub truncated: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTimelineUpdate {
     pub schema_version: u32,
@@ -119,7 +119,7 @@ pub struct SessionTimelineUpdate {
     pub node: SessionTimelineNode,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTimelineNode {
     pub id: String,
@@ -150,7 +150,7 @@ pub struct SessionTimelineNode {
     pub order: u64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTimelineReference {
     pub kind: String,
@@ -162,7 +162,7 @@ pub struct SessionTimelineReference {
     pub event_id: Option<EventId>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTimelineLink {
     pub kind: String,
@@ -174,6 +174,16 @@ pub struct SessionTimelineLink {
     pub span_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub event_id: Option<String>,
+}
+
+/// Serialized timeline records, derived from the types that publish them.
+pub fn session_timeline_json_schema() -> serde_json::Value {
+    let mut generator = schemars::generate::SchemaSettings::draft2020_12()
+        .for_serialize()
+        .into_generator();
+    generator.subschema_for::<SessionTimelineSnapshot>();
+    generator.subschema_for::<SessionTimelineUpdate>();
+    serde_json::json!({"$defs": generator.take_definitions(true)})
 }
 
 #[derive(Debug)]

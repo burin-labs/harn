@@ -1,4 +1,10 @@
 import { filter_nil } from "std/collections"
+pub import {
+  GitHubCheckRunState,
+  GitHubDeploymentState,
+  GitHubPullRequestState,
+} from "std/connectors/github/monitor_types"
+import { github_monitor_reference } from "std/connectors/github/monitor_types"
 pub import { github_repo, github_slug_from_remote } from "std/connectors/github/repository"
 import { github_repo_or_throw } from "std/connectors/github/repository"
 import {
@@ -7,7 +13,14 @@ import {
   git_forge_writeback_request,
 } from "std/connectors/shared"
 import { merge } from "std/json"
-import { wait_for } from "std/monitors"
+import {
+  MonitorEventReference,
+  MonitorSource,
+  MonitorWaitOptions,
+  MonitorWaitResult,
+  monitor_event,
+  wait_for,
+} from "std/monitors"
 
 /** Canonical connector and monitor options shared by every GitHub helper. */
 type GitHubOptions = {
@@ -1241,16 +1254,20 @@ fn __github_close_pr_envelope(
   }
 }
 
-fn __github_event(log_event: dict) {
-  return log_event?.payload?.event
+fn __github_event(log_event: unknown) -> MonitorEventReference? {
+  return monitor_event(log_event)
 }
 
-fn __github_payload(log_event: dict) {
+fn __github_payload(log_event: unknown) -> unknown {
   return __github_event(log_event)?.provider_payload
 }
 
-fn __github_repo_matches(payload: dict, repo: string) {
-  const full_name = payload?.raw?.repository?.full_name
+fn __github_repo_matches(payload: unknown, repo: string) -> bool {
+  const fields = github_monitor_reference(payload)
+  require fields != nil, "GitHub monitor payload must be a record"
+  const raw = github_monitor_reference(fields?.raw)
+  const repository = github_monitor_reference(raw?.repository)
+  const full_name = repository?.full_name
   return full_name == nil || full_name == repo
 }
 
@@ -1265,7 +1282,7 @@ pub fn deployment_status_source(
   repo: string,
   deployment_id: any,
   options: GitHubCallOptions = {},
-) {
+) -> MonitorSource<GitHubDeploymentState> {
   return {
     label: "github.deployment_status:" + repo + "#" + to_string(deployment_id),
     prefers_push: true,
@@ -1276,19 +1293,22 @@ pub fn deployment_status_source(
       if len(statuses) > 0 {
         latest = statuses[0]
       }
+      const fields = github_monitor_reference(latest)
       return {
         repo: repo,
         deployment_id: deployment_id,
         deployment_status: latest,
-        state: latest?.state ?? "unknown",
+        state: fields?.state ?? "unknown",
       }
     },
     push_filter: { log_event ->
       const event = __github_event(log_event)
       const payload = __github_payload(log_event)
+      const fields = github_monitor_reference(payload)
+      const deployment = github_monitor_reference(fields?.deployment)
       return event?.provider == "github"
         && event?.kind == "deployment_status"
-        && payload?.deployment?.id == deployment_id
+        && deployment?.id == deployment_id
         && __github_repo_matches(payload, repo)
     },
   }
@@ -1305,7 +1325,7 @@ pub fn check_run_source(
   repo: string,
   check_run_id: any,
   options: GitHubCallOptions = {},
-) {
+) -> MonitorSource<GitHubCheckRunState> {
   return {
     label: "github.check_run:" + repo + "#" + to_string(check_run_id),
     prefers_push: true,
@@ -1317,20 +1337,23 @@ pub fn check_run_source(
         nil,
         options,
       )
+      const fields = github_monitor_reference(check_run)
       return {
         repo: repo,
         check_run_id: check_run_id,
         check_run: check_run,
-        status: check_run?.status,
-        conclusion: check_run?.conclusion,
+        status: fields?.status,
+        conclusion: fields?.conclusion,
       }
     },
     push_filter: { log_event ->
       const event = __github_event(log_event)
       const payload = __github_payload(log_event)
+      const fields = github_monitor_reference(payload)
+      const check_run = github_monitor_reference(fields?.check_run)
       return event?.provider == "github"
         && event?.kind == "check_run"
-        && payload?.check_run?.id == check_run_id
+        && check_run?.id == check_run_id
         && __github_repo_matches(payload, repo)
     },
   }
@@ -1347,7 +1370,7 @@ pub fn pull_request_merged_source(
   repo: string,
   number: int | string,
   options: GitHubCallOptions = {},
-) {
+) -> MonitorSource<GitHubPullRequestState> {
   return {
     label: "github.pull_request_merged:" + repo + "#" + to_string(number),
     prefers_push: true,
@@ -1359,20 +1382,23 @@ pub fn pull_request_merged_source(
         nil,
         options,
       )
+      const fields = github_monitor_reference(pull_request)
       return {
         repo: repo,
         number: number,
         pull_request: pull_request,
-        merged: pull_request?.merged ?? false,
-        state: pull_request?.state,
+        merged: fields?.merged ?? false,
+        state: fields?.state,
       }
     },
     push_filter: { log_event ->
       const event = __github_event(log_event)
       const payload = __github_payload(log_event)
+      const fields = github_monitor_reference(payload)
+      const pull_request = github_monitor_reference(fields?.pull_request)
       return event?.provider == "github"
         && event?.kind == "pull_request"
-        && payload?.pull_request?.number == number
+        && pull_request?.number == number
         && __github_repo_matches(payload, repo)
     },
   }
@@ -1388,7 +1414,11 @@ const GITHUB_DEFAULT_WAIT_MS = 300000
  * and `poll_interval_ms` becomes the `poll_interval` duration so the caller's
  * cadence is actually honored by the monitor.
  */
-fn __github_wait_options(options: GitHubWaitOptions, source: any, condition: any) {
+fn __github_wait_options<T>(
+  options: GitHubWaitOptions,
+  source: MonitorSource<T>,
+  condition: fn(T) -> bool,
+) -> MonitorWaitOptions<T> {
   const timeout_ms = options.max_wait_ms ?? options.timeout_ms ?? GITHUB_DEFAULT_WAIT_MS
   const base = {source: source, condition: condition, timeout: duration_ms(timeout_ms)}
   const poll_interval_ms = options.poll_interval_ms
@@ -1410,7 +1440,7 @@ pub fn wait_until_deploy_succeeds(
   repo: string,
   deployment_id: any,
   options: GitHubWaitOptions = {},
-) {
+) -> MonitorWaitResult<GitHubDeploymentState> {
   return wait_for(
     runtime,
     __github_wait_options(
@@ -1433,7 +1463,7 @@ pub fn wait_until_ci_green(
   repo: string,
   check_run_id: any,
   options: GitHubWaitOptions = {},
-) {
+) -> MonitorWaitResult<GitHubCheckRunState> {
   return wait_for(
     runtime,
     __github_wait_options(
@@ -1456,7 +1486,7 @@ pub fn wait_until_pr_merged(
   repo: string,
   number: int | string,
   options: GitHubWaitOptions = {},
-) {
+) -> MonitorWaitResult<GitHubPullRequestState> {
   return wait_for(
     runtime,
     __github_wait_options(

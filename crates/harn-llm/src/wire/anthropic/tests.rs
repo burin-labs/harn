@@ -146,3 +146,71 @@ fn tool_choice_forms_and_parallel_override_share_one_wire_contract() {
     assert!(!tool_choice_forces_tool_use(&json!("none")));
     assert!(tool_choice_forces_tool_use(&json!("required")));
 }
+
+#[test]
+fn nonstrict_tool_maps_preserve_their_schema_and_nonempty_inputs() {
+    let schema = json!({
+        "type":"object",
+        "properties":{"input_env":{"type":"object","additionalProperties":{"type":"string"}}},
+        "required":["input_env"],
+        "additionalProperties":false,
+    });
+    let nonempty = json!({"input_env":{"PROBE":"value"}});
+    assert!(jsonschema::validator_for(&schema)
+        .unwrap()
+        .is_valid(&nonempty));
+    for strict in [None, Some(false), Some(true)] {
+        let mut opts = test_support::base_payload();
+        let tool = &mut opts.native_tools.as_mut().unwrap()[0];
+        tool["input_schema"] = schema.clone();
+        if let Some(strict) = strict {
+            tool["strict"] = json!(strict);
+        }
+        let encoded = encode(&opts, &Capabilities::default());
+        let actual = &encoded.body["tools"][0]["input_schema"];
+        let valid = jsonschema::validator_for(actual)
+            .unwrap()
+            .is_valid(&nonempty);
+        if strict == Some(true) {
+            assert!(!valid);
+            assert_eq!(
+                actual["properties"]["input_env"]["additionalProperties"],
+                false
+            );
+            assert!(encoded
+                .effects
+                .iter()
+                .any(|effect| matches!(effect, AnthropicWireEffect::SchemaAudit(_))));
+        } else {
+            assert_eq!(actual, &schema);
+            assert!(valid);
+            assert!(encoded.effects.is_empty());
+        }
+        assert_eq!(
+            encoded.body["tools"][0]
+                .get("strict")
+                .and_then(Value::as_bool),
+            strict
+        );
+    }
+}
+
+#[test]
+fn structured_output_keeps_its_strict_schema_independently_of_tool_strictness() {
+    let mut opts = test_support::base_payload();
+    opts.native_tools = None;
+    opts.output_format = OutputFormat::JsonSchema {
+        schema: json!({"type":"object","properties":{
+            "input_env":{"type":"object","additionalProperties":{"type":"string"}}
+        },"required":["input_env"],"additionalProperties":false}),
+        strict: false,
+    };
+    let mut caps = Capabilities::default();
+    caps.structured_output = Some("native".to_string());
+    let encoded = encode(&opts, &caps);
+    assert_eq!(
+        encoded.body["output_config"]["format"]["schema"]["properties"]["input_env"]
+            ["additionalProperties"],
+        false
+    );
+}

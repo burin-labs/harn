@@ -13,51 +13,94 @@ const repository='fixture/private-consumer';
 const mainSha='a'.repeat(40),repairSha='b'.repeat(40);
 const openPull={state:'open',head:{repo:{full_name:repository},ref:'repair-branch',sha:repairSha}};
 
-function execute(t,{body='',pull=openPull,commit=mainSha,missingRepository=false}={}) {
+function execute(t,{body='',capturedBody=body,pull=openPull,commit=mainSha,missingRepository=false,
+  parentChange={},parentReadable=true,parentToken='fixture-parent'}={}) {
   const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'harn-consumer-pin-'));
   t.after(()=>fs.rmSync(scratch,{recursive:true,force:true}));
-  const fixture=path.join(scratch,'fixture.json'),output=path.join(scratch,'output');
-  const preload=path.join(scratch,'fetch.mjs'),gh=path.join(scratch,'gh'),script=path.join(scratch,'pin.sh');
-  fs.writeFileSync(fixture,JSON.stringify({pull,commit,missingRepository}));
+  const fixture=path.join(scratch,'fixture.json'),output=path.join(scratch,'output'),calls=path.join(scratch,'calls');
+  const preload=path.join(scratch,'fetch.mjs'),script=path.join(scratch,'pin.sh');
+  const parent={number:42,state:'open',body,head:{sha:'c'.repeat(40),repo:{full_name:'burin-labs/harn'}},
+    base:{repo:{full_name:'burin-labs/harn'}},...parentChange};
+  fs.writeFileSync(fixture,JSON.stringify({pull,commit,missingRepository,parent,parentReadable}));
   fs.writeFileSync(preload,`import fs from 'node:fs';
     const f=JSON.parse(fs.readFileSync(${JSON.stringify(fixture)},'utf8'));
     globalThis.fetch=async(url,options={})=>{
-      if(options.headers?.Authorization!=='Bearer fixture-token')throw new Error('wrong-authority');
       const p=new URL(url).pathname;
-      const data=p==='/repos/${repository}/pulls/7'?f.pull
+      const own=p==='/repos/burin-labs/harn/pulls/42';
+      if(options.headers?.Authorization!==(own?'Bearer fixture-parent':'Bearer fixture-token'))throw new Error('wrong-authority');
+      fs.appendFileSync(${JSON.stringify(calls)},p+'\\n');
+      const data=own?(f.parentReadable?f.parent:null):p==='/repos/${repository}/pulls/7'?f.pull
         :p==='/repos/${repository}/commits/main'?{sha:f.commit}
         :p==='/repos/${repository}'&&!f.missingRepository?{full_name:'${repository}',default_branch:'main'}:null;
       return new Response(JSON.stringify(data??{message:'Not Found'}),{status:data?200:404});
     };`);
-  // The pre-fix workflow calls gh directly; execute that real recipe too.
-  fs.writeFileSync(gh,`#!/usr/bin/env node
-    import fs from 'node:fs';
-    const f=JSON.parse(fs.readFileSync(${JSON.stringify(fixture)},'utf8'));
-    const endpoint=process.argv[3];
-    console.log(endpoint.endsWith('/commits/main')?f.commit:'main');
-  `,{mode:0o755});
   const workflow=load(fs.readFileSync(path.join(root,'.github/workflows/ci.yml'),'utf8'));
   const recipe=workflow.jobs['consumer-pin'].steps.find(step=>step.id==='read').run;
   fs.writeFileSync(script,recipe);
   const run=spawnSync('bash',[script],{cwd:root,encoding:'utf8',env:{
     PATH:`${scratch}:${process.env.PATH}`,HOME:scratch,NODE_OPTIONS:`--import=${preload}`,
-    GH_TOKEN:'fixture-token',CONSUMER:repository,PULL_REQUEST_BODY:body,GITHUB_OUTPUT:output,
+    GH_TOKEN:'fixture-token',PARENT_READ_TOKEN:parentToken,CONSUMER:repository,
+    GITHUB_REPOSITORY:'burin-labs/harn',PULL_REQUEST_NUMBER:'42',PULL_REQUEST_HEAD_SHA:'c'.repeat(40),
+    PULL_REQUEST_BODY:capturedBody,GITHUB_OUTPUT:output,
   }});
   const pinned=fs.existsSync(output)?fs.readFileSync(output,'utf8'):'';
   assert.doesNotMatch(run.stdout+run.stderr,/private-consumer|repair-branch|fixture-token/);
-  return {run,pinned};
+  return {run,pinned,reads:fs.existsSync(calls)?fs.readFileSync(calls,'utf8').trim().split('\n'):[]};
 }
 
 test('the actual CI recipe pins the paired repair, not default main',t=>{
   const {run,pinned}=execute(t,{body:'Repair contract\n\nPairs-with: consumer#7'});
   assert.equal(run.status,0,run.stderr);
-  assert.equal(pinned,`sha=${repairSha}\n`);
+  assert.equal(pinned,`sha=${repairSha}\npaired_pull=7\n`);
+});
+
+test('the actual CI recipe re-reads a pairing edited after the original event',t=>{
+  const {run,pinned,reads}=execute(t,{capturedBody:'Original unpaired event',body:'Pairs-with: consumer#7'});
+  assert.equal(run.status,0,run.stderr);
+  assert.match(pinned,new RegExp(`^sha=${repairSha}\\n`));
+  assert.match(pinned,/paired_pull=7\n/);
+  assert.deepEqual(reads,['/repos/burin-labs/harn/pulls/42',`/repos/${repository}/pulls/7`]);
+});
+
+test('removing a pairing and cosmetic edits use the measured current declaration',t=>{
+  const removed=execute(t,{capturedBody:'Pairs-with: consumer#7',body:''});
+  assert.equal(removed.run.status,0,removed.run.stderr);
+  assert.equal(removed.pinned,`sha=${mainSha}\npaired_pull=default\n`);
+  const cosmetic=execute(t,{capturedBody:'Pairs-with: consumer#7',body:'Updated prose.\n\nPairs-with: consumer#7\n'});
+  assert.equal(cosmetic.run.status,0,cosmetic.run.stderr);
+  assert.equal(cosmetic.pinned,`sha=${repairSha}\npaired_pull=7\n`);
+});
+
+for(const [name,change] of [
+  ['closed current pull',{parentChange:{state:'closed'}}],
+  ['moved current head',{parentChange:{head:{sha:'d'.repeat(40),repo:{full_name:'burin-labs/harn'}}}}],
+  ['foreign current head',{parentChange:{head:{sha:'c'.repeat(40),repo:{full_name:'foreign/fork'}}}}],
+  ['foreign base',{parentChange:{base:{repo:{full_name:'foreign/repo'}}}}],
+  ['wrong current pull number',{parentChange:{number:43}}],
+  ['missing current body',{parentChange:{body:undefined}}],
+  ['malformed current body',{parentChange:{body:{private:'PRIVATE-PARENT-CANARY'}}}],
+  ['unreadable current pull',{parentReadable:false}],
+  ['missing parent authority',{parentToken:''}],
+]){
+  test(`the live declaration refuses ${name} before consumer reads`,t=>{
+    const result=execute(t,{body:'Pairs-with: consumer#7',...change});
+    assert.notEqual(result.run.status,0);
+    assert.equal(result.pinned,'');
+    assert.ok(result.reads.every(endpoint=>endpoint==='/repos/burin-labs/harn/pulls/42'));
+    assert.doesNotMatch(result.run.stdout+result.run.stderr,/PRIVATE-PARENT-CANARY|fixture-parent/);
+  });
+}
+
+test('an explicitly null current body is a measured unpaired declaration',t=>{
+  const result=execute(t,{capturedBody:'Pairs-with: consumer#7',parentChange:{body:null}});
+  assert.equal(result.run.status,0,result.run.stderr);
+  assert.equal(result.pinned,`sha=${mainSha}\npaired_pull=default\n`);
 });
 
 test('the same CI recipe pins a measured default head when unpaired',t=>{
   const {run,pinned}=execute(t);
   assert.equal(run.status,0,run.stderr);
-  assert.equal(pinned,`sha=${mainSha}\n`);
+  assert.equal(pinned,`sha=${mainSha}\npaired_pull=default\n`);
 });
 
 for(const [name,change] of [
@@ -90,8 +133,17 @@ test('an unreadable default repository cannot produce a pin',t=>{
 test('candidate attempts share one captured pin and have no automatic baseline exemption jobs',()=>{
   const workflow=load(fs.readFileSync(path.join(root,'.github/workflows/ci.yml'),'utf8'));
   const budgets=JSON.parse(fs.readFileSync(path.join(root,'.github/ci-latency.json'),'utf8')).required.jobs;
+  const pin=workflow.jobs['consumer-pin'];
+  const read=pin.steps.find(step=>step.id==='read');
+  assert.equal(pin.permissions['pull-requests'],'read');
+  assert.equal(pin.outputs.paired_pull,'${{ steps.read.outputs.paired_pull }}');
+  assert.equal(read.env.PARENT_READ_TOKEN,'${{ github.token }}');
+  assert.equal(read.env.PULL_REQUEST_NUMBER,'${{ github.event.pull_request.number }}');
+  assert.equal(read.env.PULL_REQUEST_HEAD_SHA,'${{ github.event.pull_request.head.sha }}');
+  assert.equal(read.env.PULL_REQUEST_BODY,undefined);
   for(const name of ['consumer-check','consumer-check-retry']) {
     assert.equal(workflow.jobs[name].with.consumer_revision,'${{ needs.consumer-pin.outputs.sha }}');
+    assert.equal(workflow.jobs[name].with.consumer_pull_request,'${{ needs.consumer-pin.outputs.paired_pull }}');
   }
   for(const name of ['consumer-base-cli','consumer-base-check','consumer-base-check-retry']) {
     assert.equal(workflow.jobs[name],undefined);

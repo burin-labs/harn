@@ -250,6 +250,7 @@ async fn host_agent_session_init(
             execution_id: ctx.execution_id(),
             task_id: ctx.task_id(),
             owns_session,
+            loop_budget: None,
             task: message.clone(),
             tokens_used: 0,
             cost_used: 0.0,
@@ -680,7 +681,11 @@ pub(super) async fn host_agent_session_finalize(
     }
     if finalization_stage < super::AgentFinalizationStage::PromptOutcomeProjected {
         if let Some(bridge) = crate::llm::agent_runtime::current_host_bridge() {
-            bridge.set_prompt_outcome(acp_stop_reason, &terminal_outcome);
+            bridge.set_prompt_terminal_receipt(crate::bridge::PromptTerminalReceipt {
+                stop_reason: acp_stop_reason.to_owned(),
+                terminal: terminal_outcome.as_ref().clone(),
+                goal_outcome: Some(goal_outcome.clone()),
+            });
         }
         session.advance_finalization_to(super::AgentFinalizationStage::PromptOutcomeProjected);
     }

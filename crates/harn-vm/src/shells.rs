@@ -445,7 +445,7 @@ fn descriptor_for_path(path: &str, source: &str) -> ShellDescriptor {
     }
 }
 
-fn shell_id_from_path(path: &str) -> String {
+pub(crate) fn shell_id_from_path(path: &str) -> String {
     let raw = Path::new(path)
         .file_name()
         .and_then(|value| value.to_str())

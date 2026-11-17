@@ -196,8 +196,10 @@ const TOOLCHAIN_ENV_ALLOWLIST: &[&str] = &[
     "GOMODCACHE",
     "GOPATH",
     "GOROOT",
-    // JVM: install root and Gradle's mutable distribution/dependency cache.
+    // JVM: install root, shared launcher options, and Gradle's mutable cache.
     "JAVA_HOME",
+    // Java ignores TMPDIR; callers relocate its scratch space with java.io.tmpdir.
+    "JAVA_TOOL_OPTIONS",
     "GRADLE_USER_HOME",
     // libpq: connection selectors and a separately permissioned password file.
     // Raw passwords and credential-bearing URLs still require explicit grants.
@@ -718,8 +720,12 @@ mod tests {
     }
 
     #[test]
-    fn gradle_cache_survives_closed_environment_without_gradle_credentials() {
+    fn jvm_configuration_survives_closed_environment_without_gradle_credentials() {
         let snapshot = BTreeMap::from([
+            (
+                "JAVA_TOOL_OPTIONS".to_string(),
+                "-Djava.io.tmpdir=/workspace/private-tmp -Xmx512m".to_string(),
+            ),
             (
                 "GRADLE_USER_HOME".to_string(),
                 "/workspace/warm-gradle".to_string(),
@@ -746,6 +752,10 @@ mod tests {
             let command =
                 resolve_env_for_command(&environment, "gradle", &parent, &no_secret).unwrap();
             for child in [resolved, command] {
+                assert_eq!(
+                    child.get("JAVA_TOOL_OPTIONS").map(String::as_str),
+                    Some("-Djava.io.tmpdir=/workspace/private-tmp -Xmx512m")
+                );
                 assert_eq!(
                     child.get("GRADLE_USER_HOME").map(String::as_str),
                     Some("/workspace/warm-gradle")

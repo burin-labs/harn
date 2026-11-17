@@ -502,6 +502,7 @@ catalog_entries! {
     "oauth/redaction" => "stdlib/oauth/redaction.harn",
     "oauth/dynamic_registration" => "stdlib/oauth/dynamic_registration.harn",
     "connectors/github" => "stdlib/stdlib_connectors_github.harn",
+    "connectors/github/monitor_types" => "stdlib/connectors/github/monitor_types.harn",
     "connectors/github/repository" => "stdlib/connectors/github/repository.harn",
     "connectors/linear" => "stdlib/stdlib_connectors_linear.harn",
     "connectors/slack" => "stdlib/stdlib_connectors_slack.harn",

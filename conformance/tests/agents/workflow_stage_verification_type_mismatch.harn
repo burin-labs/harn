@@ -1,0 +1,10 @@
+import { workflow_evaluate_verification } from "std/workflow/stage"
+
+fn invalid_verification() -> int {
+  const wrong_ok: int = workflow_evaluate_verification().ok
+  return wrong_ok
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(type_of(invalid_verification))
+}

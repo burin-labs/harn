@@ -412,6 +412,8 @@ pub(crate) struct KnownMetadata {
     pub unpriced_calls: Option<Number>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage_unknown_calls: Option<Number>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_call_count: Option<Number>,
     /// Whether provider usage was reported or remains `"unknown"`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub accounting_status: Option<String>,
