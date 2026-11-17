@@ -94,9 +94,30 @@ pub type VerificationWarmStateFact = {
   probe: dict,
 }
 
-pub type VerificationWarmStateLifecycleReceipt = dict
+pub type VerificationWarmStateLifecycleReceipt = {
+  id: unknown,
+  name: unknown,
+  status: string,
+  handle_id: unknown,
+  fact: VerificationWarmStateFact?,
+  row: dict<string, unknown>,
+  reused?: bool,
+  started?: unknown,
+  initial_fact?: VerificationWarmStateFact?,
+  cancelled?: bool,
+  cancel?: unknown,
+  teardown?: unknown,
+}
 
-pub type VerificationAffectedTarget = dict
+pub type VerificationAffectedTarget = {
+  id: string,
+  label: unknown,
+  kind: unknown,
+  source: unknown,
+  files: unknown,
+  adapter_id?: string,
+  ...dict<string, unknown>,
+}
 
 pub type VerificationAffectedAdapterFact = {
   id: string,
@@ -117,18 +138,175 @@ pub type VerificationAffectedTargetsFact = {
 
 pub type VerificationProfileMatch = {row: dict, specificity: int, index: int}
 
-pub type VerificationLadderPlanEntry = dict
+pub type VerificationLadderPlanEntry = {
+  row_id: string,
+  row: dict<string, unknown>,
+  rung: string,
+  rung_rank: int,
+  command: unknown,
+  runnable: bool,
+  granularity: unknown,
+  trust: unknown,
+  resource_class: string,
+  p95_ms: int,
+  timing_kind: string,
+  warm_state: unknown,
+  specificity: int,
+  index: int,
+  sort_key: list<int>,
+  background: unknown,
+}
+
+pub type VerificationLadderSkip = {
+  row_id: string,
+  reason: string,
+  specificity: unknown,
+  index: unknown,
+}
+
+pub type VerificationLadderCandidate = {
+  entry: VerificationLadderPlanEntry?,
+  skip: VerificationLadderSkip?,
+}
 
 pub type VerificationLadderPlan = {
   schema: string,
   query: dict,
   matches: list<VerificationProfileMatch>,
   selected: list<VerificationLadderPlanEntry>,
-  skipped: list<dict>,
+  skipped: list<VerificationLadderSkip>,
   fallback: bool,
   reason: string,
 }
 
-pub type VerificationDiagnosticDelta = dict
+pub type VerificationDiagnosticSnapshot = {
+  count: int,
+  complete: bool,
+  failure_count: int,
+  feedsGates: bool,
+  feeds_gates: bool,
+  signatures: list<string>,
+}
 
-pub type VerificationGateInput = dict
+pub type VerificationDiagnosticInfo = {
+  count: int,
+  complete: bool,
+  failure_count: int,
+  explicit_success: bool,
+  failed: bool,
+  feedsGates: bool,
+  feeds_gates: bool,
+  has_collection: bool,
+  signatures: list<string>,
+}
+
+pub type VerificationDiagnosticDelta = {
+  schema: string,
+  status: string,
+  progress_credit: bool,
+  feedsGates: bool,
+  feeds_gates: bool,
+  advisory: bool,
+  reason: string,
+  previous: VerificationDiagnosticSnapshot,
+  current: VerificationDiagnosticSnapshot,
+  removed: list<string>,
+  added: list<string>,
+  persisted: list<string>,
+  same_signature_set: bool,
+  normalization: dict<string, unknown>,
+  count_delta?: int,
+}
+
+pub type VerificationGateInput = {
+  schema: string,
+  status: string,
+  reason: string,
+  feedsGates: bool,
+  feeds_gates: bool,
+  advisory: bool,
+  progress_credit: bool,
+  no_progress: bool,
+  gate_bearing_failure: bool,
+  blocks_completion: bool,
+  stale: bool,
+  stale_files: unknown,
+  previous: {classification: dict<string, unknown>, value: dict<string, unknown>},
+  current: {classification: dict<string, unknown>, value: dict<string, unknown>},
+  delta: VerificationDiagnosticDelta,
+}
+
+pub type VerificationWarmStateTimings = {warm_ms: int?, cold_ms: int?}
+
+pub type VerificationSnapshotStaleness = {
+  schema: string,
+  status: string,
+  stale: bool,
+  fresh: bool,
+  staleFiles: list<string>,
+  stale_files: list<string>,
+  changed_files: list<string>,
+  advisory: bool,
+  reason: string,
+}
+
+pub type VerificationHudEntry = {
+  row_id: unknown,
+  rung: unknown,
+  command: string,
+  label: string,
+  p95_ms: unknown,
+  p95: string,
+  timing_kind: unknown,
+  resource_class: unknown,
+  granularity: unknown,
+  trust: unknown,
+  row: unknown,
+}
+
+pub type VerificationHudLastCheck = {
+  rung: string,
+  verdict: string,
+  at_ms: int,
+  age_ms: int,
+  age: string,
+  freshness: VerificationSnapshotStaleness,
+}
+
+pub type VerificationHudModel = {
+  schema: string,
+  visible: bool,
+  reason: string,
+  lines?: list<string>,
+  dir?: string,
+  query?: dict<string, unknown>,
+  elapsed_ms?: int,
+  elapsed?: string,
+  since_last_edit_ms?: int?,
+  since_last_edit?: string?,
+  last_check?: VerificationHudLastCheck?,
+  next_check?: VerificationHudEntry?,
+  full_check?: VerificationHudEntry?,
+  plans?: {next: VerificationLadderPlan, full: VerificationLadderPlan},
+}
+
+pub type VerificationRawReference = {
+  warmMs?: unknown,
+  warm_ms?: unknown,
+  coldMs?: unknown,
+  cold_ms?: unknown,
+  p95?: unknown,
+  started?: unknown,
+  handle_id?: unknown,
+  classification?: unknown,
+  diagnostic?: unknown,
+  status?: unknown,
+  feedsGates?: unknown,
+  feeds_gates?: unknown,
+  data?: unknown,
+  label?: unknown,
+  name?: unknown,
+  background?: unknown,
+  record?: unknown,
+  ...dict<string, unknown>,
+}

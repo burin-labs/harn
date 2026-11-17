@@ -338,10 +338,16 @@ pub fn command_workspace_effect_json(ctx: &JsonValue) -> JsonValue {
     let analysis = security_command_analysis(ctx);
     let parsed_any = !analysis.stages.is_empty();
     let all_resolved = !analysis.unresolved
-        && analysis
-            .stages
-            .iter()
-            .all(|stage| stage_is_read_only(&stage.argv, &stage.dynamic));
+        && analysis.stages.iter().all(|stage| {
+            stage_is_read_only(
+                &stage.argv,
+                &stage
+                    .expansions
+                    .iter()
+                    .map(|value| value.is_dynamic())
+                    .collect::<Vec<_>>(),
+            )
+        });
     let no_file_writes = analysis
         .redirects
         .iter()
@@ -385,7 +391,11 @@ mod tests {
             let scan = command_risk_scan_json(&ctx, None);
             assert!(!analysis.unresolved, "{command}: {analysis:?}");
             assert_eq!(scan["recommended_action"], "allow", "{command}: {scan}");
-            assert_eq!(command_workspace_effect_json(&ctx)["effect"], "read_effect", "{command}");
+            assert_eq!(
+                command_workspace_effect_json(&ctx)["effect"],
+                "read_effect",
+                "{command}"
+            );
         }
     }
 

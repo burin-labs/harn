@@ -93,6 +93,26 @@ decision record. `approval_reviewer_for` adapts the runtime's shape to
 `approval_review_decide`; anything returning `{approved, reviewer_answered,
 rationale}` works.
 
+The built-in builders return `ApprovalReviewer` callbacks whose replies are
+`ApprovalReviewDecision` records. Fields such as `approved` and
+`reviewer_answered` retain their boolean types. Risk and authorization are nil
+when the reviewer never answered. Cost is nullable: nil means the call was not
+priced; a measured zero remains `0.0`. Check cost before using it in arithmetic:
+
+```harn,ignore
+const decision = reviewer(request)
+const cost = decision.cost_usd
+if cost != nil {
+  harness.stdio.println(cost * 100.0)
+}
+```
+
+`approval_review_verdict_schema` returns `ApprovalReviewVerdictSchema`, and
+`approval_review_screen_verdict` returns `ApprovalReviewScreenVerdict`.
+Application-owned values such as the request's `site` and the returned schema's
+level `enum` remain opaque. Decode them against an application schema before
+reading their fields.
+
 ### Yolo is this seam, not a bypass
 
 ```harn,ignore

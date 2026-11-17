@@ -42,8 +42,8 @@
   "projection": {
     "last_event_id": null,
     "prefix_hash": null,
-    "projection_hash": "sha256:81eb2afe802d7d6c9b423ecf7fa8756f3c24ac3f2107e65bafa8aec1e77b9f9c",
-    "projection_id": "run_view:run_lineage_child:81eb2afe802d"
+    "projection_hash": "sha256:fc76dcde4b0786c68335f8e16d9d5050d76d55f2024367952342e8b0f77e915c",
+    "projection_id": "run_view:run_lineage_child:fc76dcde4b07"
   },
   "providers": [],
   "run": {
@@ -89,6 +89,8 @@
         "known_cost_usd": 0.0,
         "models": [],
         "output_tokens": 0,
+        "provider_call_count": null,
+        "reported_cache": null,
         "total_cost": 0.0,
         "total_duration_ms": null,
         "unpriced_calls": 0,
@@ -113,6 +115,8 @@
     "known_cost_usd": 0.0,
     "models": [],
     "output_tokens": 0,
+    "provider_call_count": null,
+    "reported_cache": null,
     "total_cost": 0.0,
     "total_duration_ms": null,
     "unpriced_calls": 0,

@@ -185,6 +185,7 @@
 - [Agent detectors](./stdlib/detectors.md)
 - [Pace cut rules](./stdlib/cut-rules.md)
 - [Completion judge](./stdlib/agent-judge.md)
+- [Pattern-learning evidence records](./stdlib/agent-pattern-evidence.md)
 - [Host-supplied facts](./stdlib/fact-intake-seams.md)
 - [GraphQL stdlib](./stdlib/graphql.md)
 - [Code librarian stdlib](./stdlib/code-librarian.md)

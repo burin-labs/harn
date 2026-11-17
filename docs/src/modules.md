@@ -242,8 +242,8 @@ Normalize connector-derived inbox items into host-renderable dashboard cards:
 | `triage_normalize(input, options?)` | Convert a TriggerEvent or provider payload into `harn.triage_event.v1`, preserving provider raw payload separately |
 | `triage_dedupe_key(provider, source_kind, source_url, source_id?)` | Build a stable dedupe key from provider-neutral source provenance |
 | `triage_dedupe_events(events)` | Drop duplicate triage events by stable dedupe key |
-| `triage_emit(input, options?)` | Validate and append a triage event to the EventLog, returning an emit receipt |
-| `triage_start_my_day(inputs, options?)` | Build a deduped Start My Day feed and optionally emit each event |
+| `triage_emit(obs, input, options?)` | Validate and append a triage event to the EventLog, returning an emit receipt |
+| `triage_start_my_day(obs, inputs, options?)` | Return a `TriageFeed` with typed events and receipts, optionally emitting each event |
 
 ### std/monitors
 

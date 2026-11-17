@@ -77,6 +77,17 @@ fn main(harness: Harness) -> nil {
     },
   )
   probe(harness, custom + {loop_until_done: true}, "CUSTOM OPERATING GUIDANCE")
+  for sample in [
+    {entry: "default_nudge.harn.prompt", expected: "make concrete progress in your reply."},
+    {entry: {path: "default_nudge.harn.prompt"}, expected: "make concrete progress in your reply."},
+    {
+      entry: { _bindings: dict -> "CUSTOM CALLBACK GUIDANCE" },
+      expected: "CUSTOM CALLBACK GUIDANCE",
+    },
+  ] {
+    const options = agent_prompt_overrides({operating_guidance: sample.entry})
+    probe(harness, options + {loop_until_done: true}, sample.expected)
+  }
   require contains(agent_prompt_ids(), "agent.operating_guidance"),
     "catalog exposes the shared prompt"
   harness.stdio.println("shared guidance reached once across loop and tool modes")

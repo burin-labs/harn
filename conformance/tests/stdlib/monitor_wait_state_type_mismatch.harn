@@ -1,0 +1,11 @@
+import { message_source } from "std/connectors/slack"
+import { wait_for } from "std/monitors"
+
+fn main(harness: Harness) {
+  const result = wait_for(
+    harness.runtime,
+    {timeout: 1ms, source: message_source("C"), condition: { state -> state.matched }},
+  )
+  const wrong: int = result.state?.matched
+  harness.stdio.println(wrong)
+}

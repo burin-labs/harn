@@ -39,6 +39,7 @@ use super::mock::{
 pub(crate) use auth::apply_auth_headers;
 pub(crate) use completion::vm_call_completion_full;
 pub use context_window::fetch_provider_max_context;
+pub(crate) use context_window::known_provider_max_context;
 pub use data_controls::{
     declaration_for as provider_data_controls, AppliedDataControl, DataControlsOutcome,
     DataControlsReceipt,

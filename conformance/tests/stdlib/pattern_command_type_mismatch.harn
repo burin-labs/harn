@@ -1,0 +1,9 @@
+import { pl_session_command_ledger } from "std/agent/pattern_knowledge_sessions"
+
+fn main(harness: Harness) {
+  const ledger = pl_session_command_ledger([])
+  for entry in ledger {
+    const wrong: int = entry.command
+    harness.stdio.println(wrong)
+  }
+}

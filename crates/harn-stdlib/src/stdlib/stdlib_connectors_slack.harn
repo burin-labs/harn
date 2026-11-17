@@ -1,7 +1,15 @@
 import { filter_nil } from "std/collections"
 import { slack_message_disclosure } from "std/disclosure"
 import { merge } from "std/json"
-import { wait_for } from "std/monitors"
+import {
+  MonitorEventReference,
+  MonitorPollContext,
+  MonitorSource,
+  MonitorWaitResult,
+  monitor_event,
+  monitor_wait_options,
+  wait_for,
+} from "std/monitors"
 
 let slack_connector_config = {}
 
@@ -159,24 +167,72 @@ pub fn upload_file(net: HarnessNet, filename: any, content: any, options: dict? 
   return __call(net, "upload_file", (options ?? {}) + {filename: filename, content: content})
 }
 
-fn __slack_event(log_event: dict) {
-  return log_event?.payload?.event
+type SlackMonitorReference = {
+  channel?: unknown,
+  channel_id?: unknown,
+  user?: unknown,
+  user_id?: unknown,
+  text?: unknown,
+  ts?: unknown,
+  thread_ts?: unknown,
+  reaction?: unknown,
+  item?: unknown,
+  item_user?: unknown,
+  ...dict<string, unknown>,
 }
 
-fn __slack_payload(log_event: dict) {
+pub type SlackMessageState = {
+  matched: bool,
+  message: unknown,
+  channel: unknown,
+  user: unknown,
+  text: unknown,
+  ts: unknown,
+  thread_ts: unknown,
+}
+
+pub type SlackReactionState = {
+  matched: bool,
+  reaction: unknown,
+  item: unknown,
+  item_user: unknown,
+  event: unknown,
+}
+
+type SlackMonitorText = string | list<unknown>
+
+type SlackMonitorKind = string
+
+fn __slack_reference(value: unknown) -> SlackMonitorReference? {
+  const kind = type_of(value)
+  return kind == "dict" || kind == "struct" ? schema_expect(
+    value,
+    schema_of(SlackMonitorReference),
+  ) : nil
+}
+
+fn __slack_event(log_event: unknown) -> MonitorEventReference? {
+  return monitor_event(log_event)
+}
+
+fn __slack_payload(log_event: unknown) -> unknown {
   return __slack_event(log_event)?.provider_payload
 }
 
-fn __slack_channel_matches(payload: dict, channel: string?) {
-  return channel == nil || payload?.channel == channel || payload?.channel_id == channel
+fn __slack_channel_matches(payload: unknown, channel: string?) -> bool {
+  const fields = schema_expect(payload, schema_of(SlackMonitorReference))
+  return channel == nil || fields?.channel == channel || fields?.channel_id == channel
 }
 
-fn __slack_user_matches(payload: dict, user: any) {
-  return user == nil || payload?.user == user || payload?.user_id == user
+fn __slack_user_matches(payload: unknown, user: unknown) -> bool {
+  const fields = schema_expect(payload, schema_of(SlackMonitorReference))
+  return user == nil || fields?.user == user || fields?.user_id == user
 }
 
-fn __slack_text_matches(payload: dict, text: any) {
-  return text == nil || contains(payload?.text ?? "", text)
+fn __slack_text_matches(payload: unknown, text: unknown) -> bool {
+  const fields = schema_expect(payload, schema_of(SlackMonitorReference))
+  return text == nil
+    || contains(schema_expect(fields.text ?? "", schema_of(SlackMonitorText)), text)
 }
 
 /**
@@ -185,32 +241,37 @@ fn __slack_text_matches(payload: dict, text: any) {
  * @effects: []
  * @errors: []
  */
-pub fn message_source(channel: string? = nil, options: dict? = nil) {
+pub fn message_source(
+  channel: string? = nil,
+  options: dict? = nil,
+) -> MonitorSource<SlackMessageState> {
   return {
     label: "slack.message:" + to_string(channel ?? "*"),
     prefers_push: true,
-    poll: { ctx ->
-      const payload = __slack_payload(ctx?.last_push_event)
+    poll: { ctx: MonitorPollContext ->
+      const payload = ctx.last_push_event == nil ? nil : __slack_payload(ctx.last_push_event)
+      const fields = __slack_reference(payload)
       return {
         matched: payload != nil,
         message: payload,
-        channel: payload?.channel ?? payload?.channel_id,
-        user: payload?.user ?? payload?.user_id,
-        text: payload?.text,
-        ts: payload?.ts,
-        thread_ts: payload?.thread_ts,
+        channel: fields?.channel ?? fields?.channel_id,
+        user: fields?.user ?? fields?.user_id,
+        text: fields?.text,
+        ts: fields?.ts,
+        thread_ts: fields?.thread_ts,
       }
     },
     push_filter: { log_event ->
       const event = __slack_event(log_event)
       const payload = __slack_payload(log_event)
+      const fields = __slack_reference(payload)
       return event?.provider == "slack"
         && (event?.kind == "message" || event?.kind == "app_mention"
-          || starts_with(event?.kind ?? "", "message."))
+          || starts_with(schema_expect(event?.kind ?? "", schema_of(SlackMonitorKind)), "message."))
         && __slack_channel_matches(payload, channel)
         && __slack_user_matches(payload, options?.user)
         && (options?.thread_ts == nil
-          || payload?.thread_ts
+          || fields?.thread_ts
             == options.thread_ts)
         && __slack_text_matches(payload, options?.text_contains)
     },
@@ -223,30 +284,37 @@ pub fn message_source(channel: string? = nil, options: dict? = nil) {
  * @effects: []
  * @errors: []
  */
-pub fn reaction_source(channel: string? = nil, reaction: string? = nil, options: dict? = nil) {
+pub fn reaction_source(
+  channel: string? = nil,
+  reaction: string? = nil,
+  options: dict? = nil,
+) -> MonitorSource<SlackReactionState> {
   return {
     label: "slack.reaction:" + to_string(channel ?? "*") + ":" + to_string(reaction ?? "*"),
     prefers_push: true,
-    poll: { ctx ->
-      const payload = __slack_payload(ctx?.last_push_event)
+    poll: { ctx: MonitorPollContext ->
+      const payload = ctx.last_push_event == nil ? nil : __slack_payload(ctx.last_push_event)
+      const fields = __slack_reference(payload)
       return {
         matched: payload != nil,
-        reaction: payload?.reaction,
-        item: payload?.item,
-        item_user: payload?.item_user,
+        reaction: fields?.reaction,
+        item: fields?.item,
+        item_user: fields?.item_user,
         event: payload,
       }
     },
     push_filter: { log_event ->
       const event = __slack_event(log_event)
       const payload = __slack_payload(log_event)
+      const fields = __slack_reference(payload)
+      const item = __slack_reference(fields?.item)
       return event?.provider == "slack"
         && event?.kind == "reaction_added"
-        && (reaction == nil || payload?.reaction == reaction)
+        && (reaction == nil || fields?.reaction == reaction)
         && (channel == nil
-          || payload?.item?.channel
+          || item?.channel
             == channel
-          || payload?.channel_id == channel)
+          || fields?.channel_id == channel)
         && __slack_user_matches(payload, options?.user)
     },
   }
@@ -258,14 +326,17 @@ pub fn reaction_source(channel: string? = nil, reaction: string? = nil, options:
  * @effects: []
  * @errors: []
  */
-pub fn wait_for_message(runtime: HarnessRuntime, channel: string? = nil, options: any = nil) {
-  return wait_for(
-    runtime,
-    merge(
-      options ?? {},
-      {source: message_source(channel, options), condition: { state -> state.matched }},
-    ),
+pub fn wait_for_message(
+  runtime: HarnessRuntime,
+  channel: string? = nil,
+  options: any = nil,
+) -> MonitorWaitResult<SlackMessageState> {
+  const wait_options = monitor_wait_options(
+    options ?? {},
+    message_source(channel, options),
+    { state -> state.matched },
   )
+  return wait_for(runtime, wait_options)
 }
 
 /**
@@ -279,12 +350,11 @@ pub fn wait_for_reaction(
   channel: string? = nil,
   reaction: string? = nil,
   options: any = nil,
-) {
-  return wait_for(
-    runtime,
-    merge(
-      options ?? {},
-      {source: reaction_source(channel, reaction, options), condition: { state -> state.matched }},
-    ),
+) -> MonitorWaitResult<SlackReactionState> {
+  const wait_options = monitor_wait_options(
+    options ?? {},
+    reaction_source(channel, reaction, options),
+    { state -> state.matched },
   )
+  return wait_for(runtime, wait_options)
 }

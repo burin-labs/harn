@@ -1,0 +1,8 @@
+import { message_source } from "std/connectors/slack"
+
+fn main(harness: Harness) {
+  const poll = message_source("C").poll
+  const state = poll({wait_id: "typed", poll_count: 0, last_push_event: nil})
+  const wrong: int = state.matched
+  harness.stdio.println(wrong)
+}

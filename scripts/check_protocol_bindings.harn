@@ -8,9 +8,11 @@ from __future__ import annotations
 import json
 import copy
 import sys
+import py_compile
+import tempfile
 from pathlib import Path
 from collections.abc import Mapping
-from dataclasses import MISSING, fields as dataclass_fields, is_dataclass
+from dataclasses import MISSING, asdict, fields as dataclass_fields, is_dataclass
 
 
 def load_bindings(artifacts: Path):
@@ -31,6 +33,9 @@ def assert_round_trip(label: str, expected: Mapping[str, object], actual: Mappin
 
 def main() -> int:
     artifacts = Path(sys.argv[1]).resolve()
+    py_compile.compile(str(artifacts / "python" / "harn_protocol.py"), doraise=True)
+    if sys.argv[2:] == ["--syntax-only"]:
+        return 0
     hp = load_bindings(artifacts)
     fixture = json.loads((artifacts / "fixtures" / "round_trip.json").read_text())
 
@@ -99,6 +104,13 @@ def main() -> int:
     if ("HarnAgentEventHostToolResult", "rawOutput") not in required_json_fields:
         raise AssertionError("required JSON field census did not reach typed host output")
     print(f"typed event required JSON null cases: {len(json_null_cases)}; required JSON fields using shared writer: {len(required_json_fields)}")
+    timeline = fixture["sessionTimeline"]
+    for key, cls in [("snapshot", hp.HarnSessionTimelineSnapshot), ("update", hp.HarnSessionTimelineUpdate)]:
+        assert_round_trip("timeline " + key, timeline[key], asdict(cls(**timeline[key])))
+    first, second = hp.HarnSessionTimelineQuery(), hp.HarnSessionTimelineQuery()
+    first.fromCursor.topics["first"] = 1
+    if second.fromCursor.topics:
+        raise AssertionError("timeline constructors share a mutable cursor")
     cases = [
         ("ACPRequest", envelopes["request"], hp.ACPRequest),
         ("ACPResponse", envelopes["response"], hp.ACPResponse),
@@ -168,7 +180,11 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # Explicit compilation and imports share a disposable cache, never the
+    # checked source tree or any preexisting timestamp cache beside it.
+    with tempfile.TemporaryDirectory(prefix="harn-protocol-bindings-") as cache:
+        sys.pycache_prefix = cache
+        sys.exit(main())
 """
 
 fn repo_root(fs: HarnessFs) -> string {
@@ -197,8 +213,9 @@ pub fn check_python_protocol_bindings(
   root: string = "",
 ) -> dict {
   const artifacts = artifact_root(fs, root)
-  const binding = path_join(artifacts, "python", "harn_protocol.py")
-  const compile = process.run({program: python, args: ["-m", "py_compile", binding]})
+  const compile = process.run(
+    {program: python, args: python_binding_probe_args(artifacts) + ["--syntax-only"]},
+  )
   if !compile.success {
     return {
       ok: false,

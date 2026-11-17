@@ -87,6 +87,10 @@ export const ACP_SESSION_UPDATES = [
   "current_mode_update",
   "config_option_update",
   "session_info_update",
+  "usage_update",
+  "notice",
+  "compaction_update",
+  "compaction_summary_chunk",
   "session_redo",
   "session_rollback",
   "session_truncated",
@@ -243,6 +247,7 @@ export type LlmErrorReason = (typeof LLM_ERROR_REASONS)[number]
 
 export const HARN_PROMPT_RESULT_EXTENSION_FIELDS = [
   "terminal",
+  "goal_outcome",
 ] as const
 export type HarnPromptResultExtensionField = (typeof HARN_PROMPT_RESULT_EXTENSION_FIELDS)[number]
 
@@ -1116,6 +1121,7 @@ export interface HarnACPPromptResult {
   _meta?: {
     harn: {
       terminal?: HarnAgentTerminalOutcome
+      goal_outcome?: ACPValue
     }
   }
 }
@@ -1827,25 +1833,6 @@ export interface ACPClientCapabilities {
   }
 }
 
-export interface HarnToolArgSchema {
-  path_params: string[]
-  dependency_key_params: string[]
-  dependency_range_params: Array<Record<string, string>>
-  arg_aliases: Record<string, string>
-  required: string[]
-}
-
-export interface HarnToolAnnotations {
-  kind: ACPToolKind
-  side_effect_level: HarnSideEffectLevel
-  completion_evidence_role?: HarnCompletionEvidenceRole
-  arg_schema: HarnToolArgSchema
-  capabilities: Record<string, string[]>
-  emits_artifacts: boolean
-  result_readers: string[]
-  inline_result: boolean
-}
-
 export interface A2ATaskStatus {
   state: A2ATaskState
   message?: A2AMessage
@@ -2026,6 +2013,28 @@ export function isResponse(msg: ACPMessage): msg is ACPResponse {
 export function isNotification(msg: ACPMessage): msg is ACPNotification {
   return !("id" in msg) && "method" in msg
 }
+export interface HarnToolArgSchema {
+  path_params: string[]
+  dependency_key_params: string[]
+  dependency_range_params: Record<string, string>[]
+  arg_aliases: Record<string, string>
+  required: string[]
+}
+
+export interface HarnToolAnnotations {
+  kind: ACPToolKind
+  side_effect_level: HarnSideEffectLevel
+  arg_schema: HarnToolArgSchema
+  capabilities: Record<string, string[]>
+  emits_artifacts: boolean
+  result_readers: string[]
+  inline_result: boolean
+  completion_evidence_role?: HarnCompletionEvidenceRole | null
+  destructiveHint?: boolean | null
+  idempotentHint?: boolean | null
+  openWorldHint?: boolean | null
+  readOnlyHint?: boolean | null
+}
 
 export interface HarnSessionTimelineCursor {
   topics: Record<string, number>
@@ -2042,37 +2051,36 @@ export interface HarnSessionTimelineQuery {
 
 export interface HarnSessionTimelineReference {
   kind: string
-  id?: string
-  topic?: string
-  eventId?: number
+  eventId?: number | null
+  id?: string | null
+  topic?: string | null
 }
 
 export interface HarnSessionTimelineLink {
   kind: string
-  targetId?: string
-  traceId?: string
-  spanId?: string
-  eventId?: string
+  eventId?: string | null
+  spanId?: string | null
+  targetId?: string | null
+  traceId?: string | null
 }
 
-/** Harn-owned semantic chronology row. `kind` remains open for forward compatibility. */
 export interface HarnSessionTimelineNode {
   id: string
-  parentId?: string
   children: string[]
   category: string
   kind: string
   name: string
   status: string
-  traceId?: string
-  spanId?: string
-  occurredAtMs?: number
-  startMs?: number
-  durationMs?: number
   attributes: ACPValue
   references: HarnSessionTimelineReference[]
   links: HarnSessionTimelineLink[]
   order: number
+  durationMs?: number | null
+  occurredAtMs?: number | null
+  parentId?: string | null
+  spanId?: string | null
+  startMs?: number | null
+  traceId?: string | null
 }
 
 export interface HarnSessionTimelineCoverage {
@@ -2094,6 +2102,7 @@ export interface HarnSessionTimelineUpdate {
   cursor: HarnSessionTimelineCursor
   node: HarnSessionTimelineNode
 }
+
 
 export const HARN_PREPARED_SESSION_SCHEMA = "harn.prepared_session.v1" as const
 export type HarnPreparedSessionState = "needs_approval" | "ready" | "blocked" | "active" | "delta" | "stopped" | "pivoted" | "terminal"

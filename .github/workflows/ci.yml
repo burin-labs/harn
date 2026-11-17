@@ -204,6 +204,7 @@ jobs:
               - '.github/workflows/consumer-canary.yml'
               - 'scripts/ci/consumer_canary.sh'
               - 'scripts/lib/consumer-observer.mjs'
+              - 'scripts/lib/consumer_pairing_superset.sh'
               - 'crates/harn-hostlib/**'
               - 'crates/harn-execution-policy/**'
               - 'crates/harn-vm/src/process_sandbox.rs'
@@ -310,6 +311,8 @@ jobs:
               - 'CHANGELOG.md'
               - 'Cargo.toml'
               - 'scripts/lib/release_version.sh'
+              - 'scripts/lib/release_consumer_verdict.sh'
+              - 'scripts/lib/consumer_pairing_superset.sh'
               - 'scripts/prepare_development_version.sh'
               - 'scripts/publish*'
               - 'scripts/release*'
@@ -2765,8 +2768,8 @@ jobs:
   # Fork and Dependabot pull requests never run it; it needs the release app
   # credential, which neither receives.
   #
-  # The consumer commit is read once here, so both candidate attempts measure
-  # the same consumer even when its main moves.
+  # The current declaration and consumer commit are captured together here,
+  # so both candidate attempts measure the same selection.
   consumer-pin:
     name: Pin the consumer commit
     needs: [changes, rust-cli]
@@ -2780,8 +2783,10 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+      pull-requests: read
     outputs:
       sha: ${{ steps.read.outputs.sha }}
+      paired_pull: ${{ steps.read.outputs.paired_pull }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -2804,8 +2809,10 @@ jobs:
         id: read
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
+          PARENT_READ_TOKEN: ${{ github.token }}
           CONSUMER: ${{ github.repository_owner }}/${{ secrets.CONSUMER_CANARY_REPOSITORY }}
-          PULL_REQUEST_BODY: ${{ github.event.pull_request.body }}
+          PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+          PULL_REQUEST_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: node scripts/ci/consumer-pin.mjs
 
   consumer-check:
@@ -2827,6 +2834,7 @@ jobs:
       pull_request_cli_run: ${{ github.run_id }}
       pull_request_base: ${{ needs.changes.outputs.pull_request_base }}
       consumer_revision: ${{ needs.consumer-pin.outputs.sha }}
+      consumer_pull_request: ${{ needs.consumer-pin.outputs.paired_pull }}
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -2851,6 +2859,7 @@ jobs:
       pull_request_cli_run: ${{ github.run_id }}
       pull_request_base: ${{ needs.changes.outputs.pull_request_base }}
       consumer_revision: ${{ needs.consumer-pin.outputs.sha }}
+      consumer_pull_request: ${{ needs.consumer-pin.outputs.paired_pull }}
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

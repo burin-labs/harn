@@ -3,6 +3,8 @@
 use harn_session_store::{AppendEvent, CreateSession, MemorySessionStore};
 use serde_json::json;
 
+use crate::orchestration::build_run_view;
+
 use super::super::*;
 use super::support::*;
 
@@ -170,4 +172,74 @@ fn records_written_before_the_fields_decode_as_unreported() {
     .expect("decode");
     assert_eq!(usage.cache_read_tokens, None);
     assert_eq!(usage.cache_write_tokens, None);
+    assert_eq!(usage.reported_cache, None);
+    assert_eq!(usage.provider_call_count, None);
+}
+
+fn physical_call(calls: i64, read: Option<i64>) -> AppendEvent {
+    let mut cache = crate::llm::usage::ReportedCacheTotals::default();
+    cache.record(crate::llm::usage::ReportedCacheUsage {
+        read_tokens: read,
+        write_tokens: read.map(|_| 0),
+    });
+    AppendEvent::new(
+        custom("llm_call"),
+        transcript_event(
+            "llm_call",
+            json!({
+                "input_tokens": 100, "output_tokens": 10, "cost_usd": 0.001,
+                "known_cost_usd": 0.001, "unpriced_calls": 0, "usage_unknown_calls": 0,
+                "provider_call_count": calls, "reported_cache": cache,
+            }),
+        ),
+    )
+}
+
+#[tokio::test]
+async fn public_usage_keeps_category_coverage_and_physical_retry_units() {
+    for read in [0, 40] {
+        let run = project(vec![physical_call(2, Some(read)), physical_call(1, None)]).await;
+        let view = build_run_view(&run);
+        assert_eq!(view.usage.call_count, 2);
+        assert_eq!(view.usage.provider_call_count, Some(3));
+        assert_eq!(view.usage.usage_unknown_calls, 0);
+        assert_eq!(view.usage.cache_read_tokens, Some(read));
+        let cache = view
+            .usage
+            .reported_cache
+            .as_ref()
+            .expect("measured coverage");
+        assert_eq!(cache.read_reported_calls, 1);
+        assert_eq!(cache.write_reported_calls, 1);
+        assert_eq!(cache.read_tokens, read);
+    }
+}
+
+#[tokio::test]
+async fn absent_physical_denominator_is_unknown_in_either_order() {
+    for calls in [
+        vec![physical_call(1, Some(0)), cached_llm_call(Some(true), 0, 0)],
+        vec![cached_llm_call(Some(true), 0, 0), physical_call(1, Some(0))],
+    ] {
+        let view = build_run_view(&project(calls).await);
+        assert_eq!(view.usage.call_count, 2);
+        assert_eq!(view.usage.provider_call_count, None);
+        assert_eq!(view.usage.cache_read_tokens, Some(0));
+        assert_eq!(
+            view.usage
+                .reported_cache
+                .as_ref()
+                .unwrap()
+                .read_reported_calls,
+            2
+        );
+    }
+}
+
+#[tokio::test]
+async fn measured_no_dispatch_and_unreported_cache_are_distinct_from_legacy() {
+    let view = build_run_view(&project(vec![physical_call(0, None)]).await);
+    assert_eq!(view.usage.provider_call_count, Some(0));
+    assert_eq!(view.usage.reported_cache, Some(Box::default()));
+    assert_eq!(view.usage.cache_read_tokens, None);
 }

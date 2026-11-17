@@ -119,6 +119,26 @@ pub fn __agent_loop_record_grant(state: dict, bucket: string) -> dict {
 }
 
 /**
+ * Publish the same counters the loop owns, without advancing or granting any.
+ *
+ * @effects: [agent]
+ * @errors: [runtime]
+ */
+pub fn __agent_loop_publish_call_budget(session_id: string, state: dict) -> nil {
+  __host_agent_session_set_loop_budget(
+    session_id,
+    {
+      schema: "harn.agent_loop_budget_snapshot.v1",
+      iteration: state.iteration,
+      remaining: agent_loop_remaining_calls(state.max, state.iteration),
+      max_iterations: state.max,
+      reserve: state.reserve,
+      grants_remaining: state.remaining,
+    },
+  )
+}
+
+/**
  * Project the remaining call budget BEFORE the turn spends anything, so a
  * shortfall is visible while the agent can still act on it instead of being
  * discovered in the terminal region.
@@ -139,6 +159,7 @@ pub fn __agent_loop_project_call_budget(harness: Harness, session: dict, state: 
   const reserve = state.reserve
   const current_max = state.max
   const remaining_calls = agent_loop_remaining_calls(current_max, state.iteration)
+  __agent_loop_publish_call_budget(session.session_id, state)
   // Only a run that HAD headroom can lose it. When the whole cap is no larger
   // than the reserve, the shortfall is true from turn zero and carries no
   // information, so signalling it would spend the agent's context to tell it

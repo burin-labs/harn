@@ -3832,7 +3832,9 @@ audit:
 import { triage_start_my_day } from "std/triage"
 
 const connector_events = []
-const feed = triage_start_my_day(connector_events, {emit: true})
+const feed = triage_start_my_day(
+  harness.obs, connector_events, {emit: true},
+)
 for event in feed.events {
   harness.stdio.log(event.summary)
 }
@@ -3845,7 +3847,7 @@ for event in feed.events {
   source provenance, not transport delivery ids.
 - `triage_dedupe_events(events)` keeps first-seen order while dropping
   duplicate triage keys.
-- `triage_emit(input, options?)` validates the envelope and appends
+- `triage_emit(obs, input, options?)` validates the envelope and appends
   `kind = "triage_event"` to `triage.inbox.events` by default.
 - Non-navigation action intents must set `requires_approval: true`; hosts own
   write execution for dismiss, snooze, and convert-to-task actions.

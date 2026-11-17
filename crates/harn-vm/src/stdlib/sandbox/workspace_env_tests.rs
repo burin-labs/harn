@@ -402,14 +402,52 @@ fn the_gh_stand_in_carries_config_but_never_hosts() {
 }
 
 #[test]
+fn a_confined_jvm_uses_private_temp_without_launcher_options() {
+    let guard = crate::test_env::test_env_guard();
+    guard.set("JAVA_TOOL_OPTIONS", "");
+    let workspace = tempfile::tempdir().unwrap();
+    let mut env = Vec::new();
+    inject_workspace_process_env(&mut env, &policy(workspace.path()));
+    let env: BTreeMap<_, _> = env.into_iter().collect();
+    assert_eq!(
+        env.get("JAVA_TOOL_OPTIONS").unwrap(),
+        &format!("-Djava.io.tmpdir=\"{}\"", env.get("TMPDIR").unwrap())
+    );
+
+    let mut env = vec![
+        ("JAVA_TOOL_OPTIONS".to_string(), "-Xmx1g".to_string()),
+        ("TMPDIR".to_string(), "/caller/private temp".to_string()),
+    ];
+    inject_workspace_process_env(&mut env, &policy(workspace.path()));
+    let env: BTreeMap<_, _> = env.into_iter().collect();
+    assert_eq!(
+        env.get("JAVA_TOOL_OPTIONS").unwrap(),
+        &format!("-Xmx1g -Djava.io.tmpdir=\"{}\"", env.get("TMPDIR").unwrap())
+    );
+
+    let explicit = "-Djava.io.tmpdir=\"/caller/private temp\" -Xmx1g";
+    let mut env = vec![("JAVA_TOOL_OPTIONS".to_string(), explicit.to_string())];
+    inject_workspace_process_env(&mut env, &policy(workspace.path()));
+    assert_eq!(
+        env.iter()
+            .find(|(key, _)| key == "JAVA_TOOL_OPTIONS")
+            .unwrap()
+            .1,
+        explicit,
+        "an explicit JVM temp choice wins"
+    );
+}
+
+#[test]
 fn a_loopback_grant_makes_the_jvm_prefer_ipv6_on_macos() {
     let workspace = tempfile::tempdir().unwrap();
     let mut policy = policy(workspace.path());
     let mut env = Vec::new();
     inject_workspace_process_env(&mut env, &policy);
     assert!(
-        !env.iter().any(|(key, _)| key == "JAVA_TOOL_OPTIONS"),
-        "no loopback grant, no JVM option"
+        !env.iter()
+            .any(|(_, value)| value.contains(JVM_PREFER_IPV6_ADDRESSES)),
+        "no loopback grant, no JVM loopback option"
     );
 
     policy.process_sandbox.allow_tcp_loopback = true;
@@ -421,9 +459,11 @@ fn a_loopback_grant_makes_the_jvm_prefer_ipv6_on_macos() {
         .map(|(_, value)| value.clone())
         .unwrap();
     if cfg!(target_os = "macos") {
-        assert_eq!(value, format!("-Xmx1g {JVM_PREFER_IPV6_ADDRESSES}"));
+        assert!(value.starts_with("-Xmx1g -Djava.io.tmpdir="));
+        assert!(value.ends_with(JVM_PREFER_IPV6_ADDRESSES));
     } else {
-        assert_eq!(value, "-Xmx1g", "only the macOS seatbelt needs the pin");
+        assert!(value.starts_with("-Xmx1g -Djava.io.tmpdir="));
+        assert!(!value.contains(JVM_PREFER_IPV6_ADDRESSES));
     }
 
     // An operator who already chose a stack keeps their choice.
@@ -438,5 +478,11 @@ fn a_loopback_grant_makes_the_jvm_prefer_ipv6_on_macos() {
             .count(),
         1
     );
-    assert_eq!(env[0].1, "-Djava.net.preferIPv4Stack=true");
+    let value = &env
+        .iter()
+        .find(|(key, _)| key == "JAVA_TOOL_OPTIONS")
+        .unwrap()
+        .1;
+    assert!(value.starts_with("-Djava.net.preferIPv4Stack=true -Djava.io.tmpdir="));
+    assert!(!value.contains(JVM_PREFER_IPV6_ADDRESSES));
 }
