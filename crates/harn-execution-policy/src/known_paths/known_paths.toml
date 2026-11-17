@@ -226,3 +226,36 @@ home = [
   ".cargo/git",            # git dependency db + checkouts
   ".cargo/.package-cache", # Cargo's advisory build lock file
 ]
+
+# Host paths every confined child on Linux may use, whatever its policy: the
+# system's programs and libraries, and the host facts runtimes size their
+# thread pools and allocators from. Absolute. The same set renders as Landlock
+# rules and as bubblewrap binds.
+[system_runtime]
+read = [
+  "/bin",
+  "/sbin", # a real directory where /usr is not merged
+  "/lib",
+  "/lib64",
+  "/usr",
+  "/etc",
+  "/nix/store",
+  "/run/current-system/sw", # the NixOS system profile
+  "/System",
+  # CPU count, online mask and topology: glibc sysconf, Rust std, the JVM,
+  # OpenBLAS, libuv, DuckDB.
+  "/sys/devices/system/cpu",
+  # NUMA layout: the JVM, OpenBLAS, hwloc.
+  "/sys/devices/system/node",
+  # CPU quota and memory limit: Rust std available_parallelism, the Go
+  # runtime, the JVM, libuv, .NET, DuckDB. Read-only, so limits cannot change.
+  "/sys/fs/cgroup",
+  # Huge page mode: the JVM, jemalloc.
+  "/sys/kernel/mm/transparent_hugepage",
+]
+# Character devices read-only, and read and write.
+device_read = ["/dev/zero", "/dev/random", "/dev/urandom"]
+device_read_write = [
+  "/dev/null",
+  "/dev/full", # always full: tests use it for a write that fails with ENOSPC
+]

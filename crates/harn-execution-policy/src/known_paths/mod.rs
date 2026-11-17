@@ -20,6 +20,15 @@ struct Registry {
     package_config: HomeList,
     toolchain_read: ToolchainRead,
     toolchain_cache: HomeList,
+    system_runtime: SystemRuntime,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SystemRuntime {
+    read: Vec<String>,
+    device_read: Vec<String>,
+    device_read_write: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -99,6 +108,30 @@ fn validate(registry: &Registry) -> Result<(), String> {
             }
         }
     }
+    let system = &registry.system_runtime;
+    let mut seen = BTreeSet::new();
+    for entry in system
+        .read
+        .iter()
+        .chain(&system.device_read)
+        .chain(&system.device_read_write)
+    {
+        if !entry.starts_with('/') || entry.contains("..") || entry.ends_with('/') {
+            return Err(format!(
+                "system_runtime entry `{entry}` must be an absolute normal path"
+            ));
+        }
+        if !seen.insert(entry) {
+            return Err(format!("system_runtime lists `{entry}` twice"));
+        }
+    }
+    for device in system.device_read.iter().chain(&system.device_read_write) {
+        if !device.starts_with("/dev/") {
+            return Err(format!(
+                "system_runtime device `{device}` is not under /dev"
+            ));
+        }
+    }
     // A grant may contain a credential (the denial beats it), but a grant that
     // names a credential or sits inside one would contradict the denial.
     for (name, list) in &lists[2..] {
@@ -156,6 +189,23 @@ pub fn toolchain_read_home_paths(windows: bool) -> impl Iterator<Item = &'static
 /// Home-relative read+write cache roots of the DeveloperToolchains preset.
 pub fn toolchain_cache_home_paths() -> &'static [String] {
     &registry().toolchain_cache.home
+}
+
+/// Absolute host paths every confined Linux child may read.
+pub fn system_runtime_read_paths() -> &'static [String] {
+    &registry().system_runtime.read
+}
+
+/// Absolute device files every confined Linux child may read, and whether
+/// it may also write each.
+pub fn system_runtime_devices() -> impl Iterator<Item = (&'static str, bool)> {
+    let system = &registry().system_runtime;
+    let read = system.device_read.iter().map(|path| (path.as_str(), false));
+    let write = system
+        .device_read_write
+        .iter()
+        .map(|path| (path.as_str(), true));
+    read.chain(write)
 }
 
 /// Whether `path` names credential material.
