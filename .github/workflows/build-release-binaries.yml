@@ -820,6 +820,12 @@ jobs:
           HARN_RELEASE_VERSION: ${{ needs.setup.outputs.version }}
           HARN_RELEASE_RUNNER_LABEL: ${{ matrix.runner }}
           HARN_RELEASE_RUST_CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit || '<unset>' }}
+          # rustc's MIR passes for the optimized harn-cli crate run close to
+          # the compiler's default 8 MiB stack: the same source built once and
+          # died with SIGSEGV in remove_noop_landing_pads on the next run. 32
+          # MiB is the size rustc's own diagnostic asks for. Scoped to this
+          # step so smoke runs of the built binary keep its shipped stack.
+          RUST_MIN_STACK: "33554432"
         run: |
           set -euo pipefail
           start=$SECONDS
