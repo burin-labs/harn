@@ -2,11 +2,10 @@
 //! its exit status while removing helpers, including already orphaned peers.
 
 use super::{
-    cleanup_token_processes, command_name, descendant_processes, signal_pid_preserving_group,
-    ActiveProcessCleanupGuard, ProcessCleanupChild, ProcessCleanupReport, ACTIVE_PROCESS_CLEANUPS,
+    command_name, signal_pid_preserving_group, token_census, ActiveProcessCleanupGuard,
+    ProcessCleanupChild, ProcessCleanupReport, ProcessTable, ACTIVE_PROCESS_CLEANUPS,
 };
 use std::collections::BTreeMap;
-use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 
 impl ActiveProcessCleanupGuard {
     /// Call before reaping the root: its reserved PID also reserves the owned
@@ -23,18 +22,18 @@ impl ActiveProcessCleanupGuard {
         let Some(pid) = entry.pid else {
             return ProcessCleanupReport::default();
         };
-        let mut children = descendant_processes(pid)
-            .into_iter()
-            .chain(cleanup_token_processes(&entry.cleanup_token))
-            .map(|child| (child.pid, child))
-            .collect::<BTreeMap<_, _>>();
-        if let Ok(mut system) = System::new() {
-            system.refresh_processes_specifics(
-                ProcessesToUpdate::All,
-                false,
-                ProcessRefreshKind::nothing(),
+        // One table answers all three questions: descendants, the token
+        // cohort, and peers still in the root's process group.
+        let mut children = BTreeMap::new();
+        if let Some(table) = ProcessTable::read(true) {
+            children.extend(
+                table
+                    .descendants(pid)
+                    .into_iter()
+                    .chain(token_census(&table, &entry.cleanup_token).0)
+                    .map(|child| (child.pid, child)),
             );
-            for (peer, process) in system.processes() {
+            for (peer, process) in table.0.processes() {
                 let peer = peer.as_u32();
                 if peer != pid && unsafe { libc::getpgid(peer as i32) } == pid as i32 {
                     children.entry(peer).or_insert_with(|| {

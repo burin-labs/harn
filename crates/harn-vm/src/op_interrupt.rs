@@ -273,6 +273,19 @@ impl ProcessCleanupReport {
         }
     }
 
+    /// Record a child that a subreaper killed with `signal` and then reaped.
+    pub fn record_retired_child(
+        &mut self,
+        pid: u32,
+        parent_pid: Option<u32>,
+        command_name: Option<String>,
+        signal: i32,
+    ) {
+        let mut child = ProcessCleanupChild::new(pid, parent_pid, 1, command_name);
+        push_unique(&mut child.signals, signal);
+        self.merge_child(child);
+    }
+
     fn merge_child(&mut self, child: ProcessCleanupChild) {
         if let Some(existing) = self
             .children
@@ -623,20 +636,15 @@ pub fn signal_pid_tree_group_and_token_with_report(
     {
         let mut report = ProcessCleanupReport::for_signal(Some(pid), signal);
         // Read the parent edges first: they are gone once the root has died.
-        let descendants = descendant_processes(pid);
+        let (descendants, cohort) = descendants_and_token_cohort(pid, cleanup_token);
         signal_pid_and_group(pid, signal);
         for child in descendants.into_iter().rev() {
             signal_pid_and_group(child.pid, signal);
             report.merge_child(child.with_signal(signal));
         }
-        if let Some(cleanup_token) = cleanup_token.filter(|token| !token.is_empty()) {
-            for child in cleanup_token_processes(cleanup_token) {
-                if child.pid == pid {
-                    continue;
-                }
-                signal_pid_and_group(child.pid, signal);
-                report.merge_child(child.with_signal(signal));
-            }
+        for child in cohort {
+            signal_pid_and_group(child.pid, signal);
+            report.merge_child(child.with_signal(signal));
         }
         if signal == 9 {
             wait_for_report_children_to_exit(&report, SUBPROCESS_KILL_SETTLE);
@@ -712,29 +720,33 @@ pub fn signal_pid_tree_and_token_preserving_group_with_report(
 ) -> ProcessCleanupReport {
     let preserved_pgid = preserved_pgid as i32;
     let mut report = ProcessCleanupReport::for_signal(Some(pid), signal);
-    let descendants = descendant_processes(pid);
+    let (descendants, cohort) = descendants_and_token_cohort(pid, cleanup_token);
     signal_pid_preserving_group(pid, preserved_pgid, signal);
     for child in descendants.into_iter().rev() {
         signal_pid_preserving_group(child.pid, preserved_pgid, signal);
         report.merge_child(child.with_signal(signal));
     }
+    for child in cohort {
+        signal_pid_preserving_group(child.pid, preserved_pgid, signal);
+        report.merge_child(child.with_signal(signal));
+    }
     if let Some(cleanup_token) = cleanup_token.filter(|token| !token.is_empty()) {
-        for child in cleanup_token_processes(cleanup_token) {
-            if child.pid == pid {
-                continue;
-            }
-            signal_pid_preserving_group(child.pid, preserved_pgid, signal);
-            report.merge_child(child.with_signal(signal));
-        }
-        for pgid in owner_process_groups(cleanup_token) {
-            if pgid != preserved_pgid as u32 {
-                unsafe {
-                    libc::kill(-(pgid as i32), signal);
-                }
+        signal_owner_process_groups(cleanup_token, preserved_pgid as u32, signal);
+    }
+    report
+}
+
+/// Signal every process group the owner journal for `cleanup_token` recorded,
+/// except `preserved_pgid`.
+#[cfg(unix)]
+pub fn signal_owner_process_groups(cleanup_token: &str, preserved_pgid: u32, signal: i32) {
+    for pgid in owner_process_groups(cleanup_token) {
+        if pgid != preserved_pgid {
+            unsafe {
+                libc::kill(-(pgid as i32), signal);
             }
         }
     }
-    report
 }
 
 #[cfg(unix)]
@@ -749,30 +761,67 @@ fn signal_pid_preserving_group(pid: u32, preserved_pgid: i32, signal: i32) {
     }
 }
 
+/// One read of the host process table: parent edges and command names, plus
+/// environments when a cleanup token must be matched. Each scan costs a pass
+/// over every process on the host, so a cleanup pass reads one table and asks
+/// it both questions instead of scanning once per question.
 #[cfg(unix)]
-fn descendant_processes(root: u32) -> Vec<ProcessCleanupChild> {
-    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
+struct ProcessTable(sysinfo::System);
 
-    let Ok(mut sys) = System::new() else {
-        return Vec::new();
+#[cfg(unix)]
+impl ProcessTable {
+    /// Nil when the platform cannot enumerate processes.
+    fn read(with_environ: bool) -> Option<Self> {
+        use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+
+        let mut sys = System::new().ok()?;
+        let mut kind = ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always);
+        if with_environ {
+            kind = kind.with_environ(UpdateKind::Always);
+        }
+        sys.refresh_processes_specifics(ProcessesToUpdate::All, false, kind);
+        Some(Self(sys))
+    }
+
+    fn descendants(&self, root: u32) -> Vec<ProcessCleanupChild> {
+        let rows = self
+            .0
+            .processes()
+            .iter()
+            .filter_map(|(pid, process)| {
+                Some((
+                    pid.as_u32(),
+                    process.parent()?.as_u32(),
+                    command_name(process.cmd()),
+                ))
+            })
+            .collect::<Vec<_>>();
+        descendant_processes_from_parent_edges(root, &rows)
+    }
+}
+
+/// The descendants of `pid`, then any other process carrying `cleanup_token`,
+/// both read from one process table taken before anything is signalled.
+#[cfg(unix)]
+fn descendants_and_token_cohort(
+    pid: u32,
+    cleanup_token: Option<&str>,
+) -> (Vec<ProcessCleanupChild>, Vec<ProcessCleanupChild>) {
+    let token = cleanup_token.filter(|token| !token.is_empty());
+    let Some(table) = ProcessTable::read(token.is_some()) else {
+        return (Vec::new(), Vec::new());
     };
-    sys.refresh_processes_specifics(
-        ProcessesToUpdate::All,
-        false,
-        ProcessRefreshKind::everything(),
-    );
-    let rows = sys
-        .processes()
-        .iter()
-        .filter_map(|(pid, process)| {
-            Some((
-                pid.as_u32(),
-                process.parent()?.as_u32(),
-                command_name(process.cmd()),
-            ))
+    let descendants = table.descendants(pid);
+    let cohort = token
+        .map(|token| {
+            token_census(&table, token)
+                .0
+                .into_iter()
+                .filter(|child| child.pid != pid)
+                .collect()
         })
-        .collect::<Vec<_>>();
-    descendant_processes_from_parent_edges(root, &rows)
+        .unwrap_or_default();
+    (descendants, cohort)
 }
 
 #[cfg(unix)]
@@ -782,18 +831,18 @@ fn cleanup_token_processes(token: &str) -> Vec<ProcessCleanupChild> {
 
 #[cfg(unix)]
 fn cleanup_token_census(token: &str) -> (Vec<ProcessCleanupChild>, ProcessCleanupCensus) {
-    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+    match ProcessTable::read(true) {
+        Some(table) => token_census(&table, token),
+        None => (Vec::new(), ProcessCleanupCensus::default()),
+    }
+}
 
-    let Ok(mut sys) = System::new() else {
-        return (Vec::new(), ProcessCleanupCensus::default());
-    };
-    sys.refresh_processes_specifics(
-        ProcessesToUpdate::All,
-        false,
-        ProcessRefreshKind::nothing()
-            .with_environ(UpdateKind::Always)
-            .with_cmd(UpdateKind::Always),
-    );
+#[cfg(unix)]
+fn token_census(
+    table: &ProcessTable,
+    token: &str,
+) -> (Vec<ProcessCleanupChild>, ProcessCleanupCensus) {
+    let sys = &table.0;
     let own_pid = sysinfo::Pid::from_u32(std::process::id());
     let own = sys.process(own_pid);
     let control_read = own.is_some_and(|process| {
@@ -1217,283 +1266,4 @@ pub fn capture_output_interruptible_in_session(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn guardian_custody_proves_zero_only_for_complete_unmixed_cleanup() {
-        let mut report = ProcessCleanupReport {
-            census: ProcessCleanupCensus {
-                control_read: true,
-                scanned_processes: 100,
-                unreadable_processes: 20,
-            },
-            ..ProcessCleanupReport::default()
-        };
-        assert_eq!(report.survivor_count(), None);
-        report.guardian_custody_complete = true;
-        assert!(!report.census_complete());
-        assert_eq!(report.survivor_count(), Some(0));
-        report.omitted_children = 1;
-        assert_eq!(report.survivor_count(), None);
-        report.omitted_children = 0;
-        report
-            .children
-            .push(ProcessCleanupChild::new(42, None, 1, None));
-        assert_eq!(report.survivor_count(), Some(1));
-        report.children.clear();
-        report.merge(ProcessCleanupReport::for_signal(Some(43), 9));
-        assert_eq!(report.survivor_count(), None);
-    }
-
-    #[test]
-    fn active_cleanup_owner_scopes_are_disjoint() {
-        let owner = Arc::new(AtomicBool::new(false));
-        let _owned =
-            register_active_process_cleanup(None, "owned-scope-test", Some(Arc::clone(&owner)));
-        let _ownerless = register_active_process_cleanup(None, "ownerless-scope-test", None);
-
-        assert_eq!(
-            active_cleanup_tokens_for_cancel_token_for_test(&owner),
-            vec!["owned-scope-test".to_string()]
-        );
-        assert!(
-            ownerless_active_cleanup_tokens_for_test()
-                .iter()
-                .any(|token| token == "ownerless-scope-test"),
-            "explicit ownerless fallback should remain separately discoverable"
-        );
-    }
-
-    #[test]
-    fn active_cleanup_guard_unregisters_on_drop() {
-        let owner = Arc::new(AtomicBool::new(false));
-        let token = "guard-lifetime-test";
-        let guard = register_active_process_cleanup(None, token, Some(Arc::clone(&owner)));
-
-        assert!(
-            active_cleanup_tokens_for_cancel_token_for_test(&owner)
-                .iter()
-                .any(|entry| entry == token),
-            "active cleanup must remain registered while its guard is alive"
-        );
-
-        drop(guard);
-
-        assert!(
-            !active_cleanup_tokens_for_cancel_token_for_test(&owner)
-                .iter()
-                .any(|entry| entry == token),
-            "dropping the guard must unregister the cleanup token"
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn descendant_pids_from_parent_edges_returns_deepest_first_tree_only() {
-        let edges = [
-            (20, 10),
-            (30, 20),
-            (40, 20),
-            (50, 30),
-            (60, 99),
-            (70, 60),
-            // A malformed process table cycle should not hang traversal.
-            (80, 90),
-            (90, 80),
-        ];
-
-        assert_eq!(
-            descendant_pids_from_parent_edges(10, &edges),
-            vec![50, 30, 40, 20]
-        );
-        assert_eq!(descendant_pids_from_parent_edges(99, &edges), vec![70, 60]);
-        assert_eq!(
-            descendant_pids_from_parent_edges(123, &edges),
-            Vec::<u32>::new()
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn descendant_processes_preserve_metadata_and_depth_order() {
-        let rows = [
-            (20, 10, Some("worker".to_string())),
-            (30, 20, Some("grandchild".to_string())),
-            (40, 20, None),
-            (50, 30, Some("leaf".to_string())),
-        ];
-
-        let descendants = descendant_processes_from_parent_edges(10, &rows);
-        let pids = descendants
-            .iter()
-            .map(|child| {
-                (
-                    child.pid,
-                    child.parent_pid,
-                    child.depth,
-                    child.command_name.as_deref(),
-                )
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            pids,
-            vec![
-                (50, Some(30), 3, Some("leaf")),
-                (30, Some(20), 2, Some("grandchild")),
-                (40, Some(20), 2, None),
-                (20, Some(10), 1, Some("worker")),
-            ]
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn command_name_keeps_only_argv0_basename() {
-        let command = vec![
-            std::ffi::OsString::from("/usr/local/bin/tool"),
-            std::ffi::OsString::from("--api-key"),
-            std::ffi::OsString::from("secret-value"),
-            std::ffi::OsString::from("plain"),
-        ];
-
-        assert_eq!(command_name(&command).as_deref(), Some("tool"));
-        assert_eq!(command_name(&[]).as_deref(), None);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn process_has_cleanup_token_requires_exact_marker_entry() {
-        let token = "tok-123";
-        let env = vec![
-            std::ffi::OsString::from("PATH=/usr/bin"),
-            std::ffi::OsString::from(format!("{PROCESS_CLEANUP_TOKEN_ENV}={token}")),
-        ];
-        assert!(process_has_cleanup_token(&env, token));
-        assert!(!process_has_cleanup_token(&env, "tok"));
-        assert!(!process_has_cleanup_token(
-            &[std::ffi::OsString::from("OTHER=tok-123")],
-            token
-        ));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn process_has_cleanup_token_accepts_owner_lifetime_marker() {
-        let token = "owner-123";
-        let env = vec![std::ffi::OsString::from(format!(
-            "{PROCESS_OWNER_TOKEN_ENV}={token}"
-        ))];
-        assert!(process_has_cleanup_token(&env, token));
-        assert!(!process_has_cleanup_token(&env, "owner"));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn zombie_processes_are_not_lifetime_survivors() {
-        assert!(!process_status_can_execute(sysinfo::ProcessStatus::Zombie));
-        assert!(process_status_can_execute(sysinfo::ProcessStatus::Sleep));
-        assert!(process_status_can_execute(sysinfo::ProcessStatus::Dead));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn owner_journal_initialization_refuses_preexisting_symlink() {
-        let token = new_process_cleanup_token();
-        let journal = owner_process_group_journal(&token);
-        let target = tempfile::NamedTempFile::new().expect("create journal symlink target");
-        std::os::unix::fs::symlink(target.path(), &journal).expect("create owner journal symlink");
-        initialize_process_owner_group_journal(&token)
-            .expect_err("preexisting journal symlink must fail closed");
-        std::fs::remove_file(journal).expect("remove owner journal symlink");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn interrupted_wait_kills_process_group() {
-        // Child spawns a grandchild; the whole group must die on interrupt.
-        let mut child = super::probe_tests::start_process_probe("tree", true, None);
-        let pgid = child.id();
-
-        let cancel = Arc::new(AtomicBool::new(true));
-        let _guard = install(Some(cancel), None);
-        let started = Instant::now();
-        let outcome = wait_child_interruptible(&mut child, None).expect("wait");
-        let ChildWait::Interrupted(_, report) = outcome else {
-            panic!("expected interrupt, got a different child wait outcome");
-        };
-        assert!(
-            !report.children.is_empty(),
-            "probe must reach a live descendant: {report:?}"
-        );
-        assert!(started.elapsed() < Duration::from_secs(10));
-
-        // kill(-pgid, 0) fails with ESRCH once every member is gone.
-        let group_gone = || {
-            (unsafe { libc::kill(-(pgid as i32), 0) }) != 0
-                && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
-        };
-        let deadline = Instant::now() + harn_clock::test_support::HANG_CEILING;
-        while !group_gone() && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        assert!(group_gone(), "process group {pgid} survived interrupt");
-    }
-
-    /// Both halves of the escalation, on one pid each.
-    ///
-    /// A dead pid on its own cannot tell TERM -> grace -> KILL apart from an
-    /// immediate KILL: both leave the same corpse. So the polite process
-    /// writes a marker from inside its SIGTERM handler, and that file is the
-    /// only evidence that the first signal was ever sent. Reverting
-    /// `terminate_pid_tree_group_and_token_with_report` to a bare SIGKILL
-    /// leaves the marker absent; reverting it to a bare SIGTERM leaves the
-    /// immune pid alive.
-    #[cfg(unix)]
-    #[test]
-    fn escalating_terminate_kills_a_term_immune_child_and_asks_a_polite_one_first() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let marker = dir.path().join("term-received.marker");
-        let mut immune = super::probe_tests::start_process_probe("immune", true, None);
-        let mut polite = super::probe_tests::start_process_probe("polite", true, Some(&marker));
-
-        let immune_pid = immune.id();
-        let polite_pid = polite.id();
-
-        // Liveness first: a child that never started would make every clause
-        // below pass for the wrong reason.
-        assert!(
-            process_exists(immune_pid) && process_exists(polite_pid),
-            "both probe children must be running before the terminate"
-        );
-        assert_eq!(
-            std::fs::read(&marker).unwrap(),
-            b"",
-            "no SIGTERM handled before termination"
-        );
-
-        let immune_report = terminate_pid_tree_group_and_token_with_report(immune_pid, None);
-        let polite_report = terminate_pid_tree_group_and_token_with_report(polite_pid, None);
-
-        let _ = immune.wait();
-        let _ = polite.wait();
-
-        assert!(
-            !process_exists(immune_pid),
-            "a child that ignores SIGTERM must still be gone: {immune_report:?}"
-        );
-        assert!(
-            !process_exists(polite_pid),
-            "the polite child must be gone: {polite_report:?}"
-        );
-        assert_eq!(
-            std::fs::read_to_string(&marker).unwrap_or_default(),
-            "TERM",
-            "the polite child must have handled SIGTERM before anything killed it"
-        );
-        assert!(
-            polite_report.attempted_signals.contains(&15),
-            "the escalation must record the SIGTERM it sent: {polite_report:?}"
-        );
-    }
-}
+mod tests;
