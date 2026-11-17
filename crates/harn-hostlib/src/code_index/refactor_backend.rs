@@ -17,6 +17,7 @@ use super::refactor_core::EditSpan;
 pub(super) struct FileEdits {
     /// Index-relative path.
     pub path: String,
+    pub rename_to: Option<String>,
     pub source: String,
     pub edits: Vec<EditSpan>,
 }

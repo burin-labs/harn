@@ -452,7 +452,9 @@ pub(super) struct EditSpan {
 /// One file's edit, staged in memory before any disk write.
 pub(super) struct FilePlan {
     pub path: String,
+    pub rename_to: Option<String>,
     pub language: Language,
+    pub expected_hash: Option<String>,
     pub source: String,
     pub patched: String,
     pub edits: Vec<EditSpan>,
@@ -473,9 +475,12 @@ pub(super) fn plan_file(
             return Err(detail);
         }
     }
+    let expected_hash = Some(sha256_hex(source.as_bytes()));
     Ok(FilePlan {
         path,
+        rename_to: None,
         language,
+        expected_hash,
         source,
         patched,
         edits,
@@ -755,6 +760,7 @@ pub(super) fn changed_since_planned(
         .collect()
 }
 
+#[cfg(not(unix))]
 fn write_source(
     builtin: &'static str,
     path: &Path,
@@ -779,11 +785,7 @@ fn write_source(
     Ok(())
 }
 
-/// Persist every plan in one pass. Call only after every plan has passed
-/// pre-flight, so a clean run is all-or-nothing modulo mid-call disk
-/// failures; those come back as `(path, reason)`. Every target passes
-/// [`contained_path`] before the first byte is written, so one escaping
-/// plan refuses the whole batch.
+/// Persist validated plans through the staged filesystem's regular-file group.
 pub(super) fn write_plans(
     builtin: &'static str,
     root: &Path,
@@ -795,13 +797,88 @@ pub(super) fn write_plans(
         .iter()
         .map(|plan| contained_path(builtin, root, &plan.path, FsAccess::Write))
         .collect::<Result<Vec<_>, _>>()?;
-    let mut failed = Vec::new();
-    for (plan, abs) in plans.iter().zip(&targets) {
-        if let Err(err) = write_source(builtin, abs, &plan.patched, session_id) {
-            failed.push((plan.path.clone(), err));
+    #[cfg(unix)]
+    {
+        let mut changes = Vec::new();
+        for (plan, path) in plans.iter().zip(&targets) {
+            if let Some(destination) = &plan.rename_to {
+                contained_path(builtin, root, &plan.path, FsAccess::Delete)?;
+                let destination = contained_path(builtin, root, destination, FsAccess::Write)?;
+                changes.push(crate::fs::FileChange {
+                    path: path.clone(),
+                    expected_hash: plan.expected_hash.clone(),
+                    contents: None,
+                    permissions_from: None,
+                });
+                changes.push(crate::fs::FileChange {
+                    path: destination,
+                    expected_hash: None,
+                    contents: Some(plan.patched.as_bytes().to_vec()),
+                    permissions_from: Some(path.clone()),
+                });
+            } else {
+                changes.push(crate::fs::FileChange {
+                    path: path.clone(),
+                    expected_hash: plan.expected_hash.clone(),
+                    contents: Some(plan.patched.as_bytes().to_vec()),
+                    permissions_from: None,
+                });
+            }
+        }
+        let targets: Vec<_> = changes.iter().map(|change| change.path.clone()).collect();
+        let immediate = std::cell::Cell::new(false);
+        let outcome = crate::fs::apply_file_changes(builtin, root, &changes, session_id, |mode| {
+            immediate.set(mode == crate::fs::FsMode::Immediate);
+            if immediate.get() {
+                if let (Some(session), Some(scope)) = (
+                    crate::fs::paths::active_session_id(session_id),
+                    harn_vm::agent_sessions::current_tool_call_id(),
+                ) {
+                    let paths: Vec<_> = targets
+                        .iter()
+                        .map(|path| path.to_string_lossy().into_owned())
+                        .collect();
+                    crate::fs_snapshot::snapshot(&session, &scope, &paths, Some(root))?;
+                }
+            }
+            Ok(())
+        });
+        match outcome {
+            Ok(()) => {
+                if immediate.get() {
+                    for path in targets {
+                        crate::fs_snapshot::record_completed_write(&path);
+                    }
+                }
+                Ok(Vec::new())
+            }
+            Err(error) => Ok(plans
+                .iter()
+                .map(|plan| (plan.path.clone(), error.to_string()))
+                .collect()),
         }
     }
-    Ok(failed)
+    #[cfg(not(unix))]
+    {
+        if plans.iter().any(|plan| plan.rename_to.is_some()) {
+            return Ok(plans
+                .iter()
+                .map(|plan| {
+                    (
+                        plan.path.clone(),
+                        "atomic file moves are unavailable on this host".into(),
+                    )
+                })
+                .collect());
+        }
+        let mut failed = Vec::new();
+        for (plan, abs) in plans.iter().zip(&targets) {
+            if let Err(err) = write_source(builtin, abs, &plan.patched, session_id) {
+                failed.push((plan.path.clone(), err));
+            }
+        }
+        Ok(failed)
+    }
 }
 
 // === Reference sites ===
@@ -1191,22 +1268,33 @@ pub(super) fn edit_proof(
         .iter()
         .filter(|plan| !failed.iter().any(|(path, _)| path == &plan.path))
     {
-        proof.add_file(
-            &plan.path,
-            &plan.source,
-            &plan.patched,
-            Some(plan.language),
-            Some(
-                plan.edits
-                    .iter()
-                    .map(|edit| crate::edit_proof::EditRegion {
-                        start: edit.span.start_byte,
-                        end: edit.span.end_byte,
-                        replacement: &edit.after,
-                    })
-                    .collect(),
-            ),
+        let regions = Some(
+            plan.edits
+                .iter()
+                .map(|edit| crate::edit_proof::EditRegion {
+                    start: edit.span.start_byte,
+                    end: edit.span.end_byte,
+                    replacement: &edit.after,
+                })
+                .collect(),
         );
+        if let Some(destination) = &plan.rename_to {
+            proof.add_file_move(
+                (&plan.path, destination),
+                &plan.source,
+                &plan.patched,
+                Some(plan.language),
+                regions,
+            );
+        } else {
+            proof.add_file(
+                &plan.path,
+                &plan.source,
+                &plan.patched,
+                Some(plan.language),
+                regions,
+            );
+        }
     }
     proof
 }
@@ -1229,8 +1317,11 @@ pub(super) fn file_plan_value(plan: &FilePlan) -> VmValue {
             ])
         })
         .collect();
-    build_dict([
-        ("path", str_value(&plan.path)),
+    let mut values = vec![
+        (
+            "path",
+            str_value(plan.rename_to.as_ref().unwrap_or(&plan.path)),
+        ),
         ("language", str_value(plan.language.name())),
         (
             "before_sha256",
@@ -1241,7 +1332,12 @@ pub(super) fn file_plan_value(plan: &FilePlan) -> VmValue {
             str_value(sha256_hex(plan.patched.as_bytes())),
         ),
         ("edits", VmValue::list(edits)),
-    ])
+    ];
+    if let Some(destination) = &plan.rename_to {
+        values.push(("before_path", str_value(&plan.path)));
+        values.push(("after_path", str_value(destination)));
+    }
+    build_dict(values)
 }
 
 pub(super) fn failed_paths_value(failed: &[(String, String)]) -> Vec<VmValue> {

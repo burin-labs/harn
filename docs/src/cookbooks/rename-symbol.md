@@ -19,6 +19,20 @@ too, and re-exports are renamed rather than aliased. Python uses basedpyright
 or pyright. Go uses gopls with the outermost `go.work`, else the nearest
 `go.mod`, as its root.
 
+On Unix, Java type and constructor renames require Eclipse JDT LS (`jdtls`)
+and its supported Java runtime. Set `HARN_LSP_SERVER_JDTLS` when the launcher
+isn't on `PATH`. Harn gives each connection private language-server state.
+JDT LS resolves imports, constructors, generic bounds and nested types while
+keeping unrelated namesakes, comments and string literals unchanged. A public
+top-level type's filename moves with its references in one recoverable
+transaction. Destination collisions, stale source and unsupported server edits
+refuse before source writes. Preview reports the old and new paths, and staged
+commits retain the complete rename as one group.
+
+Java type renames don't fall back to text replacement when semantic support
+is unavailable. They return `backend_unavailable` without writing. Windows type
+and constructor renames remain unsupported and refuse before writing.
+
 When no server is installed, or it cannot answer within its startup budget,
 the rename falls back to the syntax-tree engine. That engine walks every file
 in scope with tree-sitter to find identifier-context occurrences (skipping
@@ -57,7 +71,7 @@ running for the life of the Harn process. `HARN_LSP_STARTUP_TIMEOUT_MS`
 15000) bounds each request; a cold start that runs out of time falls back but
 keeps the server warming for the next call. `HARN_LSP_SERVER_<ID>` names a
 server's executable, where `<ID>` is `RUST_ANALYZER`,
-`TYPESCRIPT_LANGUAGE_SERVER`, `TSC_LSP`, `PYRIGHT` or `GOPLS`; a path that does not
+`TYPESCRIPT_LANGUAGE_SERVER`, `TSC_LSP`, `PYRIGHT`, `GOPLS` or `JDTLS`; a path that does not
 exist forces the fallback.
 
 A rename runs off the VM's thread, so its caller can stop it while it waits on
@@ -72,12 +86,14 @@ its tool call's `tool_call_update` as `_meta.harn.data.progress`: `phase` is
 server), `elapsed_ms` and `cancellable`, repeated every second during a wait.
 
 When the host runs with a staged-fs session (`harness.fs.set_mode`), every
-touched file lands in the overlay; one `harness.fs.commit_staged` flips them
-atomically. Without a session, the host still buffers the full plan in memory
-and only writes after pre-flight passes, so a clean run is all-or-nothing.
+touched file lands in the overlay. `harness.fs.commit_staged` checks and applies
+the complete group, including both paths of a filename move. Files publish
+individually; the recorded transaction restores their original images on failure
+and retains recovery data after an interrupted publication. Without a session,
+the host checks the complete plan before applying the same recoverable group.
 
 Supported languages (first batch): Harn, Rust, TypeScript/TSX, JavaScript/JSX,
-Python, Swift, Go.
+Python, Swift, Go, and Java on Unix.
 
 In the syntax-tree engine, cross-file import resolution covers Rust,
 TypeScript/JavaScript and Python. References in another Harn, Swift or Go file
@@ -101,7 +117,6 @@ pipeline rename_widget_to_gadget(harness: Harness, session_id: string) {
   harness.fs.set_mode({ session_id: session_id, mode: "staged" })
 
   const plan = edit_rename_symbol(harness.code_index,
-    harness.code_index,
     {
       symbol_ref: { name: "Widget", path: "src/lib.rs", kind: "Type" },
       new_name: "Gadget",
@@ -129,7 +144,6 @@ pipeline rename_widget_to_gadget(harness: Harness, session_id: string) {
 
   // Drop dry_run to actually stage the writes, then commit.
   const applied = edit_rename_symbol(harness.code_index,
-    harness.code_index,
     {
       symbol_ref: { name: "Widget", path: "src/lib.rs", kind: "Type" },
       new_name: "Gadget",

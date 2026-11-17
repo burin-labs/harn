@@ -153,6 +153,7 @@ pub(super) fn complete(
             }
             None => changeset.push(FileEdits {
                 path: path.clone(),
+                rename_to: None,
                 source,
                 edits: added.collect(),
             }),

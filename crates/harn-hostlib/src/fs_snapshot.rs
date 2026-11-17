@@ -419,6 +419,13 @@ pub fn drop_snapshot(session_id: &str, snapshot_id: &str) -> Result<DropResult, 
 /// tool call finished mutating `path`. Call it only after the mutation
 /// succeeded, so a tool call the loop later abandons reports what it applied.
 pub(crate) fn record_completed_write(path: &Path) {
+    harn_vm::invalidate_cached_file_text(path);
+    if let Some(session_id) = active_session_id(None) {
+        harn_vm::agent_sessions::record_session_changed_path(
+            &session_id,
+            normalize_logical(path).to_string_lossy().as_ref(),
+        );
+    }
     harn_vm::agent_sessions::record_tool_call_mutation(
         normalize_logical(path).to_string_lossy().as_ref(),
     );

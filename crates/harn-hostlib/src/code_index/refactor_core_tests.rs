@@ -3,6 +3,73 @@ use super::*;
 use std::fs;
 use tempfile::tempdir;
 
+#[cfg(unix)]
+#[test]
+fn file_rename_plan_preserves_collision_images_mode_and_before_after_paths() {
+    use crate::test_support::*;
+    use std::os::unix::fs::PermissionsExt;
+    let _env = crate::process::test_support::declare_inherited();
+    let dir = tempdir().unwrap();
+    let source = "public class Before {}\n";
+    let old = dir.path().join("Before.java");
+    let new = dir.path().join("After.java");
+    fs::write(&old, source).unwrap();
+    fs::set_permissions(&old, fs::Permissions::from_mode(0o755)).unwrap();
+    let start = source.find("Before").unwrap();
+    let mut plan = plan_file(
+        "Before.java".into(),
+        Language::Java,
+        source.into(),
+        vec![EditSpan {
+            span: IdentifierSpan {
+                start_byte: start,
+                end_byte: start + 6,
+                start_row: 0,
+                start_col: start,
+                end_row: 0,
+                end_col: start + 6,
+            },
+            before: "Before".into(),
+            after: "After".into(),
+        }],
+        true,
+    )
+    .unwrap();
+    plan.rename_to = Some("After.java".into());
+    let preview = file_plan_value(&plan);
+    assert_eq!(s(field(&preview, "path")), "After.java");
+    assert_eq!(s(field(&preview, "before_path")), "Before.java");
+    assert_eq!(s(field(&preview, "after_path")), "After.java");
+    let plans = [plan];
+    let writes = crate::host_call::workspace_writes();
+    fs::write(&new, "foreign destination").unwrap();
+    let refused = write_plans("test", dir.path(), &plans, None, &writes).unwrap();
+    assert_eq!(refused.len(), 1);
+    assert_eq!(fs::read_to_string(&old).unwrap(), source);
+    assert_eq!(fs::read_to_string(&new).unwrap(), "foreign destination");
+    fs::remove_file(&new).unwrap();
+    assert!(write_plans("test", dir.path(), &plans, None, &writes)
+        .unwrap()
+        .is_empty());
+    assert!(!old.exists());
+    assert_eq!(fs::read_to_string(&new).unwrap(), "public class After {}\n");
+    assert_eq!(
+        fs::metadata(&new).unwrap().permissions().mode() & 0o777,
+        0o755
+    );
+    let proof = edit_proof(&plans, &[]).value();
+    let VmValue::List(files) = field(&proof, "files") else {
+        panic!("missing file census")
+    };
+    assert_eq!(files.len(), 1);
+    assert_eq!(s(field(&files[0], "path")), "After.java");
+    assert_eq!(s(field(&files[0], "before_path")), "Before.java");
+    assert_eq!(
+        s(field(&preview, "after_sha256")),
+        sha256_hex(&fs::read(&new).unwrap())
+    );
+}
+
 #[test]
 fn positioned_seed_selection_is_exact_while_other_refactors_keep_legacy_paths() {
     let (_, state) = index(&[(
@@ -110,7 +177,10 @@ fn refactor_proof_matches_written_images_and_is_absent_by_default() {
                 "applied",
                 "{method}: {result:?}"
             );
-            assert!(matches!(field(&result, "applied"), VmValue::Bool(true)));
+            assert!(
+                matches!(field(&result, "applied"), VmValue::Bool(true)),
+                "{method}: {result:?}"
+            );
             let VmValue::Dict(result_dict) = &result else {
                 panic!("result missing")
             };

@@ -105,6 +105,38 @@ fn assert_rejected(result: Result<VmValue, HostlibError>, expect_builtin: &str) 
 }
 
 #[test]
+fn staged_session_root_requires_write_scope_before_creating_its_journal() {
+    let workspace = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+    let _policy = PolicyGuard::worktree(&[workspace.path()]);
+    let reg = registry();
+    call(
+        &reg,
+        "hostlib_fs_set_mode",
+        &[
+            ("session_id", vm_string(&uuid::Uuid::new_v4().to_string())),
+            ("mode", vm_string("immediate")),
+            ("root", vm_string(&path_str(workspace.path()))),
+        ],
+    )
+    .expect("measured authorized journal creation");
+    assert!(workspace.path().join(".harn").exists());
+    assert_rejected(
+        call(
+            &reg,
+            "hostlib_fs_set_mode",
+            &[
+                ("session_id", vm_string(&uuid::Uuid::new_v4().to_string())),
+                ("mode", vm_string("immediate")),
+                ("root", vm_string(&path_str(outside.path()))),
+            ],
+        ),
+        "hostlib_fs_set_mode",
+    );
+    assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 0);
+}
+
+#[test]
 fn read_write_delete_list_respect_workspace_roots() {
     let root = TempDir::new().unwrap();
     let outside = TempDir::new().unwrap();

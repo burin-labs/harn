@@ -604,7 +604,10 @@ pub fn edit_safe_text_patch(fs: HarnessFs, random: HarnessRandom, params: dict?)
  * `"syntax_tree"` to pin one. Either way the edit is rejected with
  * `result: "conflict"` if `new_name` already exists as an identifier in
  * any rewritten file. Languages: Rust, TypeScript/TSX, JavaScript/JSX,
- * Python, Swift, Go.
+ * Python, Swift, Go, and Java on Unix. Java type and constructor renames
+ * require Eclipse JDT LS; unavailable semantic support refuses without a
+ * syntax-tree fallback. Required public-type filename moves are part of the
+ * same recoverable transaction. Windows type and constructor renames refuse.
  *
  * Pass `session_id` to route writes through staged-fs (#1722) so all
  * touched files succeed or none do — the host still buffers every plan
