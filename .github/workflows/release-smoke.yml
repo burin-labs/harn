@@ -181,11 +181,15 @@ jobs:
           echo "rustup rustc: $(rustup which rustc)"
           cargo --version
           rustc --version
+      - name: Prepare dist build environment
+        if: steps.runtime.outputs.mode == 'source'
+        shell: bash
+        run: bash scripts/ci/prepare_dist_build.sh
       - name: Build release harn binary
         if: steps.runtime.outputs.mode == 'source'
         shell: bash
         # The distributed profile, as build-release-binaries.yml builds it.
-        run: cargo build --locked --profile dist -p harn-cli --bin harn --features embedded-stdlib
+        run: bash scripts/ci/run_with_host_telemetry.sh source-smoke-build cargo build --locked --profile dist -p harn-cli --bin harn --features embedded-stdlib
       - name: Run release smoke
         shell: bash
         timeout-minutes: 10

@@ -11,7 +11,7 @@ import {
   observerDeclarationName, observerRunNameExpression, observerDispatchActor,
   qualifyOwnedChild, githubArtifactCensus, githubChildCensus, reconcileOwnedChildren,
   createTerminalReceipt, qualifyTerminalReceipt, parentHeadSha, observerParentWorkflows, observerRefusal,
-  readRetry, cleanupReadScope,
+  readRetry, cleanupReadScope, githubArtifactJson, observerReadRetryable,
 } from '../lib/consumer-observer.mjs';
 import {archiveJson} from './fixtures/artifact_archive.mjs';
 
@@ -78,6 +78,33 @@ test('cleanup census retries share a deadline and never accept a late or unmeasu
   } finally {
     readRetry.backoffMs=previous;
   }
+});
+
+test('known archive retries retain the cleanup deadline and stop permanent absence at the read bound', async () => {
+  const bytes=Buffer.from('known archive');
+  const artifact={id:501,name:'measured',expired:false,size_in_bytes:bytes.length,
+    workflow_run:{id:42,head_sha:context.parent_head_sha},
+    digest:`sha256:${createHash('sha256').update(bytes).digest('hex')}`};
+  const identity={runId:'42',headSha:context.parent_head_sha,name:'measured',filename:'consumer-observer.json'};
+  let now=0,reads=0;
+  const waits=[];
+  const scoped=cleanupReadScope(async()=>{reads++;return new Response(null,{status:404});},
+    {now:()=>now,wait:async ms=>{waits.push(ms);now=600_000;}});
+  await assert.rejects(githubArtifactJson('fixture',context.parent_repository,artifact,identity,scoped),
+    /cleanup_read_budget_exhausted/);
+  assert.equal(reads,1,'an expired cleanup scope must not start another archive read');
+  assert.deepEqual(waits,[readRetry.backoffMs]);
+  const previous=readRetry.backoffMs;
+  readRetry.backoffMs=0;
+  try{
+    reads=0;
+    const error=await githubArtifactJson('fixture',context.parent_repository,artifact,identity,
+      async()=>{reads++;return new Response(null,{status:404});}).then(
+        ()=>assert.fail('permanent absence cannot authorize an archive'),error=>error);
+    assert.equal(reads,readRetry.attempts);
+    assert.equal(observerReadRetryable(error),false,'the outer cleanup census must not multiply exhausted 404 retries');
+    assert.match(observerRefusal(error,'fallback').line,/dispatch_declaration_read_refused status=404 attempts=4/);
+  }finally{readRetry.backoffMs=previous;}
 });
 
 test('admission binds an authenticated child to a live current parent and separately frozen source', () => {
@@ -455,6 +482,7 @@ test('the action entrypoint reaches private receipt creation and refuses dead pa
       readRetry.backoffMs = 0;
       let parentReads = 0;
       let declarationReads = 0;
+      let archiveReads = 0;
       function parentRead() {
         const record = JSON.parse(fs.readFileSync(${JSON.stringify(parentFile)}, 'utf8'));
         return record.fixture_end_after_first_read && ++parentReads > 1
@@ -474,12 +502,20 @@ test('the action entrypoint reaches private receipt creation and refuses dead pa
         fs.appendFileSync(${JSON.stringify(path.join(scratch, 'declaration-reads'))}, 'x');
         return ++declarationReads <= lag ? {total_count: 0, artifacts: []} : reading;
       }
-      globalThis.fetch = async url => ({ok: true,
+      globalThis.fetch = async url => {
+        if (url.endsWith('/zip')) {
+          fs.appendFileSync(${JSON.stringify(path.join(scratch, 'archive-reads'))}, 'x');
+          const fixture = JSON.parse(fs.readFileSync(${JSON.stringify(censusFile)}, 'utf8'));
+          if (++archiveReads <= (fixture.fixture_zip_404_reads ?? 0)) return new Response(null, {status:404});
+          if (fixture.fixture_zip_denied) return new Response(null, {status:403});
+        }
+        return {ok: true,
         arrayBuffer: async () => fs.readFileSync(${JSON.stringify(archiveFile)}),
         json: async () => url.includes('/artifacts?')
           ? artifactRead(url)
           : url.endsWith('/42') ? parentRead()
-          : JSON.parse(fs.readFileSync(${JSON.stringify(childFile)}, 'utf8'))});`);
+          : JSON.parse(fs.readFileSync(${JSON.stringify(childFile)}, 'utf8'))};
+      };`);
     const env = {
       PATH: process.env.PATH,
       NODE_OPTIONS: `--import=${preload}`,
@@ -509,6 +545,43 @@ test('the action entrypoint reaches private receipt creation and refuses dead pa
     assert.equal(fs.statSync(receiptFile).mode & 0o777, 0o600);
     assert.doesNotMatch(admitted.stdout + admitted.stderr, /widget-host|run_id|73/);
     assert.equal(fs.readFileSync(reads, 'utf8').length, readRetry.attempts, 'empty reads are retried');
+    fs.writeFileSync(censusFile, JSON.stringify(census));
+
+    const witness = fileURLToPath(new URL('../ci/consumer-observer-declare.mjs', import.meta.url));
+    const witnessEnv = {...env, GITHUB_REPOSITORY:context.parent_repository,
+      GITHUB_RUN_ID:context.parent_run_id, GITHUB_RUN_ATTEMPT:String(context.parent_run_attempt),
+      GITHUB_SHA:context.parent_head_sha};
+    const archiveReads = path.join(scratch, 'archive-reads');
+    const witnessRead = fixture => {
+      fs.writeFileSync(censusFile, JSON.stringify({...census,...fixture}));
+      fs.writeFileSync(archiveReads, '');
+      fs.writeFileSync(output, '');
+      return spawnSync(process.execPath, [witness, '--witness'], {env:witnessEnv, encoding:'utf8'});
+    };
+    const delayedArchive = witnessRead({fixture_zip_404_reads:readRetry.attempts-1});
+    assert.equal(delayedArchive.status, 0, delayedArchive.stderr);
+    assert.match(delayedArchive.stdout, /publication=authenticated parent=live attempt=current/);
+    assert.equal(fs.readFileSync(archiveReads,'utf8').length,readRetry.attempts);
+    assert.equal(fs.readFileSync(output,'utf8'),'');
+    const missingArchive = witnessRead({fixture_zip_404_reads:readRetry.attempts});
+    assert.equal(missingArchive.status,1);
+    assert.match(missingArchive.stderr,/dispatch_declaration_read_refused status=404.*attempts=4/);
+    assert.equal(fs.readFileSync(archiveReads,'utf8').length,readRetry.attempts);
+    assert.doesNotMatch(missingArchive.stdout,/publication=authenticated/);
+    const deniedArchive = witnessRead({fixture_zip_denied:true});
+    assert.equal(deniedArchive.status,1);
+    assert.match(deniedArchive.stderr,/dispatch_declaration_read_refused status=403.*attempts=1/);
+    assert.equal(fs.readFileSync(archiveReads,'utf8').length,1);
+    const changedArchive = witnessRead({fixture_zip_404_reads:1,
+      artifacts:[{...metadata,digest:`sha256:${'0'.repeat(64)}`}]});
+    assert.equal(changedArchive.status,1);
+    assert.match(changedArchive.stderr,/dispatch_declaration_digest_mismatch/);
+    assert.equal(fs.readFileSync(archiveReads,'utf8').length,2);
+    const expiredArchive = witnessRead({fixture_zip_404_reads:3,
+      artifacts:[{...metadata,expired:true}]});
+    assert.equal(expiredArchive.status,1);
+    assert.match(expiredArchive.stderr,/dispatch_declaration_identity_unproven/);
+    assert.equal(fs.readFileSync(archiveReads,'utf8').length,0);
     fs.writeFileSync(censusFile, JSON.stringify(census));
 
     fs.rmSync(receiptFile);

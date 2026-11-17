@@ -1,9 +1,32 @@
+import { WorkflowPreparedArtifact, WorkflowPreparedStage } from "std/workflow/options"
 import {
   workflow_classify_stage_outcome,
   workflow_evaluate_condition,
   workflow_evaluate_verification,
   workflow_prepare_static_stage,
 } from "std/workflow/stage"
+
+type EscalationData = {queue: string}
+
+type GateData = {approval_id: string, approved: bool}
+
+type CompactData = {compact_options: {keep_last: int}}
+
+type CommandText = string
+
+fn prepared_result(value: unknown) -> WorkflowPreparedStage {
+  const result = schema_expect(value, schema_of(WorkflowPreparedStage))
+  require result.handled, "the static stage must be handled"
+  return result
+}
+
+fn first_artifact(result: WorkflowPreparedStage) -> WorkflowPreparedArtifact {
+  const artifact = result.artifacts[0]
+  if artifact == nil {
+    throw "the prepared artifact must remain available"
+  }
+  return artifact
+}
 
 pipeline default(harness: Harness) {
   const verification = workflow_evaluate_verification(
@@ -14,12 +37,20 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(verification.kind)
   harness.stdio.println(verification.ok)
-  harness.stdio.println(len(verification.checks))
+  harness.stdio.println(len(verification.checks ?? []))
   const failed_verification = workflow_evaluate_verification(
     {verify: {assert_text: "missing", expect_status: 1}, result: {text: "present", exit_status: 0}},
   )
   harness.stdio.println(failed_verification.ok)
-  harness.stdio.println(failed_verification.checks[1].actual)
+  const checks = failed_verification.checks ?? []
+  const status_check = checks[1]
+  if status_check == nil {
+    throw "the status verification must remain available"
+  }
+  if status_check.kind != "expect_status" {
+    throw "the second verification must check status"
+  }
+  harness.stdio.println(status_check.actual)
   const condition = workflow_evaluate_condition(
     {
       metadata: {contains_text: "needle"},
@@ -55,50 +86,62 @@ pipeline default(harness: Harness) {
   )
   harness.stdio.println(subagent_outcome.outcome)
   harness.stdio.println(subagent_outcome.branch)
-  const static_condition = workflow_prepare_static_stage(
-    harness.agent,
-    harness.interaction,
-    harness.tools,
-    {
-      node_id: "gate",
-      node: {kind: "condition", metadata: {artifact_kind: "summary"}},
-      artifacts: [{id: "s", kind: "summary", text: "ok"}],
-    },
+  const static_condition = prepared_result(
+    workflow_prepare_static_stage(
+      harness.agent,
+      harness.interaction,
+      harness.tools,
+      {
+        node_id: "gate",
+        node: {kind: "condition", metadata: {artifact_kind: "summary"}},
+        artifacts: [{id: "s", kind: "summary", text: "ok"}],
+      },
+    ),
   )
   harness.stdio.println(static_condition.result.text)
   harness.stdio.println(static_condition.outcome)
-  const static_reduce = workflow_prepare_static_stage(
-    harness.agent,
-    harness.interaction,
-    harness.tools,
-    {
-      node_id: "reduce",
-      node: {
-        kind: "reduce",
-        reduce_policy: {separator: " / "},
-        output_contract: {output_kinds: ["plan"]},
+  const static_reduce = prepared_result(
+    workflow_prepare_static_stage(
+      harness.agent,
+      harness.interaction,
+      harness.tools,
+      {
+        node_id: "reduce",
+        node: {
+          kind: "reduce",
+          reduce_policy: {separator: " / "},
+          output_contract: {output_kinds: ["plan"]},
+        },
+        artifacts: [
+          {id: "a", kind: "summary", text: "one"},
+          {id: "b", kind: "summary", text: "two"},
+        ],
       },
-      artifacts: [{id: "a", kind: "summary", text: "one"}, {id: "b", kind: "summary", text: "two"}],
-    },
+    ),
   )
+  const reduced_artifact = first_artifact(static_reduce)
   harness.stdio.println(static_reduce.result.text)
-  harness.stdio.println(static_reduce.artifacts[0].kind)
-  harness.stdio.println(json_stringify(static_reduce.artifacts[0].lineage))
-  const static_escalation = workflow_prepare_static_stage(
-    harness.agent,
-    harness.interaction,
-    harness.tools,
-    {
-      node_id: "escalate",
-      node: {
-        kind: "escalation",
-        escalation_policy: {queue: "review", level: "high", reason: "needs owner"},
+  harness.stdio.println(reduced_artifact.kind)
+  harness.stdio.println(json_stringify(reduced_artifact.lineage))
+  const static_escalation = prepared_result(
+    workflow_prepare_static_stage(
+      harness.agent,
+      harness.interaction,
+      harness.tools,
+      {
+        node_id: "escalate",
+        node: {
+          kind: "escalation",
+          escalation_policy: {queue: "review", level: "high", reason: "needs owner"},
+        },
+        artifacts: [{id: "input", kind: "plan", text: "blocked"}],
       },
-      artifacts: [{id: "input", kind: "plan", text: "blocked"}],
-    },
+    ),
   )
+  const escalation_artifact = first_artifact(static_escalation)
+  const escalation_data = schema_expect(escalation_artifact.data, schema_of(EscalationData))
   harness.stdio.println(static_escalation.result.text)
-  harness.stdio.println(static_escalation.artifacts[0].data.queue)
+  harness.stdio.println(escalation_data.queue)
   harness.stdio.println(static_escalation.branch)
   harness.testing.clear()
   harness.testing.respond(
@@ -106,63 +149,78 @@ pipeline default(harness: Harness) {
     "approval_response",
     {approved: true, reviewer: "lead", reason: "ready"},
   )
-  const static_gate = workflow_prepare_static_stage(
-    harness.agent,
-    harness.interaction,
-    harness.tools,
-    {
-      node_id: "gate",
-      node: {
-        kind: "stage",
-        mode: "manual",
-        metadata: {human_gate: true, approval_id: "ship", approval_prompt: "Approve ship"},
+  const static_gate = prepared_result(
+    workflow_prepare_static_stage(
+      harness.agent,
+      harness.interaction,
+      harness.tools,
+      {
+        node_id: "gate",
+        node: {
+          kind: "stage",
+          mode: "manual",
+          metadata: {human_gate: true, approval_id: "ship", approval_prompt: "Approve ship"},
+        },
+        artifacts: [{id: "input", kind: "plan", text: "ship plan"}],
       },
-      artifacts: [{id: "input", kind: "plan", text: "ship plan"}],
-    },
+    ),
   )
+  const gate_artifact = first_artifact(static_gate)
+  const gate_data = schema_expect(gate_artifact.data, schema_of(GateData))
   harness.stdio.println(static_gate.branch)
-  harness.stdio.println(static_gate.artifacts[0].data.approval_id)
-  harness.stdio.println(static_gate.artifacts[0].data.approved)
+  harness.stdio.println(gate_data.approval_id)
+  harness.stdio.println(gate_data.approved)
   const argv = if harness.system.platform().os == "windows" {
     ["cmd", "/C", "echo|set /p=command-ok"]
   } else {
     ["printf", "command-ok"]
   }
-  const static_command = workflow_prepare_static_stage(
-    harness.agent,
-    harness.interaction,
-    harness.tools,
-    {
-      node_id: "cmd",
-      node: {kind: "stage", mode: "command", metadata: {command_tool: "run", command_args: argv}},
-      artifacts: [{id: "input", kind: "plan", text: "ship plan"}],
-    },
+  const static_command = prepared_result(
+    workflow_prepare_static_stage(
+      harness.agent,
+      harness.interaction,
+      harness.tools,
+      {
+        node_id: "cmd",
+        node: {kind: "stage", mode: "command", metadata: {command_tool: "run", command_args: argv}},
+        artifacts: [{id: "input", kind: "plan", text: "ship plan"}],
+      },
+    ),
   )
   harness.stdio.println(static_command.branch)
   harness.stdio.println(static_command.result.ok)
-  harness.stdio.println(contains(static_command.result.text, "command-ok"))
-  harness.stdio.println(static_command.artifacts[0].kind)
-  const static_compact = workflow_prepare_static_stage(
-    harness.agent,
-    harness.interaction,
-    harness.tools,
-    {
-      node_id: "compact",
-      node: {
-        kind: "stage",
-        mode: "compact",
-        metadata: {compact_preserve_recent: 1},
-        auto_compact: {token_threshold: 1},
-        output_contract: {output_kinds: ["context_summary"]},
+  const command_text = schema_expect(static_command.result.text, schema_of(CommandText))
+  harness.stdio.println(contains(command_text, "command-ok"))
+  harness.stdio.println(first_artifact(static_command).kind)
+  const static_compact = prepared_result(
+    workflow_prepare_static_stage(
+      harness.agent,
+      harness.interaction,
+      harness.tools,
+      {
+        node_id: "compact",
+        node: {
+          kind: "stage",
+          mode: "compact",
+          metadata: {compact_preserve_recent: 1},
+          auto_compact: {token_threshold: 1},
+          output_contract: {output_kinds: ["context_summary"]},
+        },
+        artifacts: [
+          {id: "a", kind: "summary", text: "first"},
+          {id: "b", kind: "summary", text: "second"},
+        ],
       },
-      artifacts: [
-        {id: "a", kind: "summary", text: "first"},
-        {id: "b", kind: "summary", text: "second"},
-      ],
-    },
+    ),
   )
+  const compact_artifact = first_artifact(static_compact)
+  const compact_data = schema_expect(compact_artifact.data, schema_of(CompactData))
+  const compact_text = compact_artifact.text
+  if compact_text == nil {
+    throw "the compacted artifact must retain text"
+  }
   harness.stdio.println(static_compact.branch)
-  harness.stdio.println(static_compact.artifacts[0].kind)
-  harness.stdio.println(contains(static_compact.artifacts[0].text, "auto-compacted"))
-  harness.stdio.println(static_compact.artifacts[0].data.compact_options.keep_last)
+  harness.stdio.println(compact_artifact.kind)
+  harness.stdio.println(contains(compact_text, "auto-compacted"))
+  harness.stdio.println(compact_data.compact_options.keep_last)
 }

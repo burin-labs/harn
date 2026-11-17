@@ -704,6 +704,35 @@ Explicit `max_iterations`, `initial`, `max`, and adaptive `extend_by` values
 must be positive integers, and `initial` must be less than or equal to `max`;
 invalid fields raise an `agent_loop` error before the first provider call.
 
+### Read the active loop budget
+
+Tools and lifecycle callbacks can call
+`harness.agent.session_loop_budget(session_id)` to read the loop's current
+iteration budget. The read returns `nil` before the loop publishes a
+measurement. A session without live host state raises an error. Retaining a
+completed session's transcript doesn't retain its callable budget.
+
+The snapshot uses schema `harn.agent_loop_budget_snapshot.v1`:
+
+| Field | Meaning |
+|---|---|
+| `iteration` | Number of model turns consumed by this loop |
+| `max_iterations` | Current iteration limit, or `nil` when unmeasured |
+| `remaining` | Turns left before that limit; measured zero differs from `nil` |
+| `reserve` | Initial verification, recovery, and terminal-report grant allowances, plus their `total` |
+| `grants_remaining` | Unspent allowances for those same three grant categories |
+
+The loop publishes before each model call, after consuming its response, and
+before the terminal callback. A tool therefore sees the current turn already
+spent. Reads don't advance counters or grant more work. Iteration counts
+aren't physical provider-request counts; use `provider_call_count` for that.
+
+Grant allowances describe permission to extend the loop under its existing
+terminal policy. They don't promise admission past spend, wall, or forced-stop
+limits. A terminal callback can request a bounded continuation after an
+iteration ceiling; the completed result records an accepted grant in
+`adaptive_budget.decisions` when `expose_decisions` is enabled.
+
 ### loop_control policy
 
 When the budget is `"adaptive"` (or any time you set `loop_control`), the loop

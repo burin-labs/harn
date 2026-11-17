@@ -74,7 +74,7 @@ async function main() {
     fs.writeFileSync(filename+'.tmp',JSON.stringify(state,null,2)+'\n');fs.renameSync(filename+'.tmp',filename);
   };
   try {
-    const request=await releaseRequest(api,repository,number,dryRun);
+    const request=await releaseRequest(api,repository,number,dryRun,process.env.RELEASE_REQUEST_CONSUMER_PULL??'');
     state=await runRequestedRelease(api,request,{dryRun,progress});
     if (dryRun && process.env.RELEASE_REQUEST_INSPECT_RUN) {
       state.live_observation=await releaseObservation(api,request,'candidate',Number(process.env.RELEASE_REQUEST_INSPECT_RUN));

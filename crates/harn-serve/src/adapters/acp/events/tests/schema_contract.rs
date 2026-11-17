@@ -91,17 +91,31 @@ pub(in crate::adapters::acp::events) async fn collect_notifications(
     events: Vec<AgentEvent>,
 ) -> Vec<serde_json::Value> {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let (sink, expected_len) = (AcpAgentEventSink::new(AcpOutput::Channel(tx)), events.len());
+    let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
     for event in events {
         sink.handle_event(&event);
     }
 
-    let mut notifications = Vec::with_capacity(expected_len);
-    for _ in 0..expected_len {
-        let line = rx.recv().await.expect("ACP event notification");
+    drop(sink);
+    let mut notifications = Vec::new();
+    while let Some(line) = rx.recv().await {
         notifications.push(serde_json::from_str(&line).expect("json"));
     }
     notifications
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn notification_collection_retains_both_projections_of_one_event() {
+    let actual = collect_notifications(vec![AgentEvent::TranscriptCompacted {
+        session_id: "session-1".into(),
+        receipt: super::fixture_compaction_receipt("collector-control", None, None, None),
+    }])
+    .await;
+    let kinds: Vec<_> = actual
+        .iter()
+        .map(|frame| frame["params"]["update"]["sessionUpdate"].as_str().unwrap())
+        .collect();
+    assert_eq!(kinds, ["transcript_compacted", "compaction_update"]);
 }
 
 /// The canonical content location is unchanged by Harn's history identity.

@@ -364,6 +364,14 @@ async fn acp_reemits_available_commands_on_pipeline_hot_reload() {
 /// Drive an agent loop through a real ACP roundtrip and return the complete
 /// prompt result, including Harn's typed terminal extension.
 async fn run_acp_agent_loop_prompt(prompt_body: &str) -> serde_json::Value {
+    run_acp_agent_loop_prompt_with_checkpoints(prompt_body)
+        .await
+        .0
+}
+
+async fn run_acp_agent_loop_prompt_with_checkpoints(
+    prompt_body: &str,
+) -> (serde_json::Value, Vec<serde_json::Value>) {
     let dir = tempfile::tempdir().expect("tempdir");
     let pipeline_path = dir.path().join("agent-loop.harn");
     std::fs::write(
@@ -393,11 +401,18 @@ async fn run_acp_agent_loop_prompt(prompt_body: &str) -> serde_json::Value {
         .expect("send session/prompt");
 
     let mut result = serde_json::Value::Null;
+    let mut checkpoints = Vec::new();
     for _ in 0..64 {
         let message = recv_json(&mut response_rx).await;
         if message["method"] == "host/capabilities" {
             reply_empty_result(&request_tx, &message);
             continue;
+        }
+        if message["method"] == HARN_AGENT_EVENT_METHOD
+            && message["params"]["kind"] == "typed_checkpoint"
+            && message["params"]["checkpoint"]["schema"] == "harn.agent_terminal.v1"
+        {
+            checkpoints.push(message["params"]["checkpoint"].clone());
         }
         if message["id"] == 3 {
             result = message["result"].clone();
@@ -406,7 +421,38 @@ async fn run_acp_agent_loop_prompt(prompt_body: &str) -> serde_json::Value {
     }
     drop(request_tx);
     server.await.expect("ACP channel server task");
-    result
+    (result, checkpoints)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn acp_session_prompt_preserves_goal_outcome() {
+    harn_clock::test_support::with_local_tasks(async {
+        for kind in ["not_achieved", "unknown"] {
+            let body = format!(
+                r#"const session = harness.agent.session_init("hello", nil, {{}})
+harness.agent.session_finalize(session.session_id, {{
+  final_status: "done",
+  completion_assessment: {{
+    action: "accept", evidence_id: "assessed-state",
+    pending_tool_batch_effect_count: 0, gap_count: 0,
+    goal_assessment: {{kind: "{kind}", evidence_refs: [1]}},
+  }},
+}})"#
+            );
+            let (result, checkpoints) = run_acp_agent_loop_prompt_with_checkpoints(&body).await;
+            assert_eq!(result["stopReason"], "end_turn");
+            assert_eq!(
+                checkpoints.len(),
+                1,
+                "one owning finalization must be reached"
+            );
+            let outcome = &checkpoints[0]["goal_outcome"];
+            assert_eq!(outcome["kind"], kind);
+            assert_eq!(outcome["evidence_id"], "assessed-state");
+            assert_eq!(result["_meta"]["harn"]["goal_outcome"], *outcome);
+        }
+    })
+    .await;
 }
 
 #[tokio::test(flavor = "current_thread")]

@@ -1,0 +1,1 @@
+const binding `wrong_matched`: expected int, found bool

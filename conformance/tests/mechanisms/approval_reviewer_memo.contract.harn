@@ -66,7 +66,7 @@ pipeline default(harness: Harness) {
           approval_reviewer: { request ->
             harness.runtime.atomic_add(review_requests, 1)
             const decision = reviewer(request)
-            if decision?.memoized ?? false {
+            if decision.memoized ?? false {
               harness.runtime.atomic_add(memo_hits, 1)
               if request.arguments.text == "different" {
                 harness.runtime.atomic_add(different_memoized, 1)

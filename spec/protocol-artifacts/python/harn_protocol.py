@@ -303,6 +303,10 @@ ACP_SESSION_UPDATES: tuple = (
     "current_mode_update",
     "config_option_update",
     "session_info_update",
+    "usage_update",
+    "notice",
+    "compaction_update",
+    "compaction_summary_chunk",
     "session_redo",
     "session_rollback",
     "session_truncated",
@@ -551,6 +555,7 @@ HARN_CONTENT_EXTENSION_FIELDS: tuple = (
 )
 HARN_PROMPT_RESULT_EXTENSION_FIELDS: tuple = (
     "terminal",
+    "goal_outcome",
 )
 A2A_METHODS: tuple = (
     "message/send",
@@ -697,6 +702,10 @@ class ACPSessionUpdate(str, Enum):
     CURRENT_MODE_UPDATE = "current_mode_update"
     CONFIG_OPTION_UPDATE = "config_option_update"
     SESSION_INFO_UPDATE = "session_info_update"
+    USAGE_UPDATE = "usage_update"
+    NOTICE = "notice"
+    COMPACTION_UPDATE = "compaction_update"
+    COMPACTION_SUMMARY_CHUNK = "compaction_summary_chunk"
     SESSION_REDO = "session_redo"
     SESSION_ROLLBACK = "session_rollback"
     SESSION_TRUNCATED = "session_truncated"
@@ -972,75 +981,6 @@ JsonValue = Union[None, bool, int, float, str, List[Any], Dict[str, Any]]
 JsonObject = Dict[str, JsonValue]
 JsonRpcId = Union[int, str, None]
 
-@dataclass
-class HarnSessionTimelineCursor:
-    topics: Dict[str, int] = field(default_factory=dict)
-
-@dataclass
-class HarnSessionTimelineQuery:
-    sessionId: Optional[str] = None
-    runId: Optional[str] = None
-    runPath: Optional[str] = None
-    projectId: Optional[str] = None
-    fromCursor: HarnSessionTimelineCursor = field(default_factory=HarnSessionTimelineCursor)
-    limit: Optional[int] = None
-
-@dataclass
-class HarnSessionTimelineReference:
-    kind: str
-    id: Optional[str] = None
-    topic: Optional[str] = None
-    eventId: Optional[int] = None
-
-@dataclass
-class HarnSessionTimelineLink:
-    kind: str
-    targetId: Optional[str] = None
-    traceId: Optional[str] = None
-    spanId: Optional[str] = None
-    eventId: Optional[str] = None
-
-@dataclass
-class HarnSessionTimelineNode:
-    """Harn-owned semantic chronology row with a forward-compatible kind."""
-    id: str
-    category: str
-    kind: str
-    name: str
-    status: str
-    order: int
-    parentId: Optional[str] = None
-    children: List[str] = field(default_factory=list)
-    traceId: Optional[str] = None
-    spanId: Optional[str] = None
-    occurredAtMs: Optional[int] = None
-    startMs: Optional[int] = None
-    durationMs: Optional[int] = None
-    attributes: JsonValue = None
-    references: List[HarnSessionTimelineReference] = field(default_factory=list)
-    links: List[HarnSessionTimelineLink] = field(default_factory=list)
-
-@dataclass
-class HarnSessionTimelineCoverage:
-    returned: int
-    available: Optional[int]
-    truncated: bool
-
-@dataclass
-class HarnSessionTimelineSnapshot:
-    schemaVersion: int
-    query: HarnSessionTimelineQuery
-    cursor: HarnSessionTimelineCursor
-    coverage: HarnSessionTimelineCoverage
-    nodes: List[HarnSessionTimelineNode]
-
-@dataclass
-class HarnSessionTimelineUpdate:
-    schemaVersion: int
-    cursor: HarnSessionTimelineCursor
-    node: HarnSessionTimelineNode
-
-
 _T = TypeVar("_T", bound="_HarnDataclass")
 
 
@@ -1147,6 +1087,7 @@ class HarnAgentTerminalOutcome(_HarnDataclass):
 @dataclass
 class HarnACPPromptResultHarnMetadata(_HarnDataclass):
     terminal: Optional[HarnAgentTerminalOutcome] = None
+    goal_outcome: Optional[JsonValue] = None
 
 
 @dataclass
@@ -1351,27 +1292,6 @@ class HarnAgentEventNotification(_HarnDataclass):
 
 
 @dataclass
-class HarnToolArgSchema(_HarnDataclass):
-    path_params: List[str] = field(default_factory=list)
-    dependency_key_params: List[str] = field(default_factory=list)
-    dependency_range_params: List[Dict[str, str]] = field(default_factory=list)
-    arg_aliases: Dict[str, str] = field(default_factory=dict)
-    required: List[str] = field(default_factory=list)
-
-
-@dataclass
-class HarnToolAnnotations(_HarnDataclass):
-    kind: str
-    side_effect_level: str
-    arg_schema: HarnToolArgSchema
-    completion_evidence_role: Optional[HarnCompletionEvidenceRole] = None
-    capabilities: Dict[str, List[str]] = field(default_factory=dict)
-    emits_artifacts: bool = False
-    result_readers: List[str] = field(default_factory=list)
-    inline_result: bool = False
-
-
-@dataclass
 class A2AMessage(_HarnDataclass):
     id: str
     role: str
@@ -1481,6 +1401,96 @@ class MCPPrompt(_HarnDataclass):
     title: Optional[str] = None
     description: Optional[str] = None
     arguments: Optional[List[JsonObject]] = None
+@dataclass
+class HarnToolArgSchema(_HarnDataclass):
+    path_params: List[str] = field(default_factory=list)
+    dependency_key_params: List[str] = field(default_factory=list)
+    dependency_range_params: List[Dict[str, str]] = field(default_factory=list)
+    arg_aliases: Dict[str, str] = field(default_factory=dict)
+    required: List[str] = field(default_factory=list)
+
+@dataclass
+class HarnToolAnnotations(_HarnDataclass):
+    kind: str
+    side_effect_level: str
+    arg_schema: HarnToolArgSchema
+    capabilities: Dict[str, List[str]] = field(default_factory=dict)
+    emits_artifacts: bool = False
+    result_readers: List[str] = field(default_factory=list)
+    inline_result: bool = False
+    completion_evidence_role: Optional[HarnCompletionEvidenceRole] = None
+    destructiveHint: Optional[bool] = None
+    idempotentHint: Optional[bool] = None
+    openWorldHint: Optional[bool] = None
+    readOnlyHint: Optional[bool] = None
+
+@dataclass
+class HarnSessionTimelineCursor:
+    topics: Dict[str, int] = field(default_factory=dict)
+
+@dataclass
+class HarnSessionTimelineQuery:
+    sessionId: Optional[str] = None
+    runId: Optional[str] = None
+    runPath: Optional[str] = None
+    projectId: Optional[str] = None
+    fromCursor: HarnSessionTimelineCursor = field(default_factory=HarnSessionTimelineCursor)
+    limit: Optional[int] = None
+
+@dataclass
+class HarnSessionTimelineReference:
+    kind: str
+    eventId: Optional[int] = None
+    id: Optional[str] = None
+    topic: Optional[str] = None
+
+@dataclass
+class HarnSessionTimelineLink:
+    kind: str
+    eventId: Optional[str] = None
+    spanId: Optional[str] = None
+    targetId: Optional[str] = None
+    traceId: Optional[str] = None
+
+@dataclass
+class HarnSessionTimelineNode:
+    id: str
+    category: str
+    kind: str
+    name: str
+    status: str
+    order: int
+    children: List[str] = field(default_factory=list)
+    attributes: JsonValue = None
+    references: List[HarnSessionTimelineReference] = field(default_factory=list)
+    links: List[HarnSessionTimelineLink] = field(default_factory=list)
+    durationMs: Optional[int] = None
+    occurredAtMs: Optional[int] = None
+    parentId: Optional[str] = None
+    spanId: Optional[str] = None
+    startMs: Optional[int] = None
+    traceId: Optional[str] = None
+
+@dataclass
+class HarnSessionTimelineCoverage:
+    returned: int
+    available: Optional[int]
+    truncated: bool
+
+@dataclass
+class HarnSessionTimelineSnapshot:
+    schemaVersion: int
+    query: HarnSessionTimelineQuery
+    cursor: HarnSessionTimelineCursor
+    coverage: HarnSessionTimelineCoverage
+    nodes: List[HarnSessionTimelineNode]
+
+@dataclass
+class HarnSessionTimelineUpdate:
+    schemaVersion: int
+    cursor: HarnSessionTimelineCursor
+    node: HarnSessionTimelineNode
+
 
 @dataclass
 class ACPArtifactUpdateMetaHarn(_HarnDataclass):

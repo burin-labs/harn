@@ -89,6 +89,7 @@ public struct HarnAgentTerminalOutcome: Codable, Sendable, Equatable {
 
 public struct HarnACPPromptResultHarnMetadata: Codable, Sendable, Equatable {
     public var terminal: HarnAgentTerminalOutcome?
+    public var goal_outcome: HarnACPValue?
 }
 
 public struct HarnACPPromptResultMetadata: Codable, Sendable, Equatable {

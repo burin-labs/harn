@@ -542,8 +542,20 @@ check-openapi-snapshot:
 
 # Lint GitHub Actions workflows without requiring the Harn binary. Keep this
 # target source-only so the dedicated hygiene job never pays for a Rust build.
+# Workflows use background/wait steps, which only the pinned fork parses, so
+# any other actionlint would report false syntax errors. CI pins the same
+# version as ACTIONLINT_VERSION in ci.yml. A `go install` build prints
+# `actionlint.kjanat.dev v1.16.1` and the release tarball prints it without the
+# `v`, so the check compares the fork name and the bare version.
+ACTIONLINT_PINNED := actionlint.kjanat.dev 1.16.1
 lint-actions-source:
 	@if command -v actionlint >/dev/null 2>&1; then \
+		found="$$(actionlint --version | head -n 1)"; \
+		if [ "$$(echo "$$found" | sed -E 's/ v([0-9])/ \1/')" != "$(ACTIONLINT_PINNED)" ]; then \
+			echo "actionlint on PATH is '$$found', not the pinned '$(ACTIONLINT_PINNED)'." >&2; \
+			echo "hint: go install actionlint.kjanat.dev/cmd/actionlint@v1.16.1, ahead of other installs on PATH" >&2; \
+			exit 1; \
+		fi; \
 		actionlint; \
 	else \
 		echo "actionlint not installed; skipping GitHub Actions lint"; \
@@ -1804,6 +1816,7 @@ check-rust-test-lane-policy:
 	@echo "=== Checking Rust test lane stack contract ==="
 	@$(HARN_CMD) run scripts/check_rust_test_lane_policy.harn
 	@bash scripts/tests/rust_resource_budget_test.sh
+	@node --test scripts/tests/dist_build_environment_test.mjs
 	@node --test scripts/tests/native_qualification_budget_test.mjs
 	@bash scripts/tests/host_telemetry_test.sh
 	@bash scripts/tests/consumer_canary_test.sh

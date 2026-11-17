@@ -6,6 +6,8 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer_canary_policy.sh"
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/candidate_archive_contract.sh"
 # shellcheck source=scripts/lib/sha256.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sha256.sh"
+# shellcheck source=scripts/lib/consumer_pairing_superset.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/consumer_pairing_superset.sh"
 
 # Runner records choose their original budget. Job-clock records additionally
 # require the policy from their authenticated producer head.
@@ -139,6 +141,19 @@ release_require_rehearsal_binding() (
     (.consumer_pull == null or (.consumer_pull | type == "string" and test("^[1-9][0-9]*$")))
   ' <<< "$binding" >/dev/null || release_binding_refusal rehearsal_binding_malformed "run=$run_id" || exit 1
   field() { jq -r ".$1 // empty" <<< "$binding"; }
+  superseded="$(jq -er '
+    def pull_id: if type == "string" then test("^[1-9][0-9]*\\z") else false end;
+    if has("superseded_pulls") then
+      .superseded_pulls as $pulls |
+      if ($pulls | type) != "array" then error("malformed superseded pulls")
+      elif all($pulls[]; pull_id) | not then error("malformed superseded pulls")
+      elif ($pulls | length) > 0 and ((.declared_pull | pull_id) | not)
+        then error("unmeasured declared pull")
+      elif ($pulls | length) > 0 and .consumer_pull != null and .consumer_pull != .declared_pull
+        then error("mismatched declared pull")
+      else $pulls | join(",") end
+    else "" end
+  ' <<< "$binding")" || release_binding_refusal rehearsal_binding_malformed "run=$run_id" || exit 1
   [[ "$(field source_sha)" == "$sha" ]] ||
     release_binding_refusal rehearsal_source_mismatch "rehearsed=$(field source_sha) promoted=$sha" || exit 1
   [[ "$(field producer_run)" == "$run_id" ]] ||
@@ -177,6 +192,17 @@ release_require_rehearsal_binding() (
       ahead) decision="consumer=default decision=default_advanced_from_rehearsed_head ahead_by=$ahead" ;;
       *) release_binding_refusal consumer_default_diverged "status=${status:-unreported}" || exit 1 ;;
     esac
+  fi
+  if [[ -n "$superseded" ]]; then
+    declared="$(field declared_pull)"
+    release_superset_read() {
+      local destination=$1 read_repository=$2 endpoint=$3 query=$4 value
+      [[ "$read_repository" == "$consumer" ]] || return 1
+      value="$(consumer_read "$endpoint" "$query")" || return 1
+      printf -v "$destination" '%s' "$value"
+    }
+    consumer_pairing_superset_check "$consumer" "$declared" "$tested" "$superseded" release_superset_read ||
+      release_binding_refusal "$CONSUMER_SUPERSET_REASON" "$CONSUMER_SUPERSET_DETAIL" || exit 1
   fi
   binding_after="$(node "$reader" rehearsal-binding "$repository" "$run_id" "$sha")" &&
     [[ "$binding_after" == "$binding" ]] ||

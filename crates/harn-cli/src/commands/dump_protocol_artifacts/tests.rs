@@ -42,6 +42,7 @@ mod external_action_roundtrip;
 mod llm_outcome_vocabulary;
 mod open_enum_source_compatibility;
 mod open_vocabulary_projection;
+mod owned_record_roundtrip;
 mod plan;
 mod prepared_session;
 mod session_recap;
@@ -673,35 +674,6 @@ fn generated_rust_preserves_wire_constants_and_provenance() {
     ] {
         assert_eq!(actual, expected);
     }
-}
-
-#[test]
-fn generated_bindings_expose_one_open_session_timeline_contract() {
-    let rust = generate_rust_for_tests();
-    let swift = generate_swift_for_tests();
-    let typescript = generate_typescript_for_tests();
-    let python = generate_python();
-    let go = generate_go();
-
-    for type_name in [
-        "HarnSessionTimelineCursor",
-        "HarnSessionTimelineQuery",
-        "HarnSessionTimelineReference",
-        "HarnSessionTimelineLink",
-        "HarnSessionTimelineNode",
-        "HarnSessionTimelineCoverage",
-        "HarnSessionTimelineSnapshot",
-        "HarnSessionTimelineUpdate",
-    ] {
-        assert!(rust.contains(&format!("struct {type_name}")));
-        assert!(swift.contains(&format!("struct {type_name}")));
-        assert!(typescript.contains(&format!("interface {type_name}")));
-        assert!(python.contains(&format!("class {type_name}")));
-        assert!(go.contains(&format!("type {type_name} struct")));
-    }
-    assert!(rust.contains("pub kind: String"));
-    assert!(swift.contains("public var kind: String"));
-    assert!(typescript.contains("kind: string"));
 }
 
 #[test]

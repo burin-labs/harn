@@ -1,0 +1,121 @@
+import "std/ui_resource"
+
+struct HostAppRecord {
+  enabled: bool
+  profiles: list<unknown>
+  permissions: list<unknown>
+  bridges: list<unknown>
+}
+
+struct HostRecord {
+  apps: HostAppRecord
+}
+
+struct ResourceOptionsRecord {
+  domain: string
+  prefers_border: bool
+  permissions: dict
+  connect_domains: list<string>
+}
+
+type ToolArguments = {enabled: bool, count: int, label: string}
+
+type ContextValue = {selected: bool}
+
+pipeline test_host_capabilities_preserve_nominal_records_and_scalar_coercions() {
+  const host = HostRecord {
+    apps: HostAppRecord {
+      enabled: false,
+      profiles: [nil, " mcp-app ", "mcp-app"],
+      permissions: [false, 0, " read ", "read"],
+      bridges: [" mcp ", "mcp"],
+    },
+  }
+  const normalized = ui_host_capabilities(host)
+  assert(normalized.apps, "declared profiles still enable app support")
+  assert(normalized.profiles == ["mcp-app"], "profiles trim and deduplicate")
+  assert(normalized.permissions == ["false", "0", "read"], "false and zero survive coercion")
+  assert(normalized.bridges == ["mcp"], "bridges trim and deduplicate")
+  assert(ui_host_supports_apps(host), "the public support selector consumes the same normalization")
+}
+
+pipeline test_host_capabilities_keep_dialect_precedence_and_malformed_refusals() {
+  const normalized = ui_host_capabilities(
+    {
+      apps: {enabled: false, profiles: [], permissions: [], bridges: []},
+      ui: {apps: true, profiles: ["fallback"], permissions: ["fallback"], bridges: ["fallback"]},
+      extensions: {"io.modelcontextprotocol/ui": {mimeTypes: ["text/html;profile=mcp-app"]}},
+    },
+  )
+  assert(normalized.apps, "the MCP extension independently enables app support")
+  assert(
+    normalized.profiles == [],
+    "an empty explicit profile list wins over the extension default",
+  )
+  assert(normalized.permissions == [], "an empty list wins over later dialect fields")
+  assert(normalized.bridges == [], "an empty bridge list wins over later dialect fields")
+  for malformed in [false, 0, "", []] {
+    const refused = try {
+      ui_host_capabilities({extensions: malformed})
+    }
+    assert(is_err(refused), "a non-record extension container remains refused")
+  }
+  for malformed in [false, 0, "", {}] {
+    const refused = try {
+      ui_host_capabilities({apps: {permissions: malformed}})
+    }
+    assert(is_err(refused), "a selected non-list permission field remains refused")
+  }
+  assert(
+    !ui_host_capabilities({apps: false}).apps,
+    "explicit false remains false without other support",
+  )
+  assert(!ui_host_capabilities(nil).apps, "an absent host has no app support")
+}
+
+pipeline test_resource_metadata_retains_typed_policy_and_opaque_permission_values() {
+  const raw = {clipboardWrite: {}, extension: [nil, false, 0, ""], [7]: "integer key"}
+  const resource = ui_resource("ui://boundary", "boundary", "<p>hello</p>")
+  const registration = ui_resource_to_mcp(
+    resource,
+    ResourceOptionsRecord {
+      domain: " demo ",
+      prefers_border: false,
+      permissions: raw,
+      connect_domains: ["https://api.test"],
+    },
+  )
+  const domains: list<string> = registration.meta.ui.csp.connectDomains
+  assert(domains == ["https://api.test"], "generated policy fields retain their declared list type")
+  assert(registration.meta.ui.domain == "demo", "domain normalization remains unchanged")
+  assert(registration.meta.ui.prefersBorder == false, "false border preference remains present")
+  assert(
+    registration.meta.ui.permissions == raw,
+    "opaque permissions retain values and integer keys",
+  )
+  assert(
+    ui_resource_to_mcp(resource).meta.ui.permissions == nil,
+    "absent permissions remain absent",
+  )
+}
+
+pipeline test_message_records_keep_typed_names_and_raw_payloads() {
+  const raw = {enabled: false, count: 0, label: "", extension: [nil], [7]: "integer key"}
+  const call = ui_tool_call_envelope(" refresh ", raw, {meta: raw})
+  const name: string = call.params.name
+  const arguments = schema_expect(call.params.arguments, schema_of(ToolArguments))
+  assert(name == "refresh", "the generated tool name remains normalized")
+  assert(
+    !arguments.enabled && arguments.count == 0 && arguments.label == "",
+    "opaque arguments decode at their consumer",
+  )
+  assert(
+    call.params.arguments == raw && call.params._meta == raw,
+    "raw tool values are not reconstructed",
+  )
+  const value = {selected: false, extension: raw}
+  const update = ui_context_update_envelope(" selection ", value)
+  const selected = schema_expect(update.params.structuredContent.selection, schema_of(ContextValue))
+  assert(!selected.selected, "keyed context values decode at their consumer")
+  assert(update.params.structuredContent.selection == value, "context values retain extra fields")
+}

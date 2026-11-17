@@ -334,11 +334,29 @@ async fn start_acp_test_listener_with_project_root(
     (listener, log, dir)
 }
 
-async fn wait_for_acp_session_detached(listener: &ListenerRuntime, session_id: &str) {
-    harn_clock::test_support::within("ACP session detaching", async {
-        while !listener.acp_session_is_detached_for_test(session_id) {
-            tokio::task::yield_now().await;
+async fn wait_for_acp_session_detached(log: &Arc<AnyEventLog>, session_id: &str) {
+    harn_clock::test_support::within("ACP persisted detachment", async {
+        let topic = Topic::new(format!("acp.session.{session_id}")).expect("session topic");
+        let mut events = log
+            .clone()
+            .subscribe(&topic, None)
+            .await
+            .expect("subscribe");
+        while let Some(event) = events.next().await {
+            let (_, event) = event.expect("session event");
+            if event.kind != "message_sent" || event.payload["method"] != "_harn/presence" {
+                continue;
+            }
+            let message: JsonValue =
+                serde_json::from_str(event.payload["line"].as_str().expect("serialized presence"))
+                    .expect("presence JSON");
+            if message["params"]["state"] == "detached" {
+                assert_eq!(message["params"]["sessionId"], json!(session_id));
+                assert_eq!(message["params"]["role"], json!("host_owner"));
+                return;
+            }
         }
+        panic!("session event stream ended before detachment");
     })
     .await;
 }
@@ -836,7 +854,7 @@ async fn acp_websocket_replays_serialized_events_after_worker_expiry() {
     let _guard = lock_harn_state_async().await;
     reset_active_event_log();
 
-    let (listener, _log, _dir) = start_acp_test_listener_with_env(
+    let (listener, log, _dir) = start_acp_test_listener_with_env(
         ListenerRuntimeEnv::for_test()
             .with_api_key("ws-test-key")
             .with_acp_retained_session_duration(Duration::ZERO),
@@ -857,8 +875,10 @@ async fn acp_websocket_replays_serialized_events_after_worker_expiry() {
         .saturating_sub(1);
     socket.close(None).await.expect("close socket");
     drop(socket);
-    wait_for_acp_session_detached(&listener, &session_id).await;
+    wait_for_acp_session_detached(&log, &session_id).await;
     listener.sweep_expired_acp_workers_for_test().await;
+    // Detachment must remain observable after expiry removes the live worker.
+    wait_for_acp_session_detached(&log, &session_id).await;
 
     let (mut reconnected, _) =
         tokio_tungstenite::connect_async(authorized_acp_request(listener.local_addr()))

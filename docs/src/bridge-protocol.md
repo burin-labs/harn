@@ -187,6 +187,34 @@ values:
 - `current_mode_update`
 - `config_option_update`
 - `session_info_update`
+- `usage_update`
+- `notice` when the client advertises `clientCapabilities.session.notices: {}`
+- `compaction_update` when the client advertises `clientCapabilities.session.compaction: {}`
+
+`usage_update.used` estimates the current request's resident input tokens.
+It excludes deferred tool schemas and the reserved output budget.
+`size` uses the effective configured or previously discovered context limit;
+reporting usage doesn't start a provider discovery request.
+When that limit is unknown, Harn omits the stable update because ACP requires both counts.
+`update._meta.harn.contextMeasurement` is `request_estimate`, and `callId`
+identifies the request that produced it.
+
+`cost` is `null`, with `update._meta.harn.costAvailability: "unmeasured"`.
+Per-run ledgers, retained history, and budget subtotals don't establish a
+complete billed-session total. The existing `provider_usage` extension still
+reports its own run's exact cost or known subtotal and availability.
+
+Notices project live informational, warning, and error logs into a title and
+severity. Debug logs and diagnostic fields remain on the Harn log extension.
+Notices aren't conversation history and aren't replayed.
+See the upstream [session notices contract](https://agentclientprotocol.com/rfds/session-notices).
+
+Compaction updates carry the canonical receipt's `receiptId` as `compactionId`
+and its successful terminal outcome as `status: "completed"`.
+An older receipt without an ID doesn't acquire an invented identity.
+Harn doesn't infer compaction starts, failures, cancellation, or summary chunks
+from log text. The existing `transcript_compacted` extension remains available
+through its separate grant.
 
 Harn advertises its additional `sessionUpdate` discriminators during
 `initialize` under `agentCapabilities._meta.harn.sessionUpdateExtensions`.
@@ -202,6 +230,19 @@ by Harn's runtime under `result._meta.harn.terminal`, advertised through
 `agentCapabilities._meta.harn.promptResultExtensionFields`. Hosts must treat
 only `terminal.kind: "natural"` as completion; canonical ACP `stopReason:
 "end_turn"` alone is not completion evidence.
+
+The sibling `result._meta.harn.goal_outcome` preserves the completion owner's
+assessment from the terminal checkpoint. A finished turn doesn't establish
+that the task succeeded. `not_achieved` and `unknown` remain unchanged; missing
+or null assessments remain unmeasured.
+
+Rust embedders can retain both outcomes atomically with
+`HostBridge::set_prompt_terminal_receipt` and
+`HostBridge::take_prompt_terminal_receipt`. The receipt contains `stop_reason`,
+`terminal` and optional `goal_outcome`. The deprecated `set_prompt_outcome`
+and `take_prompt_outcome` methods use the same storage but only carry terminal
+authority. Migrate writers and readers together to preserve the assessment;
+the old writer leaves it unmeasured.
 
 Harn keeps its tool-rendering extensions under `tool_call._meta.harn` and
 `tool_call_update._meta.harn`, following ACP's extension convention while

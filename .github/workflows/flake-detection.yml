@@ -34,6 +34,7 @@ env:
   FLAKE_ITERATIONS_CEILING: "50"
   FLAKE_ITERATIONS_FLOOR: "10"
   FLAKE_JOB_BUDGET_MINUTES: "160"
+  FLAKE_CARGO_PROFILE: ci-cli
 
 jobs:
   flake-rerun:
@@ -50,8 +51,18 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up the filter runtime
+        id: filter_runtime
+        uses: ./.github/actions/setup-harn
+        with:
+          version: "0.10.201"
+
       - name: Detect touched test files
         id: touched
+        env:
+          HARN_BIN: ${{ steps.filter_runtime.outputs.path }}
+          EVENT_NAME: ${{ github.event_name }}
+          SOURCE_REF: ${{ github.ref }}
         run: |
           # Match every Rust source file under any workspace crate.
           # The narrower `crates/**/src/**/tests*.rs` glob this replaces
@@ -62,7 +73,7 @@ jobs:
           # `package(<pkg>)`, which now reruns the whole package's
           # tests 50× — the safe default when behavior changes
           # anywhere in a crate could introduce a flake.
-          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+          if [[ "$EVENT_NAME" == "schedule" || "$SOURCE_REF" == "refs/heads/main" ]]; then
             BASE=$(git rev-list -n 1 --before='24 hours ago' HEAD || true)
             if [[ -z "$BASE" ]]; then
               BASE=$(git rev-list --max-parents=0 HEAD | tail -n 1)
@@ -121,14 +132,23 @@ jobs:
         with:
           tool: nextest@0.9.132
 
+      - name: Prepare immutable inventory reader
+        id: inventory_reader
+        if: steps.touched.outputs.has_tests == 'true'
+        run: |
+          source_bin="$(env -u HARN_BIN -u HARN_BIN_NO_BUILD ./scripts/harn_bin.sh --print)"
+          reader="$(./scripts/snapshot_harn_bin.sh "$source_bin" "$RUNNER_TEMP/flake-inventory-reader")"
+          echo "path=$reader" >> "$GITHUB_OUTPUT"
+
       - name: Build test binaries
         if: steps.touched.outputs.has_tests == 'true'
-        run: cargo test --locked --no-run --workspace
+        run: cargo test --locked --profile "$FLAKE_CARGO_PROFILE" --no-run --workspace
 
       - name: Budget-aware flake rerun
         id: repeatability
         if: steps.touched.outputs.has_tests == 'true'
         env:
+          HARN_BIN: ${{ steps.inventory_reader.outputs.path }}
           NEXTEST_FILTER: ${{ steps.touched.outputs.filter }}
           RUST_MIN_STACK: "16777216"
         run: scripts/ci/run_touched_test_repeats.sh

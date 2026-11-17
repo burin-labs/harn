@@ -313,6 +313,37 @@ the normalized policy shape but deterministic workflow execution does not sleep
 between attempts yet; use host/orchestrator retry policy for scheduled delivery
 retries and provider failover rather than relying on workflow backoff fields.
 
+### Stage helper result types
+
+`std/workflow/stage` exports its result types from `std/workflow/options`.
+`workflow_evaluate_condition` returns `WorkflowConditionResult`, with a boolean
+`matched` and a `list<string>` of `consumed_artifact_ids`.
+`workflow_evaluate_verification` returns `WorkflowVerificationResult`: `kind`,
+`ok`, optional `findings`, and optional `checks`. Each check distinguishes a
+text assertion from an expected exit status through its `kind` field.
+
+`workflow_classify_stage_outcome` returns `WorkflowStageOutcome`, with string
+`outcome` and `branch` fields. `workflow_stage_attempt_outcome` adds the original
+`verification` value, which remains `unknown` because callers may supply custom
+metadata.
+
+`workflow_prepare_static_stage` returns `WorkflowStaticStageResult`. An
+unhandled stage has only `handled: false`; its payload fields remain optional.
+Validate a handled result against `WorkflowPreparedStage` before requiring its
+`result` or `artifacts`. Prepared artifacts describe proposals before
+persistence and don't promise persisted artifact identifiers or timestamps.
+
+`workflow_execute_stage_attempts` returns `WorkflowStageExecutionResult`.
+Executor results, transcripts, verification metadata, and artifact payloads
+retain their original values. Decode those `unknown` values before accessing
+custom fields. `workflow_flatten_agent_loop_options` returns
+`WorkflowFlattenedAgentOptions` and preserves extra option fields.
+
+`workflow_stage_retry_task` returns a string. Its repair callback receives
+`WorkflowStageRetryContext`, including typed task, attempt, findings, and prior
+text fields. The original stage and prior metadata remain available as
+`unknown` values.
+
 ### Retry with feedback
 
 A stage's `retry_policy` is the typed `WorkflowRetryPolicy`

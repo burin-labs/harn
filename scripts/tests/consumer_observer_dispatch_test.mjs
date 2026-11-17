@@ -20,6 +20,8 @@ test('the actual dispatch entrypoint requires issued custody and a fresh live pa
       {id:501,name:observerDeclarationName(context),workflow_run:{id:42,head_sha:parent.head_sha}});
     const fixture=path.join(scratch,'fixture.json'),calls=path.join(scratch,'calls.jsonl'),preload=path.join(scratch,'fetch.mjs');
     fs.writeFileSync(preload,`import fs from 'node:fs';
+      import {readRetry} from ${JSON.stringify(new URL('../lib/consumer-observer.mjs', import.meta.url).href)};
+      readRetry.backoffMs=0;
       const f=JSON.parse(fs.readFileSync(${JSON.stringify(fixture)},'utf8'));
       globalThis.fetch=async(url,options={})=>{
         if(options.headers?.Authorization!==((options.method==='POST'||url.includes('/repos/acme/'))?'Bearer fixture-consumer':'Bearer fixture-parent'))throw new Error('authority-scope-mismatch');

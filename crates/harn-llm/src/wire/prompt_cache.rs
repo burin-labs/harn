@@ -35,8 +35,16 @@ pub enum PromptCacheBreakpoint {
 #[serde(rename_all = "snake_case")]
 pub enum BreakpointPlacement {
     TopLevel,
+    /// The final non-deferred native tool and conversation caching share one TTL.
+    ToolsAndTopLevel {
+        tool_index: usize,
+    },
     LastBlock,
 }
+
+#[cfg(test)]
+#[path = "prompt_cache_tests.rs"]
+mod tests;
 
 impl PromptCacheBreakpoint {
     pub fn resolve(request: &LlmRequestPayload, caps: &Capabilities) -> Self {
@@ -56,7 +64,24 @@ impl PromptCacheBreakpoint {
             // Anthropic-shaped marker its adapter passes just by sitting next
             // to a row that declares a style.
             CacheBreakpointStyle::None => return Self::Automatic,
-            CacheBreakpointStyle::TopLevel => BreakpointPlacement::TopLevel,
+            CacheBreakpointStyle::TopLevel => request
+                .native_tools
+                .as_ref()
+                .and_then(|tools| {
+                    tools.iter().rposition(|tool| {
+                        tool.get("defer_loading")
+                            .and_then(serde_json::Value::as_bool)
+                            != Some(true)
+                            && tool
+                                .get("function")
+                                .and_then(|function| function.get("defer_loading"))
+                                .and_then(serde_json::Value::as_bool)
+                                != Some(true)
+                    })
+                })
+                .map_or(BreakpointPlacement::TopLevel, |tool_index| {
+                    BreakpointPlacement::ToolsAndTopLevel { tool_index }
+                }),
             CacheBreakpointStyle::LastBlock => BreakpointPlacement::LastBlock,
         };
         if request_carries_cache_marker(request) {
@@ -76,6 +101,19 @@ pub fn apply_prompt_cache_breakpoint(
         PromptCacheBreakpoint::Placed {
             style: BreakpointPlacement::TopLevel,
         } => body["cache_control"] = marker,
+        PromptCacheBreakpoint::Placed {
+            style: BreakpointPlacement::ToolsAndTopLevel { tool_index },
+        } => {
+            if let Some(tool) = body
+                .get_mut("tools")
+                .and_then(serde_json::Value::as_array_mut)
+                .and_then(|tools| tools.get_mut(tool_index))
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                tool.insert("cache_control".to_string(), marker.clone());
+            }
+            body["cache_control"] = marker;
+        }
         PromptCacheBreakpoint::Placed {
             style: BreakpointPlacement::LastBlock,
         } => {

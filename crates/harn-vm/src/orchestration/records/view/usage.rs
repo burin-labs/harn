@@ -18,6 +18,10 @@ pub struct RunViewUsage {
     /// null when no call did, which is distinct from a measured zero.
     pub cache_read_tokens: Option<i64>,
     pub cache_write_tokens: Option<i64>,
+    /// Existing category measurements and physical-call coverage. Missing on
+    /// older records; a present zero count is a measured absence of reports.
+    pub reported_cache: Option<Box<crate::llm::usage::ReportedCacheTotals>>,
+    pub provider_call_count: Option<i64>,
     pub models: Vec<String>,
 }
 
@@ -35,6 +39,8 @@ impl From<&LlmUsageRecord> for RunViewUsage {
             total_cost: value.total_cost,
             cache_read_tokens: value.cache_read_tokens,
             cache_write_tokens: value.cache_write_tokens,
+            reported_cache: value.reported_cache.clone(),
+            provider_call_count: value.provider_call_count,
             models: value.models.clone(),
         }
     }
@@ -63,6 +69,20 @@ impl RunViewUsage {
         // explicit unpriced count. Preserve each owner's certainty while folding.
         let total_is_exact = (self.call_count == 0 || self.cost_usd.is_some())
             && (usage.call_count == 0 || usage.cost_usd.is_some());
+        self.provider_call_count = if self.call_count == 0 {
+            usage.provider_call_count
+        } else if usage.call_count == 0 {
+            self.provider_call_count
+        } else {
+            self.provider_call_count
+                .zip(usage.provider_call_count)
+                .and_then(|(total, more)| total.checked_add(more))
+        };
+        if let Some(measured) = usage.reported_cache.as_deref() {
+            self.reported_cache
+                .get_or_insert_with(Default::default)
+                .merge(measured);
+        }
         self.input_tokens += usage.input_tokens;
         self.output_tokens += usage.output_tokens;
         self.call_count += usage.call_count;
@@ -87,5 +107,48 @@ fn add_reported(total: Option<i64>, more: Option<i64>) -> Option<i64> {
     match (total, more) {
         (None, None) => None,
         (total, more) => Some(total.unwrap_or(0).saturating_add(more.unwrap_or(0))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::usage::ReportedCacheTotals;
+
+    #[test]
+    fn cache_coverage_aggregate_preserves_zero_and_unknown_denominators() {
+        let measured = RunViewUsage {
+            call_count: 1,
+            provider_call_count: Some(2),
+            cache_read_tokens: Some(0),
+            reported_cache: Some(Box::new(ReportedCacheTotals {
+                reported_calls: 2,
+                read_reported_calls: 2,
+                write_reported_calls: 0,
+                read_tokens: 0,
+                write_tokens: 0,
+            })),
+            ..RunViewUsage::default()
+        };
+        let empty = RunViewUsage::default();
+        let legacy = RunViewUsage {
+            call_count: 1,
+            ..RunViewUsage::default()
+        };
+        for values in [[&empty, &measured], [&measured, &empty]] {
+            let aggregate = RunViewUsage::aggregate(values.into_iter());
+            assert_eq!(aggregate.provider_call_count, Some(2));
+            assert_eq!(aggregate.reported_cache, measured.reported_cache);
+            assert_eq!(aggregate.cache_read_tokens, Some(0));
+        }
+        for values in [[&legacy, &measured], [&measured, &legacy]] {
+            let aggregate = RunViewUsage::aggregate(values.into_iter());
+            assert_eq!(aggregate.provider_call_count, None);
+            assert_eq!(aggregate.reported_cache, measured.reported_cache);
+            assert_eq!(aggregate.call_count, 2);
+        }
+        let absent = RunViewUsage::aggregate(std::iter::empty());
+        assert_eq!(absent.provider_call_count, None);
+        assert_eq!(absent.reported_cache, None);
     }
 }
