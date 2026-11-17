@@ -36,6 +36,7 @@ impl AgentEvent {
             | Self::IterationEnd { session_id, .. }
             | Self::InferenceSpeed { session_id, .. }
             | Self::ProviderUsage { session_id, .. }
+            | Self::ContextUsage { session_id, .. }
             | Self::SessionClosed { session_id, .. }
             | Self::AnchorChanged { session_id, .. }
             | Self::JudgeStarted { session_id, .. }
@@ -85,6 +86,7 @@ impl AgentEvent {
             | Self::ToolFormatOverride { session_id, .. }
             | Self::ToolCallAudit { session_id, .. }
             | Self::ToolBatchDisposition { session_id, .. }
+            | Self::ToolBatchProposalResolution { session_id, .. }
             | Self::CacheHit { session_id, .. }
             | Self::CacheMiss { session_id, .. }
             | Self::LlmCallLog { session_id, .. }

@@ -415,6 +415,7 @@
       "subagent_join",
       "subagent_stop",
       "tool_batch_disposition",
+      "tool_batch_proposal_resolution",
       "tool_call_audit",
       "tool_format_override",
       "turn_phase_changed",
@@ -522,7 +523,8 @@
       "managed_allowance_unavailable"
     ],
     "promptResultExtensionFields": [
-      "terminal"
+      "terminal",
+      "goal_outcome"
     ],
     "schemaCompatibility": "agentclientprotocol/agent-client-protocol schema v1.26.0",
     "sessionUpdateVariants": [
@@ -537,6 +539,10 @@
       "current_mode_update",
       "config_option_update",
       "session_info_update",
+      "usage_update",
+      "notice",
+      "compaction_update",
+      "compaction_summary_chunk",
       "session_redo",
       "session_rollback",
       "session_truncated",

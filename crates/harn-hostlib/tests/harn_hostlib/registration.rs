@@ -793,17 +793,18 @@ fn parallel_named_host_lease_scopes_release_before_reacquire() {
                         };
                         let source = format!(
                             r#"
-import {{ with_host_lease }} from "std/host_lease"
+import {{ host_lease_status, with_host_lease }} from "std/host_lease"
 
 pipeline default(harness: Harness, task: unknown) {{
 {first}
+  const released = host_lease_status(harness.host_lease, "mac-local", "rust-heavy", "{domain}").active == nil
   const second = with_host_lease(
     harness.host_lease,
     harness.clock,
-    {{host: "mac-local", owner: "second-{worker}", resource_class: "rust-heavy", domain: "{domain}"}},
+    {{host: "mac-local", owner: "second-{worker}", resource_class: "rust-heavy", domain: "{domain}", wait_timeout_ms: 5000}},
     {{ _ -> "second" }},
   )
-  return {{first: first, second: second.status}}
+  return {{first: first, released: released, second: second.status, second_deferred_reason: second.acquire.defer?.deferred_reason}}
 }}
 "#
                         );
@@ -822,9 +823,15 @@ pipeline default(harness: Harness, task: unknown) {{
                         "fixture failure"
                     })
                 );
+                assert!(
+                    matches!(result.get("released"), Some(VmValue::Bool(true))),
+                    "iteration {iteration}, worker {index}: first scope retained its lease"
+                );
                 assert_eq!(
                     result.get("second").map(VmValue::display).as_deref(),
-                    Some("completed")
+                    Some("completed"),
+                    "iteration {iteration}, worker {index}: deferred reason {:?}",
+                    result.get("second_deferred_reason")
                 );
             }
         });

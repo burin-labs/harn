@@ -193,7 +193,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             succeeded: tool_calls_succeeded,
           }
         }
-        const turn_opts = setup.turn_opts
+        let turn_opts = setup.turn_opts
         const turn_llm_opts = setup.turn_llm_opts
         const turn_prompt = setup.turn_prompt
         const llm_opts = setup.llm_opts
@@ -261,6 +261,10 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
         const llm_result = call.value
         consecutive_failure_count = 0
         iteration = iteration + 1
+        __agent_loop_publish_call_budget(
+          session.session_id,
+          call_budget + {iteration: iteration, max: current_max},
+        )
         const projection_context = {llm_options: turn_llm_opts, turn_options: turn_opts}
         const projected = __agent_loop_project_result(harness.agent, llm_result, projection_context)
         const raw_text = projected.raw_text
@@ -890,12 +894,13 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             },
         )
         const dispatch = dispatched.dispatch
+        turn_opts = dispatched.turn_opts
         const actuation_dispatch_results = __dispatch_results_list(dispatch)
         const completed_observation = __agent_loop_completed_dispatch_stall(
           {
             harness: harness,
             session_id: session.session_id,
-            tool_calls: tool_calls,
+            tool_calls: dispatched.calls,
             dispatch: dispatch,
             iteration: iteration_index + 1,
             stall_config: stall_observation.config,
@@ -1045,7 +1050,7 @@ pub fn __agent_loop_run(harness: Harness, message: any, session: dict, initial_o
             raw_text: raw_text,
             rejected_tools_seen: rejected_tools_seen,
             successful_tools_seen: successful_tools_seen,
-            tool_calls: tool_calls,
+            tool_calls: dispatched.calls,
             totals: totals,
             turn_llm_opts: turn_llm_opts,
             turn_opts: turn_opts,

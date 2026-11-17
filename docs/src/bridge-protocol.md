@@ -187,6 +187,34 @@ values:
 - `current_mode_update`
 - `config_option_update`
 - `session_info_update`
+- `usage_update`
+- `notice` when the client advertises `clientCapabilities.session.notices: {}`
+- `compaction_update` when the client advertises `clientCapabilities.session.compaction: {}`
+
+`usage_update.used` estimates the current request's resident input tokens.
+It excludes deferred tool schemas and the reserved output budget.
+`size` uses the effective configured or previously discovered context limit;
+reporting usage doesn't start a provider discovery request.
+When that limit is unknown, Harn omits the stable update because ACP requires both counts.
+`update._meta.harn.contextMeasurement` is `request_estimate`, and `callId`
+identifies the request that produced it.
+
+`cost` is `null`, with `update._meta.harn.costAvailability: "unmeasured"`.
+Per-run ledgers, retained history, and budget subtotals don't establish a
+complete billed-session total. The existing `provider_usage` extension still
+reports its own run's exact cost or known subtotal and availability.
+
+Notices project live informational, warning, and error logs into a title and
+severity. Debug logs and diagnostic fields remain on the Harn log extension.
+Notices aren't conversation history and aren't replayed.
+See the upstream [session notices contract](https://agentclientprotocol.com/rfds/session-notices).
+
+Compaction updates carry the canonical receipt's `receiptId` as `compactionId`
+and its successful terminal outcome as `status: "completed"`.
+An older receipt without an ID doesn't acquire an invented identity.
+Harn doesn't infer compaction starts, failures, cancellation, or summary chunks
+from log text. The existing `transcript_compacted` extension remains available
+through its separate grant.
 
 Harn advertises its additional `sessionUpdate` discriminators during
 `initialize` under `agentCapabilities._meta.harn.sessionUpdateExtensions`.
@@ -202,6 +230,19 @@ by Harn's runtime under `result._meta.harn.terminal`, advertised through
 `agentCapabilities._meta.harn.promptResultExtensionFields`. Hosts must treat
 only `terminal.kind: "natural"` as completion; canonical ACP `stopReason:
 "end_turn"` alone is not completion evidence.
+
+The sibling `result._meta.harn.goal_outcome` preserves the completion owner's
+assessment from the terminal checkpoint. A finished turn doesn't establish
+that the task succeeded. `not_achieved` and `unknown` remain unchanged; missing
+or null assessments remain unmeasured.
+
+Rust embedders can retain both outcomes atomically with
+`HostBridge::set_prompt_terminal_receipt` and
+`HostBridge::take_prompt_terminal_receipt`. The receipt contains `stop_reason`,
+`terminal` and optional `goal_outcome`. The deprecated `set_prompt_outcome`
+and `take_prompt_outcome` methods use the same storage but only carry terminal
+authority. Migrate writers and readers together to preserve the assessment;
+the old writer leaves it unmeasured.
 
 Harn keeps its tool-rendering extensions under `tool_call._meta.harn` and
 `tool_call_update._meta.harn`, following ACP's extension convention while
@@ -846,12 +887,29 @@ payload is validated as a reminder spec; non-standard host metadata belongs unde
 `_meta`. Malformed reminder payloads are rejected with `HARN-RMD-002`; unknown
 top-level reminder options are rejected with `HARN-RMD-001`.
 
-`pin_reminder` can include a typed `goal_pin` projection with `spec` and
+`pin_reminder` can include a typed `goal_pin` projection with `spec`, required
+`lifecycle` (`managed` or `context`), `objective_covered_body`, and optional
 `control_id`. The spec carries the objective, active and retired criteria
 (`id` and `description`), constraints, and budget. Machine-check callbacks stay
-with the caller. Harn updates this projection when a recorded retarget lands,
+with the caller. Harn updates managed projections when a recorded retarget lands,
 so the pin preserves the current goal across compaction. An optional `max_body`
 preserves the visible-body limit from `pin_reminder` when Harn refreshes the pin.
+
+A `context` projection only supplies rendering metadata. It keeps the caller's
+wording, authority and bound; managed retarget and completion policy do not
+consume it. `pin_reminder` selects this lifecycle through
+`meta.goal_lifecycle: "context"`; ordinary goal pins select `managed`.
+
+At final request assembly, an objective already present verbatim in an actual
+selected user message may be omitted from its matching canonical goal envelope.
+Known tool results and harness directives do not count as user requests.
+Filtering, rewriting or truncating the user text restores the full objective.
+Harn checks role, full content and ordered reminder IDs against the immutable
+stored message, then replaces only a unique complete goal block produced by the
+canonical renderer. Unrelated reminder expiry cannot alter that served prefix.
+Projector-authored text stays unchanged. Caller-supplied origins, anchors and
+byte ranges grant no authority.
+Full text remains durable; distinct criteria and constraints remain rendered.
 
 Hosts that need an operator-facing queue can call
 `session/pending_prompts` with `{ "sessionId": "..." }`. The response is

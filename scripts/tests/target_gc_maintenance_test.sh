@@ -224,12 +224,11 @@ HARN_TARGET_GC_TEST_LAUNCHCTL_CALLS="$test_root/launchctl-calls" \
 rm -f "$mac_home/.local/bin/harn-target-gc-maintenance"
 HOME="$mac_home" \
 PATH="$test_root/fake-bin:$PATH" \
-HARN_TARGET_GC_SCHEDULE=none \
 HARN_TARGET_GC_TEST_PLATFORM=Darwin \
 HARN_TARGET_GC_TEST_CRONTAB="$mac_crontab" \
 HARN_TARGET_GC_TEST_LAUNCHCTL_STATE="$test_root/launchctl-state" \
 HARN_TARGET_GC_TEST_LAUNCHCTL_CALLS="$test_root/launchctl-calls" \
-  "$repo_root/scripts/install_target_gc_maintenance.sh" > "$test_root/mac-none.txt"
+  "$repo_root/scripts/install_target_gc_maintenance.sh" --schedule none > "$test_root/mac-none.txt"
 if [ -f "$test_root/launchctl-state" ] || [ -e "$mac_plist" ] \
   || [ ! -x "$mac_home/.local/bin/harn-target-gc-maintenance" ]; then
   echo "macOS install without a schedule kept the LaunchAgent or skipped the wrapper" >&2
@@ -238,20 +237,21 @@ fi
 printf '%s\n' '0 1 * * * existing-job' \
   '17 3 * * * old-maintenance # harn-target-gc-maintenance' > "$test_root/crontab"
 PATH="$test_root/fake-bin:$PATH" \
-HARN_TARGET_GC_SCHEDULE=none \
 HARN_TARGET_GC_TEST_CRONTAB="$test_root/crontab" \
 HARN_TARGET_GC_INSTALL_DIR="$test_root/installed" \
 HARN_TARGET_GC_LOG_DIR="$test_root/logs" \
-  "$repo_root/scripts/install_target_gc_maintenance.sh" > "$test_root/linux-none.txt"
+  "$repo_root/scripts/install_target_gc_maintenance.sh" --schedule none > "$test_root/linux-none.txt"
 if grep -Fq '# harn-target-gc-maintenance' "$test_root/crontab" \
   || ! grep -Fq '0 1 * * * existing-job' "$test_root/crontab"; then
   echo "Linux install without a schedule kept its cron entry or lost another job" >&2
   exit 1
 fi
-if HARN_TARGET_GC_SCHEDULE=hourly "$repo_root/scripts/install_target_gc_maintenance.sh" \
-    > "$test_root/bad-schedule.txt" 2>&1; then
-  echo "installer accepted an unknown schedule" >&2
-  exit 1
-fi
+for bad in "--schedule hourly" "--schedule" "--frequency daily"; do
+  # shellcheck disable=SC2086 # each case is a word list
+  if "$repo_root/scripts/install_target_gc_maintenance.sh" $bad > "$test_root/bad-schedule.txt" 2>&1; then
+    echo "installer accepted a bad argument list: $bad" >&2
+    exit 1
+  fi
+done
 
 echo "target_gc_maintenance_test: ok"

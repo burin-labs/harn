@@ -12,6 +12,8 @@ pub type CiStep = {
   uses?: string,
   run?: string,
   shell?: string,
+  background?: bool | string,
+  wait?: string | list<string>,
   if?: string | bool,
   with?: dict<string, CiScalar>,
   env?: dict<string, CiScalar>,

@@ -1,0 +1,189 @@
+import {
+  canon_event_observed_symbols,
+  canon_event_paths,
+  canon_event_write_path_from_result,
+} from "std/agent/canon"
+import {
+  agent_transcript_normalize,
+  agent_transcript_tool_call_args,
+  agent_transcript_tool_call_name,
+} from "std/agent/transcript"
+import { connector_lifecycle, git_forge_pull_request_event } from "std/connectors/shared"
+
+struct ToolFunction {
+  name: string
+  arguments: string
+}
+
+struct Message {
+  role: string
+  content: string
+  tool_calls: list<dict>
+}
+
+struct Llm {
+  provider: string
+  model: string
+  input_tokens: int
+}
+
+struct Usage {
+  output_tokens: int
+  cache_read_tokens: int
+}
+
+struct ToolResult {
+  kind: string
+  tool_name: string
+  tool_call_id: string
+  outcome: string
+  origin: string
+  data: dict
+}
+
+struct Carrier {
+  changed_paths: list<string>
+  observed_symbols: list<string>
+}
+
+struct Revision {
+  ref: string
+  sha: string
+}
+
+struct Repository {
+  full_name: string
+  html_url: string
+}
+
+struct Project {
+  path_with_namespace: string
+  id: int
+  web_url: string
+}
+
+struct ProviderEvent {
+  provider_payload: dict
+}
+
+struct ProviderWrapper {
+  event: ProviderEvent
+}
+
+struct Matcher {
+  path: string
+}
+
+pipeline test(harness: Harness) {
+  const function = ToolFunction {name: "lookup", arguments: "{\"path\":\"src/main.harn\"}"}
+  assert_eq(type_of(function), "struct")
+  const call = {id: "call-1", function: function}
+  assert_eq(agent_transcript_tool_call_name(call), "lookup")
+  assert_eq(agent_transcript_tool_call_args(call), {path: "src/main.harn"})
+  const message = Message {role: "assistant", content: "inspect", tool_calls: [call]}
+  const row = agent_transcript_normalize(
+    [
+      {
+        message: message,
+        llm: Llm {provider: "mock", model: "fixture", input_tokens: 7},
+        usage: Usage {output_tokens: 3, cache_read_tokens: 2},
+      },
+    ],
+  )[0]
+  if row == nil || row.kind != "assistant" {
+    throw "the assistant row must remain available"
+  }
+  assert_eq(row.text, "inspect")
+  assert_eq(row.provider, "mock")
+  assert_eq(row.model, "fixture")
+  assert_eq(row.usage.input_tokens, 7)
+  assert_eq(row.usage.output_tokens, 3)
+  assert_eq(row.usage.cache_read_tokens, 2)
+  assert_eq(row.tool_calls[0]?.name, "lookup")
+  assert_eq(row.raw.message, message)
+  const metadata = ToolResult {
+    kind: "tool_result",
+    tool_name: "lookup",
+    tool_call_id: "call-1",
+    outcome: "error",
+    origin: "harness_repair",
+    data: {extension: true},
+  }
+  const tool = agent_transcript_normalize([{content: "result", _harn: metadata}])[0]
+  if tool == nil || tool.kind != "tool_result" {
+    throw "the tool result must remain available"
+  }
+  assert_eq(tool.name, "lookup")
+  assert_eq(tool.tool_call_id, "call-1")
+  assert_eq(tool.outcome, "error")
+  assert_eq(tool.origin, "harness_repair")
+  assert_eq(tool.data, {extension: true})
+  assert_eq(tool.raw._harn, metadata)
+  const carrier = Carrier {changed_paths: ["src/main.harn"], observed_symbols: ["observed"]}
+  const event = {iteration_info: carrier, tool_results: [{result: carrier, raw_output: carrier}]}
+  assert_eq(canon_event_paths(event), ["src/main.harn"])
+  assert_eq(canon_event_observed_symbols(event), ["observed"])
+  assert_eq(canon_event_write_path_from_result({function: function}), "")
+  struct WriteFunction {
+    arguments: dict
+  }
+  assert_eq(
+    canon_event_write_path_from_result(
+      {function: WriteFunction {arguments: {path: "src/main.harn"}}},
+    ),
+    "src/main.harn",
+  )
+  const revision = Revision {ref: "feature", sha: "head"}
+  for provider in ["github", "gitea", "forgejo"] {
+    const payload = {
+      action: "opened",
+      repository: Repository {full_name: "owner/repo", html_url: "https://example.test/repo"},
+      pull_request: {number: 7, head: revision, base: Revision {ref: "main", sha: "base"}},
+    }
+    const normalized = git_forge_pull_request_event(provider, payload)
+    if normalized == nil {
+      throw "the pull request must reach normalization"
+    }
+    assert_eq(normalized.repository.full_name, "owner/repo")
+    assert_eq(normalized.pull_request.head_ref, "feature")
+    assert_eq(normalized.pull_request.head_sha, "head")
+    assert_eq(normalized.pull_request.base_ref, "main")
+    assert_eq(normalized.pull_request.base_sha, "base")
+    assert_eq(normalized.raw_payload, payload)
+    const wrapped = git_forge_pull_request_event(
+      provider,
+      {payload: ProviderWrapper {event: ProviderEvent {provider_payload: payload}}},
+    )
+    assert_eq(wrapped, normalized)
+  }
+  const gitlab = git_forge_pull_request_event(
+    "gitlab",
+    {
+      raw: {
+        project: Project {
+          path_with_namespace: "group/project",
+          id: 42,
+          web_url: "https://example.test/project",
+        },
+        object_attributes: {iid: 9, action: "update", last_commit: revision},
+      },
+    },
+  )
+  if gitlab == nil {
+    throw "the GitLab merge request must reach normalization"
+  }
+  assert_eq(gitlab.repository.full_name, "group/project")
+  assert_eq(gitlab.repository.id, "42")
+  assert_eq(gitlab.pull_request.head_sha, "head")
+  const lifecycle = connector_lifecycle("fixture", "nominal-matcher")
+  lifecycle.init(harness.runtime)
+  const refused = lifecycle.activate(
+    harness.runtime,
+    [{id: "one", match: Matcher {path: "same"}}, {id: "two", path: "same"}],
+  )
+  assert(is_err(refused))
+  assert_eq(unwrap_err(refused).code, "activation")
+  assert_eq(lifecycle.state(harness.runtime).active, false)
+  lifecycle.shutdown(harness.runtime)
+  harness.stdio.println("nominal decoder containers preserved")
+}

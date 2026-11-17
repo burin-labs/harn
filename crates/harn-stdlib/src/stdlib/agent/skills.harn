@@ -175,6 +175,7 @@ fn __with_load_skill_tool(agent: HarnessAgent, session: dict, opts: dict) {
     "load_skill",
     "Load the full instructions for a skill from the active skill catalog",
     {
+      defer_loading: true,
       parameters: {
         name: {type: "string", description: "Skill id from the catalog"},
         require_signature: {

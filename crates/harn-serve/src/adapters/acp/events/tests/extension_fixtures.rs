@@ -2,6 +2,31 @@
 
 use super::*;
 
+pub(super) async fn extension_notifications() -> Vec<serde_json::Value> {
+    let (standard, extensions): (Vec<_>, Vec<_>) =
+        collect_notifications(extension_fixture_events())
+            .await
+            .into_iter()
+            .partition(|frame| {
+                crate::adapters::acp::schema::is_standard_session_update(
+                    frame["params"]["update"]["sessionUpdate"]
+                        .as_str()
+                        .expect("session update kind"),
+                )
+            });
+    assert_eq!(standard.len(), 1);
+    assert_eq!(
+        standard[0]["params"]["update"]["sessionUpdate"],
+        "compaction_update"
+    );
+    assert_eq!(
+        standard[0]["params"]["update"]["compactionId"],
+        "compaction-fixture-1"
+    );
+    assert_eq!(standard[0]["params"]["update"]["status"], "completed");
+    extensions
+}
+
 pub(super) fn extension_fixture_events() -> Vec<AgentEvent> {
     vec![
         AgentEvent::InferenceSpeed {

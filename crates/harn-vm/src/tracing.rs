@@ -1321,6 +1321,7 @@ mod tests {
         assert_eq!(pairs[meta::CACHE_READ_TOKENS], serde_json::json!(40));
         assert_eq!(pairs[meta::CACHE_WRITE_TOKENS], serde_json::json!(8));
         assert_eq!(pairs[meta::COST_USD], serde_json::json!(0.0123));
+        assert_eq!(pairs["provider_call_count"], serde_json::json!(1));
     }
 
     #[test]

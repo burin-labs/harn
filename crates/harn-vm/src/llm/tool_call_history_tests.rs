@@ -30,6 +30,50 @@ fn user(text: &str) -> Value {
     json!({"role": "user", "content": text})
 }
 
+#[test]
+fn a_dispatched_alias_projects_the_invoked_name_without_rewriting_execution_facts() {
+    let stored = vec![
+        json!({"role": "assistant", "tool_calls": [
+            {"id": "alias", "name": "confirm_operation", "arguments": {}},
+            {"id": "neighbor", "name": "read", "arguments": {}}
+        ]}),
+        json!({"role": "tool_result", "tool_call_id": "alias", "name": "edit",
+            "tool_name": "edit", "content": "applied", "_harn": {"semantic_tool": "edit"}}),
+        json!({"role": "tool_result", "tool_call_id": "neighbor", "name": "read", "content": "value"}),
+    ];
+    let projected = repair_tool_call_history(stored.clone());
+    assert_eq!(projected[1]["name"], "confirm_operation");
+    assert_eq!(projected[1]["tool_name"], "confirm_operation");
+    assert_eq!(projected[1]["_harn"], stored[1]["_harn"]);
+    assert_eq!(projected[2], stored[2]);
+    assert_eq!(stored[1]["name"], "edit");
+}
+
+#[test]
+fn a_gemini_part_projects_its_own_call_name_without_changing_its_neighbor() {
+    let stored = vec![
+        json!({"role": "assistant", "content": [
+            {"functionCall": {"id": "alias", "name": "confirm_operation", "args": {}}},
+            {"functionCall": {"id": "neighbor", "name": "read", "args": {}}}
+        ]}),
+        json!({"role": "user", "content": [
+            {"functionResponse": {"id": "alias", "name": "edit", "response": {"output": "applied"}}},
+            {"functionResponse": {"id": "neighbor", "name": "read", "response": {"output": "value"}}}
+        ]}),
+    ];
+    let projected = repair_tool_call_history(stored.clone());
+    assert_eq!(
+        projected[1]["content"][0]["functionResponse"]["name"],
+        "confirm_operation"
+    );
+    assert_eq!(
+        projected[1]["content"][0]["functionResponse"]["response"],
+        stored[1]["content"][0]["functionResponse"]["response"]
+    );
+    assert_eq!(projected[1]["content"][1], stored[1]["content"][1]);
+    assert_eq!(stored[1]["content"][0]["functionResponse"]["name"], "edit");
+}
+
 /// The harn#8951 transcript: the call was cancelled, then the person typed again.
 fn stopped_mid_tool() -> Vec<Value> {
     vec![

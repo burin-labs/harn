@@ -111,6 +111,10 @@ var ACPSessionUpdates = []ACPSessionUpdate{
 	"current_mode_update",
 	"config_option_update",
 	"session_info_update",
+	"usage_update",
+	"notice",
+	"compaction_update",
+	"compaction_summary_chunk",
 	"session_redo",
 	"session_rollback",
 	"session_truncated",
@@ -224,6 +228,7 @@ var HarnAgentEventKinds = []HarnAgentEventKind{
 	"subagent_join",
 	"subagent_stop",
 	"tool_batch_disposition",
+	"tool_batch_proposal_resolution",
 	"tool_call_audit",
 	"tool_format_override",
 	"turn_phase_changed",
@@ -236,6 +241,7 @@ type HarnPromptResultExtensionField string
 // HarnPromptResultExtensionFields enumerates every wire value Harn currently emits for HarnPromptResultExtensionField.
 var HarnPromptResultExtensionFields = []HarnPromptResultExtensionField{
 	"terminal",
+	"goal_outcome",
 }
 
 // ACPContentBlockType is the named string type for the ACPContentBlockTypes wire vocabulary.
@@ -687,81 +693,6 @@ type JSONValue = json.RawMessage
 // JSONObject mirrors `Record<string, JsonValue>`.
 type JSONObject = map[string]json.RawMessage
 
-// HarnSessionTimelineCursor advances independently over each projected topic.
-type HarnSessionTimelineCursor struct {
-	Topics map[string]uint64 `json:"topics"`
-}
-
-// HarnSessionTimelineQuery filters and bounds the canonical semantic timeline.
-type HarnSessionTimelineQuery struct {
-	SessionID  *string                   `json:"sessionId,omitempty"`
-	RunID      *string                   `json:"runId,omitempty"`
-	RunPath    *string                   `json:"runPath,omitempty"`
-	ProjectID  *string                   `json:"projectId,omitempty"`
-	FromCursor HarnSessionTimelineCursor `json:"fromCursor"`
-	Limit      *uint64                   `json:"limit,omitempty"`
-}
-
-// HarnSessionTimelineReference binds a semantic node to stable source evidence.
-type HarnSessionTimelineReference struct {
-	Kind    string  `json:"kind"`
-	ID      *string `json:"id,omitempty"`
-	Topic   *string `json:"topic,omitempty"`
-	EventID *uint64 `json:"eventId,omitempty"`
-}
-
-// HarnSessionTimelineLink carries causal or identity relationships.
-type HarnSessionTimelineLink struct {
-	Kind     string  `json:"kind"`
-	TargetID *string `json:"targetId,omitempty"`
-	TraceID  *string `json:"traceId,omitempty"`
-	SpanID   *string `json:"spanId,omitempty"`
-	EventID  *string `json:"eventId,omitempty"`
-}
-
-// HarnSessionTimelineNode is Harn's semantic chronology row; Kind remains open.
-type HarnSessionTimelineNode struct {
-	ID           string                         `json:"id"`
-	ParentID     *string                        `json:"parentId,omitempty"`
-	Children     []string                       `json:"children"`
-	Category     string                         `json:"category"`
-	Kind         string                         `json:"kind"`
-	Name         string                         `json:"name"`
-	Status       string                         `json:"status"`
-	TraceID      *string                        `json:"traceId,omitempty"`
-	SpanID       *string                        `json:"spanId,omitempty"`
-	OccurredAtMs *int64                         `json:"occurredAtMs,omitempty"`
-	StartMs      *uint64                        `json:"startMs,omitempty"`
-	DurationMs   *uint64                        `json:"durationMs,omitempty"`
-	Attributes   JSONValue                      `json:"attributes,omitempty"`
-	References   []HarnSessionTimelineReference `json:"references"`
-	Links        []HarnSessionTimelineLink      `json:"links"`
-	Order        uint64                         `json:"order"`
-}
-
-// HarnSessionTimelineCoverage states whether a bounded snapshot is complete.
-type HarnSessionTimelineCoverage struct {
-	Returned  uint64  `json:"returned"`
-	Available *uint64 `json:"available"`
-	Truncated bool    `json:"truncated"`
-}
-
-// HarnSessionTimelineSnapshot is a point-in-time semantic timeline query result.
-type HarnSessionTimelineSnapshot struct {
-	SchemaVersion uint32                      `json:"schemaVersion"`
-	Query         HarnSessionTimelineQuery    `json:"query"`
-	Cursor        HarnSessionTimelineCursor   `json:"cursor"`
-	Coverage      HarnSessionTimelineCoverage `json:"coverage"`
-	Nodes         []HarnSessionTimelineNode   `json:"nodes"`
-}
-
-// HarnSessionTimelineUpdate revises one semantic node for subscribers.
-type HarnSessionTimelineUpdate struct {
-	SchemaVersion uint32                    `json:"schemaVersion"`
-	Cursor        HarnSessionTimelineCursor `json:"cursor"`
-	Node          HarnSessionTimelineNode   `json:"node"`
-}
-
 // HarnPlanCommentState is the closed collaborative comment lifecycle.
 type HarnPlanCommentState string
 
@@ -880,7 +811,8 @@ type HarnAgentTerminalOutcome struct {
 
 // HarnACPPromptResultHarnMetadata contains Harn prompt-result extensions.
 type HarnACPPromptResultHarnMetadata struct {
-	Terminal *HarnAgentTerminalOutcome `json:"terminal,omitempty"`
+	GoalOutcome JSONValue                 `json:"goal_outcome,omitempty"`
+	Terminal    *HarnAgentTerminalOutcome `json:"terminal,omitempty"`
 }
 
 // HarnACPPromptResultMetadata is the standard ACP extension envelope.
@@ -1059,27 +991,6 @@ type HarnAgentEventNotification struct {
 	Params  JSONObject `json:"params"`
 }
 
-// HarnToolArgSchema describes the static slice of a Harn tool's argument shape.
-type HarnToolArgSchema struct {
-	PathParams            []string            `json:"path_params"`
-	DependencyKeyParams   []string            `json:"dependency_key_params"`
-	DependencyRangeParams []map[string]string `json:"dependency_range_params"`
-	ArgAliases            map[string]string   `json:"arg_aliases"`
-	Required              []string            `json:"required"`
-}
-
-// HarnToolAnnotations describes Harn-side metadata for a tool.
-type HarnToolAnnotations struct {
-	Kind                   ACPToolKind                 `json:"kind"`
-	SideEffectLevel        HarnSideEffectLevel         `json:"side_effect_level"`
-	CompletionEvidenceRole *HarnCompletionEvidenceRole `json:"completion_evidence_role,omitempty"`
-	ArgSchema              HarnToolArgSchema           `json:"arg_schema"`
-	Capabilities           map[string][]string         `json:"capabilities"`
-	EmitsArtifacts         bool                        `json:"emits_artifacts"`
-	ResultReaders          []string                    `json:"result_readers"`
-	InlineResult           bool                        `json:"inline_result"`
-}
-
 // A2AMessage is one message inside an A2A task history.
 type A2AMessage struct {
 	ID    string            `json:"id"`
@@ -1230,6 +1141,96 @@ func IsNotification(envelope map[string]json.RawMessage) bool {
 	_, hasID := envelope["id"]
 	_, hasMethod := envelope["method"]
 	return !hasID && hasMethod
+}
+
+type HarnToolArgSchema struct {
+	PathParams            []string            `json:"path_params"`
+	DependencyKeyParams   []string            `json:"dependency_key_params"`
+	DependencyRangeParams []map[string]string `json:"dependency_range_params"`
+	ArgAliases            map[string]string   `json:"arg_aliases"`
+	Required              []string            `json:"required"`
+}
+
+type HarnToolAnnotations struct {
+	Kind                   ACPToolKind                 `json:"kind"`
+	SideEffectLevel        HarnSideEffectLevel         `json:"side_effect_level"`
+	ArgSchema              HarnToolArgSchema           `json:"arg_schema"`
+	Capabilities           map[string][]string         `json:"capabilities"`
+	EmitsArtifacts         bool                        `json:"emits_artifacts"`
+	ResultReaders          []string                    `json:"result_readers"`
+	InlineResult           bool                        `json:"inline_result"`
+	CompletionEvidenceRole *HarnCompletionEvidenceRole `json:"completion_evidence_role,omitempty"`
+	DestructiveHint        *bool                       `json:"destructiveHint,omitempty"`
+	IdempotentHint         *bool                       `json:"idempotentHint,omitempty"`
+	OpenWorldHint          *bool                       `json:"openWorldHint,omitempty"`
+	ReadOnlyHint           *bool                       `json:"readOnlyHint,omitempty"`
+}
+
+type HarnSessionTimelineCursor struct {
+	Topics map[string]uint64 `json:"topics"`
+}
+
+type HarnSessionTimelineQuery struct {
+	SessionID  *string                   `json:"sessionId,omitempty"`
+	RunID      *string                   `json:"runId,omitempty"`
+	RunPath    *string                   `json:"runPath,omitempty"`
+	ProjectID  *string                   `json:"projectId,omitempty"`
+	FromCursor HarnSessionTimelineCursor `json:"fromCursor"`
+	Limit      *uint64                   `json:"limit,omitempty"`
+}
+
+type HarnSessionTimelineReference struct {
+	Kind    string  `json:"kind"`
+	EventID *uint64 `json:"eventId,omitempty"`
+	ID      *string `json:"id,omitempty"`
+	Topic   *string `json:"topic,omitempty"`
+}
+
+type HarnSessionTimelineLink struct {
+	Kind     string  `json:"kind"`
+	EventID  *string `json:"eventId,omitempty"`
+	SpanID   *string `json:"spanId,omitempty"`
+	TargetID *string `json:"targetId,omitempty"`
+	TraceID  *string `json:"traceId,omitempty"`
+}
+
+type HarnSessionTimelineNode struct {
+	ID           string                         `json:"id"`
+	Children     []string                       `json:"children"`
+	Category     string                         `json:"category"`
+	Kind         string                         `json:"kind"`
+	Name         string                         `json:"name"`
+	Status       string                         `json:"status"`
+	Attributes   JSONValue                      `json:"attributes,omitempty"`
+	References   []HarnSessionTimelineReference `json:"references"`
+	Links        []HarnSessionTimelineLink      `json:"links"`
+	Order        uint64                         `json:"order"`
+	DurationMs   *uint64                        `json:"durationMs,omitempty"`
+	OccurredAtMs *int64                         `json:"occurredAtMs,omitempty"`
+	ParentID     *string                        `json:"parentId,omitempty"`
+	SpanID       *string                        `json:"spanId,omitempty"`
+	StartMs      *uint64                        `json:"startMs,omitempty"`
+	TraceID      *string                        `json:"traceId,omitempty"`
+}
+
+type HarnSessionTimelineCoverage struct {
+	Returned  uint64  `json:"returned"`
+	Available *uint64 `json:"available"`
+	Truncated bool    `json:"truncated"`
+}
+
+type HarnSessionTimelineSnapshot struct {
+	SchemaVersion uint32                      `json:"schemaVersion"`
+	Query         HarnSessionTimelineQuery    `json:"query"`
+	Cursor        HarnSessionTimelineCursor   `json:"cursor"`
+	Coverage      HarnSessionTimelineCoverage `json:"coverage"`
+	Nodes         []HarnSessionTimelineNode   `json:"nodes"`
+}
+
+type HarnSessionTimelineUpdate struct {
+	SchemaVersion uint32                    `json:"schemaVersion"`
+	Cursor        HarnSessionTimelineCursor `json:"cursor"`
+	Node          HarnSessionTimelineNode   `json:"node"`
 }
 
 type ACPArtifactUpdateMetaHarn struct {
@@ -2744,6 +2745,21 @@ type HarnAgentEventSubagentStop struct {
 
 type HarnAgentEventToolBatchDisposition struct {
 	Receipt json.RawMessage `json:"receipt"`
+}
+
+type HarnAgentEventToolBatchProposalResolutionEventResolution struct {
+	ProposalID         string  `json:"proposal_id"`
+	SourceBatchID      string  `json:"source_batch_id"`
+	SourceToolCallID   string  `json:"source_tool_call_id"`
+	ToolName           string  `json:"tool_name"`
+	Resolution         string  `json:"resolution"`
+	Reason             string  `json:"reason"`
+	ConfirmationCallID *string `json:"confirmation_call_id"`
+	PendingCount       uint64  `json:"pending_count"`
+}
+
+type HarnAgentEventToolBatchProposalResolutionEvent struct {
+	Resolution HarnAgentEventToolBatchProposalResolutionEventResolution `json:"resolution"`
 }
 
 type HarnAgentEventToolCallAudit struct {

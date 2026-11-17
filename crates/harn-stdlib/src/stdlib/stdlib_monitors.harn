@@ -3,38 +3,104 @@
  *
  * Import with: `import "std/monitors"`.
  */
-type MonitorWaitStatus = "matched" | "timed_out" | "interrupted"
+import { merge } from "std/json"
 
-type MonitorPollContext = {wait_id: string, poll_count: int, last_push_event: any}
+pub type MonitorWaitStatus = "matched" | "timed_out" | "interrupted"
 
-type MonitorSource = {
+pub type MonitorPollContext = {wait_id: string, poll_count: int, last_push_event: unknown}
+
+pub type MonitorSource<T> = {
   label?: string,
-  poll: fn(MonitorPollContext) -> any,
+  poll: fn(MonitorPollContext) -> T,
   prefers_push?: bool,
-  push_filter?: fn(any) -> bool,
+  push_filter?: fn(dict) -> bool,
 }
 
-type MonitorWaitOptions = {
+pub type MonitorWaitOptions<T> = {
   wait_id?: string,
   timeout: duration,
   poll_interval?: duration,
-  source: MonitorSource,
-  condition: fn(any) -> bool,
+  source: MonitorSource<T>,
+  condition: fn(T) -> bool,
 }
 
-type MonitorWaitResult = {
+type MonitorTimingOptions = {
+  wait_id?: string,
+  timeout: unknown,
+  poll_interval?: unknown,
+  ...dict<string, unknown>,
+}
+
+fn __monitor_duration(value: unknown) -> Result<duration, string> {
+  return type_of(value) == "duration" ? Ok(value) : Err("monitor timing expects a duration")
+}
+
+/**
+ * Attach a typed source after validating the wait's timing options.
+ *
+ * @effects: []
+ * @errors: ["schema validation failure", "monitor timing expects a duration"]
+ */
+pub fn monitor_wait_options<T>(
+  options: unknown,
+  source: MonitorSource<T>,
+  condition: fn(T) -> bool,
+) -> MonitorWaitOptions<T> {
+  const timing = schema_expect(options, schema_of(MonitorTimingOptions))
+  const timeout = unwrap(__monitor_duration(timing.timeout))
+  const base = {wait_id: timing.wait_id, timeout: timeout, source: source, condition: condition}
+  if contains(keys(timing), "poll_interval") {
+    return merge(base, {poll_interval: unwrap(__monitor_duration(timing.poll_interval))})
+  }
+  return base
+}
+
+pub type MonitorWaitResult<T> = {
   wait_id: string,
   status: MonitorWaitStatus,
   source_label: string?,
   started_at: string,
   resolved_at: string,
-  state: any,
-  condition_value: any,
+  state: T?,
+  condition_value: unknown,
   poll_count: int,
   push_wake_count: int,
   trace_id: string?,
   replay_of_event_id: string?,
   reason: string?,
+}
+
+type MonitorLogReference = {payload?: unknown, ...dict<string, unknown>}
+
+type MonitorPayloadReference = {event?: unknown, ...dict<string, unknown>}
+
+pub type MonitorEventReference = {
+  provider?: unknown,
+  kind?: unknown,
+  provider_payload?: unknown,
+  ...dict<string, unknown>,
+}
+
+/**
+ * Read the event carried by a monitor log record, preserving provider extensions.
+ *
+ * @effects: []
+ * @errors: ["schema validation failure"]
+ */
+pub fn monitor_event(log_event: unknown) -> MonitorEventReference? {
+  const log = schema_expect(log_event, schema_of(MonitorLogReference))
+  const raw_payload = log.payload
+  const payload_kind = type_of(raw_payload)
+  if payload_kind != "dict" && payload_kind != "struct" {
+    return nil
+  }
+  const payload = schema_expect(raw_payload, schema_of(MonitorPayloadReference))
+  const raw_event = payload.event
+  const event_kind = type_of(raw_event)
+  return event_kind == "dict" || event_kind == "struct" ? schema_expect(
+    raw_event,
+    schema_of(MonitorEventReference),
+  ) : nil
 }
 
 /**
@@ -43,6 +109,9 @@ type MonitorWaitResult = {
  * @effects: []
  * @errors: []
  */
-pub fn wait_for(runtime: HarnessRuntime, options: MonitorWaitOptions) -> MonitorWaitResult {
+pub fn wait_for<T>(
+  runtime: HarnessRuntime,
+  options: MonitorWaitOptions<T>,
+) -> MonitorWaitResult<T> {
   return runtime.monitor_wait_for_native(options)
 }

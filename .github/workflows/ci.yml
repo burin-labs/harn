@@ -204,6 +204,7 @@ jobs:
               - '.github/workflows/consumer-canary.yml'
               - 'scripts/ci/consumer_canary.sh'
               - 'scripts/lib/consumer-observer.mjs'
+              - 'scripts/lib/consumer_pairing_superset.sh'
               - 'crates/harn-hostlib/**'
               - 'crates/harn-execution-policy/**'
               - 'crates/harn-vm/src/process_sandbox.rs'
@@ -310,6 +311,8 @@ jobs:
               - 'CHANGELOG.md'
               - 'Cargo.toml'
               - 'scripts/lib/release_version.sh'
+              - 'scripts/lib/release_consumer_verdict.sh'
+              - 'scripts/lib/consumer_pairing_superset.sh'
               - 'scripts/prepare_development_version.sh'
               - 'scripts/publish*'
               - 'scripts/release*'
@@ -2672,9 +2675,10 @@ jobs:
           baseline-sha: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
           github-token: ${{ github.token }}
       - name: Install actionlint
+        # This maintained fork validates GitHub's background/wait step syntax.
         env:
-          ACTIONLINT_VERSION: "1.7.12"
-          ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+          ACTIONLINT_VERSION: "1.16.1"
+          ACTIONLINT_SHA256: "d566eee8af147ee1fa24ee204e1a171fcf8b5ce40e267c39a7383c7f20e6236d"
         run: |
           set -euo pipefail
           archive="${RUNNER_TEMP}/actionlint.tar.gz"
@@ -2688,7 +2692,7 @@ jobs:
           curl -fsSL --retry 3 --retry-all-errors \
             --connect-timeout 15 --max-time 120 \
             -o "${archive}" \
-            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+            "https://github.com/kjanat/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
           echo "${ACTIONLINT_SHA256}  ${archive}" | sha256sum -c -
           tar -xzf "${archive}" -C "${RUNNER_TEMP}" actionlint
           mkdir -p "${HOME}/.local/bin"
@@ -2763,8 +2767,8 @@ jobs:
   # Fork and Dependabot pull requests never run it; it needs the release app
   # credential, which neither receives.
   #
-  # The consumer commit is read once here, so both candidate attempts measure
-  # the same consumer even when its main moves.
+  # The current declaration and consumer commit are captured together here,
+  # so both candidate attempts measure the same selection.
   consumer-pin:
     name: Pin the consumer commit
     needs: [changes, rust-cli]
@@ -2778,8 +2782,10 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+      pull-requests: read
     outputs:
       sha: ${{ steps.read.outputs.sha }}
+      paired_pull: ${{ steps.read.outputs.paired_pull }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -2802,8 +2808,10 @@ jobs:
         id: read
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
+          PARENT_READ_TOKEN: ${{ github.token }}
           CONSUMER: ${{ github.repository_owner }}/${{ secrets.CONSUMER_CANARY_REPOSITORY }}
-          PULL_REQUEST_BODY: ${{ github.event.pull_request.body }}
+          PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number }}
+          PULL_REQUEST_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: node scripts/ci/consumer-pin.mjs
 
   consumer-check:
@@ -2825,6 +2833,7 @@ jobs:
       pull_request_cli_run: ${{ github.run_id }}
       pull_request_base: ${{ needs.changes.outputs.pull_request_base }}
       consumer_revision: ${{ needs.consumer-pin.outputs.sha }}
+      consumer_pull_request: ${{ needs.consumer-pin.outputs.paired_pull }}
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -2849,6 +2858,7 @@ jobs:
       pull_request_cli_run: ${{ github.run_id }}
       pull_request_base: ${{ needs.changes.outputs.pull_request_base }}
       consumer_revision: ${{ needs.consumer-pin.outputs.sha }}
+      consumer_pull_request: ${{ needs.consumer-pin.outputs.paired_pull }}
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

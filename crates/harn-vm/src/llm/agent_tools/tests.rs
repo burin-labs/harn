@@ -69,10 +69,9 @@ fn denied_tool_result_includes_actionable_next_step() {
         next.contains("run"),
         "next_step should name the denied tool: {next}"
     );
-    // No active policy → no allow-all list to assert, so the "Available
-    // tools:" clause is omitted rather than claiming a misleading set.
+    // No active policy means no bounded permission inventory to assert.
     assert!(
-        !next.contains("Available tools:"),
+        !next.contains("Allowed tool names"),
         "with no active policy the denial should not assert an allow list: {next}"
     );
 }
@@ -83,7 +82,7 @@ fn denied_tool_result_includes_actionable_next_step() {
 // transcripts where the model called Codex/container vocab it was never
 // shown and only saw a bare "not permitted" denial.
 #[test]
-fn denied_tool_result_names_available_tools_under_policy() {
+fn denied_tool_result_names_permission_hints_without_claiming_schema_disclosure() {
     push_execution_policy(CapabilityPolicy {
         tools: vec![
             "look".to_string(),
@@ -101,7 +100,7 @@ fn denied_tool_result_names_available_tools_under_policy() {
         .as_str()
         .expect("denial should carry a next_step string");
     assert!(
-        next.contains("Available tools:"),
+        next.contains("Allowed tool names (permission hints):"),
         "next_step should name the allowed tools under an active policy: {next}"
     );
     for tool in ["look", "search", "edit", "run", "read_command_output"] {
@@ -110,6 +109,9 @@ fn denied_tool_result_names_available_tools_under_policy() {
             "next_step should list the allowed tool {tool}: {next}"
         );
     }
+    assert!(next.contains("These names do not disclose schemas"));
+    assert!(next.contains("tool-search capability before calling"));
+    assert!(!next.contains("Available tools:"));
 }
 
 // A NAME-RESOLUTION failure (tool-ceiling denial) must never use permission
@@ -131,13 +133,16 @@ fn unavailable_tool_result_is_action_oriented_without_permission_framing() {
         .as_str()
         .expect("unavailable-tool result should carry a next_step string");
     assert!(
-        !next.to_lowercase().contains("permission") && !next.contains("not permitted"),
-        "name-resolution feedback must not use permission framing: {next}"
+        next.contains("does not itself require new permission") && !next.contains("not permitted"),
+        "name-resolution feedback must not demand new permission: {next}"
     );
     assert!(
-        next.contains("Available tools:") && next.contains("look"),
-        "next_step should list the callable tools: {next}"
+        next.contains("permission hints")
+            && next.contains("look")
+            && !next.contains("Available tools:"),
+        "permission patterns must not be presented as callable schemas: {next}"
     );
+    assert!(next.contains("supplied schema") && next.contains("tool search"));
     assert!(
         next.contains("re-sending this call will fail"),
         "next_step should steer off an identical re-send: {next}"

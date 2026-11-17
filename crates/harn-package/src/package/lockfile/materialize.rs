@@ -323,6 +323,36 @@ fn ensure_dependency_requests_materialized_before_lock(
     // a demand initializer must not derive from the old lock and then publish
     // after that install completes.
     before_lock();
+    // A prepared generation can be observed without becoming a publisher.
+    // Keep its lease through closure validation, and check root authority
+    // again before returning. A miss must reload all authority under the
+    // install lock below; no optimistic derivation may reach publication.
+    {
+        let _read_lock = acquire_existing_package_install_read_lock(&ctx)?;
+        if let Some(installed) = InstalledPackageSources::acquire(&ctx)? {
+            if let Some(lock) = LockFile::load(&ctx.lock_path())? {
+                if !lock.requires_git_hash_migration() {
+                    let reachable = dependency_closure_lock(
+                        &workspace,
+                        &ctx,
+                        &lock,
+                        requested.clone(),
+                        |entry| installed.source_for(entry),
+                    )?;
+                    if let Some(reachable) = reachable {
+                        if package_snapshot_satisfies_lock_subset(&installed.snapshot, &reachable)?
+                            && LockFile::load(&ctx.lock_path())?
+                                .is_some_and(|current| current.same_resolution(&lock))
+                        {
+                            return Ok(harn_modules::package_snapshot::package_lock_digest(
+                                &reachable.encode()?,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
     let _install_lock = acquire_package_install_lock(&ctx)?;
     let lock = LockFile::load(&ctx.lock_path())?.ok_or_else(|| {
         format!(
@@ -331,12 +361,19 @@ fn ensure_dependency_requests_materialized_before_lock(
         )
     })?;
     let runtime_lock = lock_for_materialization(&workspace, &ctx, lock)?;
-    let reachable_lock = dependency_closure_lock(&workspace, &ctx, &runtime_lock, requested)?;
-    let digest = harn_modules::package_snapshot::package_lock_digest(&reachable_lock.encode()?);
-    if current_generation_satisfies_lock_subset(&ctx, &reachable_lock)? {
-        return Ok(digest);
-    }
     let installed_sources = InstalledPackageSources::acquire(&ctx)?;
+    let reachable_lock =
+        dependency_closure_lock(&workspace, &ctx, &runtime_lock, requested, |entry| {
+            locked_package_source_dir(&workspace, installed_sources.as_ref(), entry, None, false)
+                .map(Some)
+        })?
+        .expect("materializing resolver always supplies a package source");
+    let digest = harn_modules::package_snapshot::package_lock_digest(&reachable_lock.encode()?);
+    if let Some(installed) = installed_sources.as_ref() {
+        if package_snapshot_satisfies_lock_subset(&installed.snapshot, &reachable_lock)? {
+            return Ok(digest);
+        }
+    }
     let cumulative_lock =
         cumulative_demand_lock(&runtime_lock, reachable_lock, installed_sources.as_ref());
     publish_package_generation_locked(&ctx, &cumulative_lock, false, |packages_dir| {
@@ -418,8 +455,8 @@ fn dependency_closure_lock(
     root: &ManifestContext,
     lock: &LockFile,
     mut pending: Vec<ReachableDependency>,
-) -> Result<LockFile, PackageError> {
-    let installed_sources = InstalledPackageSources::acquire(root)?;
+    mut resolve_source: impl FnMut(&LockEntry) -> Result<Option<PackageSource>, PackageError>,
+) -> Result<Option<LockFile>, PackageError> {
     let mut reachable = LockFile {
         version: lock.version,
         generator_version: lock.generator_version.clone(),
@@ -454,8 +491,9 @@ fn dependency_closure_lock(
             continue;
         }
         reachable.packages.push(entry.clone());
-        let source_dir =
-            locked_package_source_dir(workspace, installed_sources.as_ref(), entry, None, false)?;
+        let Some(source_dir) = resolve_source(entry)? else {
+            return Ok(None);
+        };
         let Some(manifest) = read_package_manifest_from_dir(source_dir.as_ref())? else {
             continue;
         };
@@ -473,7 +511,7 @@ fn dependency_closure_lock(
         }
     }
     reachable.sort_entries();
-    Ok(reachable)
+    Ok(Some(reachable))
 }
 
 struct InstalledPackageSources {
@@ -503,6 +541,10 @@ impl InstalledPackageSources {
         };
         if !installed.same_resolution(entry) {
             return Ok(None);
+        }
+        if entry.source.starts_with("path+") {
+            return path_from_source_uri(&entry.source)
+                .map(|path| Some(PackageSource::local(path)));
         }
         let Some(expected_hash) = entry.content_hash.as_deref() else {
             return Ok(None);
@@ -590,6 +632,14 @@ pub(crate) fn ensure_dependencies_materialized_in(
     workspace: &PackageWorkspace,
     anchor: &Path,
 ) -> Result<(), PackageError> {
+    ensure_dependencies_materialized_before_lock(workspace, anchor, || {})
+}
+
+pub(crate) fn ensure_dependencies_materialized_before_lock(
+    workspace: &PackageWorkspace,
+    anchor: &Path,
+    before_lock: impl FnOnce(),
+) -> Result<(), PackageError> {
     let Some((manifest, dir)) = load_nearest_manifest(anchor).into_result()? else {
         return Ok(());
     };
@@ -605,7 +655,31 @@ pub(crate) fn ensure_dependencies_materialized_in(
     })?;
     validate_lock_matches_manifest(workspace, &ctx, &lock)?;
     let runtime_lock = lock_for_materialization(workspace, &ctx, lock)?;
-    materialize_dependencies_from_lock(workspace, &ctx, &runtime_lock, None, false)?;
+    if prepared_generation_matches_lock(&ctx, &runtime_lock)? {
+        return Ok(());
+    }
+    before_lock();
+    let _install_lock = acquire_package_install_lock(&ctx)?;
+    // A concurrent full install may have replaced authority while this
+    // initializer waited. Only a fresh derivation may become a publisher.
+    let Some((manifest, dir)) = load_nearest_manifest(anchor).into_result()? else {
+        return Err("package materialization lost its governing harn.toml".into());
+    };
+    if dir != ctx.dir {
+        return Err("package materialization changed its governing project while waiting".into());
+    }
+    let ctx = ManifestContext { manifest, dir };
+    let lock = LockFile::load(&ctx.lock_path())?.ok_or_else(|| {
+        format!(
+            "{} is missing; run `harn install`",
+            ctx.lock_path().display()
+        )
+    })?;
+    validate_lock_matches_manifest(workspace, &ctx, &lock)?;
+    let runtime_lock = lock_for_materialization(workspace, &ctx, lock)?;
+    publish_package_generation_locked(&ctx, &runtime_lock, false, |packages_dir| {
+        materialize_lock_entries(workspace, &runtime_lock, packages_dir, None, false, None)
+    })?;
     Ok(())
 }
 

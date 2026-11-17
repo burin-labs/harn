@@ -324,6 +324,8 @@ pub(super) fn generate_python_with_payloads(payloads: &SessionUpdatePayloads) ->
     out.push_str(&py_str_enum("MCPLoggingLevel", MCP_LOGGING_LEVELS));
 
     out.push_str(PYTHON_TYPE_DEFINITIONS);
+    super::tool_annotation_records::append(&mut out, super::records::Target::Python);
+    super::timeline_records::append(&mut out, super::records::Target::Python);
     payloads.append(&mut out, super::records::Target::Python);
     append_python_prepared_session_types(&mut out);
     append_python_session_recap_types(&mut out);
@@ -341,75 +343,6 @@ pub(super) const PYTHON_TYPE_DEFINITIONS: &str = r#"
 JsonValue = Union[None, bool, int, float, str, List[Any], Dict[str, Any]]
 JsonObject = Dict[str, JsonValue]
 JsonRpcId = Union[int, str, None]
-
-@dataclass
-class HarnSessionTimelineCursor:
-    topics: Dict[str, int] = field(default_factory=dict)
-
-@dataclass
-class HarnSessionTimelineQuery:
-    sessionId: Optional[str] = None
-    runId: Optional[str] = None
-    runPath: Optional[str] = None
-    projectId: Optional[str] = None
-    fromCursor: HarnSessionTimelineCursor = field(default_factory=HarnSessionTimelineCursor)
-    limit: Optional[int] = None
-
-@dataclass
-class HarnSessionTimelineReference:
-    kind: str
-    id: Optional[str] = None
-    topic: Optional[str] = None
-    eventId: Optional[int] = None
-
-@dataclass
-class HarnSessionTimelineLink:
-    kind: str
-    targetId: Optional[str] = None
-    traceId: Optional[str] = None
-    spanId: Optional[str] = None
-    eventId: Optional[str] = None
-
-@dataclass
-class HarnSessionTimelineNode:
-    """Harn-owned semantic chronology row with a forward-compatible kind."""
-    id: str
-    category: str
-    kind: str
-    name: str
-    status: str
-    order: int
-    parentId: Optional[str] = None
-    children: List[str] = field(default_factory=list)
-    traceId: Optional[str] = None
-    spanId: Optional[str] = None
-    occurredAtMs: Optional[int] = None
-    startMs: Optional[int] = None
-    durationMs: Optional[int] = None
-    attributes: JsonValue = None
-    references: List[HarnSessionTimelineReference] = field(default_factory=list)
-    links: List[HarnSessionTimelineLink] = field(default_factory=list)
-
-@dataclass
-class HarnSessionTimelineCoverage:
-    returned: int
-    available: Optional[int]
-    truncated: bool
-
-@dataclass
-class HarnSessionTimelineSnapshot:
-    schemaVersion: int
-    query: HarnSessionTimelineQuery
-    cursor: HarnSessionTimelineCursor
-    coverage: HarnSessionTimelineCoverage
-    nodes: List[HarnSessionTimelineNode]
-
-@dataclass
-class HarnSessionTimelineUpdate:
-    schemaVersion: int
-    cursor: HarnSessionTimelineCursor
-    node: HarnSessionTimelineNode
-
 
 _T = TypeVar("_T", bound="_HarnDataclass")
 
@@ -517,6 +450,7 @@ class HarnAgentTerminalOutcome(_HarnDataclass):
 @dataclass
 class HarnACPPromptResultHarnMetadata(_HarnDataclass):
     terminal: Optional[HarnAgentTerminalOutcome] = None
+    goal_outcome: Optional[JsonValue] = None
 
 
 @dataclass
@@ -718,27 +652,6 @@ class HarnAgentEventNotification(_HarnDataclass):
     params: JsonObject
     method: str = HARN_AGENT_EVENT_METHOD
     jsonrpc: str = "2.0"
-
-
-@dataclass
-class HarnToolArgSchema(_HarnDataclass):
-    path_params: List[str] = field(default_factory=list)
-    dependency_key_params: List[str] = field(default_factory=list)
-    dependency_range_params: List[Dict[str, str]] = field(default_factory=list)
-    arg_aliases: Dict[str, str] = field(default_factory=dict)
-    required: List[str] = field(default_factory=list)
-
-
-@dataclass
-class HarnToolAnnotations(_HarnDataclass):
-    kind: str
-    side_effect_level: str
-    arg_schema: HarnToolArgSchema
-    completion_evidence_role: Optional[HarnCompletionEvidenceRole] = None
-    capabilities: Dict[str, List[str]] = field(default_factory=dict)
-    emits_artifacts: bool = False
-    result_readers: List[str] = field(default_factory=list)
-    inline_result: bool = False
 
 
 @dataclass

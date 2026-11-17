@@ -983,8 +983,16 @@
         "reader": "__dispatch_invoke_once"
       },
       {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_batch_proposals.harn",
+        "reader": "tool_batch_retain"
+      },
+      {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
         "reader": "__tool_batch_emit_receipt"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
+        "reader": "__tool_batch_dispatch"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_resource_dispatch.harn",
@@ -1383,6 +1391,10 @@
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop.harn",
         "reader": "agent_loop"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/loop_batch_proposals.harn",
+        "reader": "tool_batch_inject_resolution_tool"
       },
       {
         "file": "crates/harn-stdlib/src/stdlib/agent/loop_foundation.harn",

@@ -13,6 +13,7 @@ pub(super) struct AcpAgentEventSink {
     hitl_log: Option<super::prompt_owner::PromptExecutionOwner>,
     receipts: Option<super::delivery::PromptReceipts>,
     elicitations: Option<std::sync::Arc<super::elicitation::UrlElicitations>>,
+    usage: Option<super::usage::PromptUsage>,
 }
 
 impl AcpAgentEventSink {
@@ -23,6 +24,7 @@ impl AcpAgentEventSink {
             hitl_log: None,
             receipts: None,
             elicitations: None,
+            usage: None,
         }
     }
 
@@ -30,6 +32,7 @@ impl AcpAgentEventSink {
         output: AcpOutput,
         hitl_log: super::prompt_owner::PromptExecutionOwner,
         receipts: super::delivery::PromptReceipts,
+        usage: super::usage::PromptUsage,
     ) -> Self {
         Self {
             output,
@@ -37,6 +40,7 @@ impl AcpAgentEventSink {
             hitl_log: Some(hitl_log),
             receipts: Some(receipts),
             elicitations: None,
+            usage: Some(usage),
         }
     }
 
@@ -47,6 +51,7 @@ impl AcpAgentEventSink {
             hitl_log: None,
             receipts: None,
             elicitations: None,
+            usage: None,
         }
     }
 
@@ -566,6 +571,17 @@ impl AgentEventSink for AcpAgentEventSink {
                     "sessionId": session_id,
                     "update": update,
                 }));
+                if !receipt.receipt_id.trim().is_empty() {
+                    self.write_notification(serde_json::json!({
+                        "sessionId": session_id,
+                        "update": {
+                            "sessionUpdate": "compaction_update",
+                            "compactionId": receipt.receipt_id,
+                            "status": "completed",
+                            "_meta": {"harn": receipt.to_acp_meta()},
+                        },
+                    }));
+                }
             }
             AgentEvent::TranscriptProjected {
                 session_id,
@@ -913,6 +929,20 @@ impl AgentEventSink for AcpAgentEventSink {
             AgentEvent::InferenceSpeed { .. } => {
                 self.write_notification(meta::inference_speed_notification(event));
             }
+            AgentEvent::ContextUsage {
+                session_id,
+                call_id,
+                used_tokens,
+                capacity_tokens,
+            } => {
+                if !self.replayed {
+                    if let Some(params) = self.usage.as_ref().and_then(|usage| {
+                        usage.observe(session_id, call_id, *used_tokens, *capacity_tokens)
+                    }) {
+                        self.write_notification(params);
+                    }
+                }
+            }
             AgentEvent::ProviderUsage {
                 session_id,
                 call_id,
@@ -1247,6 +1277,7 @@ impl AgentEventSink for AcpAgentEventSink {
             | AgentEvent::ToolFormatOverride { .. }
             | AgentEvent::ToolCallAudit { .. }
             | AgentEvent::ToolBatchDisposition { .. }
+            | AgentEvent::ToolBatchProposalResolution { .. }
             | AgentEvent::CompositionStart { .. }
             | AgentEvent::CompositionChildCall { .. }
             | AgentEvent::CompositionChildResult { .. }

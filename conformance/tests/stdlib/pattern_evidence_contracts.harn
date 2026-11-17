@@ -1,0 +1,55 @@
+import { pl_observation_from_input } from "std/agent/pattern_knowledge_persistence"
+import {
+  pl_session_command_ledger,
+  pl_session_runs,
+  pl_session_tool_sequence,
+} from "std/agent/pattern_knowledge_sessions"
+
+type ExitCode = int
+
+fn require_strings(values: list<string>) -> int {
+  return len(values)
+}
+
+fn main(harness: Harness) {
+  const event = {
+    headers: {run_id: "typed"},
+    payload: {
+      transcript_event: {
+        kind: "tool_call_update",
+        metadata: {
+          tool_name: "run",
+          tool_call_id: "call",
+          status: "completed",
+          raw_input: {command: "printf typed"},
+          health: {command_exit_code: 0},
+        },
+      },
+    },
+  }
+  const tools = pl_session_tool_sequence([event + {kind: {type: "tool_call"}}])
+  assert_eq(require_strings(tools), 1)
+  const runs = pl_session_runs([event])
+  const run = runs[0]
+  require run != nil, "the source event must produce a run"
+  assert_eq(run.run_id, "typed")
+  const retained = run.events[0]
+  require retained != nil, "grouping must retain the source event"
+  assert_eq(retained.headers.run_id, "typed")
+  const ledger = pl_session_command_ledger([event])
+  const command = ledger[0]
+  require command != nil, "the completed source command must be retained"
+  const raw = command.exit_code
+  assert(schema_is(raw, schema_of(ExitCode)))
+  const observation = pl_observation_from_input(
+    harness.clock,
+    harness.random,
+    {id: "fixed", observed_at: "fixed", prompt: "typed", command_ledger: ledger},
+  )
+  const normalized = observation.command_ledger[0]
+  require normalized != nil, "persistence must retain the completed command"
+  assert_eq(normalized.command, "printf typed")
+  assert_eq(normalized.exit_code, 0)
+  assert_eq(observation.outcome, nil)
+  harness.stdio.println("pattern evidence contracts OK")
+}

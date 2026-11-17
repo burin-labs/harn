@@ -643,6 +643,10 @@ pub(super) fn generate_round_trip_fixture() -> Result<String, String> {
         kind: ToolKind::Execute,
         side_effect_level: SideEffectLevel::ProcessExec,
         completion_evidence_role: Some(CompletionEvidenceRole::Verification),
+        read_only_hint: Some(false),
+        destructive_hint: Some(true),
+        idempotent_hint: Some(false),
+        open_world_hint: Some(true),
         ..ToolAnnotations::default()
     };
     let mcp_discover_result = json!({
@@ -715,6 +719,7 @@ pub(super) fn generate_round_trip_fixture() -> Result<String, String> {
         "mcpUnsupportedProtocolVersionError": mcp_unsupported_version_error,
         "toolCallReceipt": tool_call_receipt,
         "sessionRecapAvailability": session_recap_availability,
+        "sessionTimeline": super::timeline_records::round_trip_fixture()?,
         "planDocument": super::plan_records::round_trip_fixture()?,
         "providerUsage": super::provider_usage::round_trip_fixtures()?,
         "hostToolResult": host_tool_result,

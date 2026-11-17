@@ -1,6 +1,6 @@
 import { agent_capture_events } from "std/agent/events"
 import { typed_output_checkpoint } from "std/checkpoint"
-import { llm_text, with_llm_script } from "std/testing"
+import { assert_eq, llm_text, with_llm_script } from "std/testing"
 
 pipeline default(harness: Harness) {
   const schema = {
@@ -63,8 +63,18 @@ pipeline default(harness: Harness) {
           "confidence must be at least 0.7",
         ),
       )
-      harness.stdio.println(captured.events[0].type)
-      harness.stdio.println(captured.events[0].checkpoint.final_accepted)
+      const checkpoints = captured.events.filter({ event -> event.type == "typed_checkpoint" })
+      const contexts = captured.events.filter({ event -> event.type == "context_usage" })
+      assert_eq(len(checkpoints), 1)
+      assert_eq(checkpoints[0].checkpoint.name, "merge_captain.next_action")
+      assert_eq(len(contexts), 2)
+      for context in contexts {
+        assert_eq(context.session_id, session_id)
+        assert(context.used_tokens > 0)
+        assert(context.call_id != "")
+      }
+      harness.stdio.println(checkpoints[0].type)
+      harness.stdio.println(checkpoints[0].checkpoint.final_accepted)
       const trace = harness.obs.agent_trace()
       let found = false
       for event in trace {

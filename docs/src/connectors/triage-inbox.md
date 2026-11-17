@@ -6,9 +6,10 @@ audit, but hosts render cards from normalized fields so they do not need
 Slack- or GitHub-specific branching.
 
 ```harn
-import { triage_emit, triage_start_my_day } from "std/triage"
+import { triage_start_my_day } from "std/triage"
 
 const feed = triage_start_my_day(
+  harness.obs,
   [github_event, slack_event],
   {emit: true, topic: "triage.inbox.start_my_day"},
 )
@@ -17,6 +18,10 @@ for event in feed.events {
   harness.stdio.log(event.summary)
 }
 ```
+
+`triage_start_my_day(obs, inputs, options?)` returns `TriageFeed` with typed
+`events` and `receipts` lists. `title` and `generated_at` retain the supplied
+metadata values and have type `unknown`.
 
 ## Envelope
 
@@ -61,7 +66,7 @@ const _unique = triage_dedupe_events([
 
 ## EventLog receipts
 
-`triage_emit(event, {topic?})` validates the envelope, appends it as
+`triage_emit(obs, event, {topic?})` validates the envelope, appends it as
 `kind = "triage_event"` to `triage.inbox.events` by default, and returns
 `harn.triage_event_emit_receipt.v1` with the EventLog id. The payload itself is
 the normalized event, so Harn receipt/provenance builders can serialize the

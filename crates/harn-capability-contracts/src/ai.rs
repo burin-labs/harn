@@ -761,6 +761,13 @@ capability_method!(
     "Read aggregate session totals."
 );
 capability_method!(
+    agent_session_loop_budget,
+    "harness.agent.session_loop_budget",
+    [],
+    harn_builtin_meta::signatures::AGENT_LOOP_BUDGET.with_name("__cap_agent_session_loop_budget"),
+    "Read the current loop-owned budget projection, or nil before the loop has measured it."
+);
+capability_method!(
     agent_session_inject_feedback,
     "harness.agent.session_inject_feedback",
     // Match the corresponding `__host_agent_*` runtime_internal builtin
@@ -840,7 +847,7 @@ capability_method!(agent_session_replace_messages, "harness.agent.session_replac
     // (effects = []): live session journal / reminder / budget seams are
     // runtime-owned, not model-facing state effects. Inflated contracts
     // reject under agent-loop execution policy and abort turns mid-flight.
-    [], "__cap_agent_session_replace_messages(session_id: string, messages: list, summary?: any) -> nil", "Replace session messages after compaction.");
+    [], "__cap_agent_session_replace_messages(session_id: string, messages: list, summary?: any) -> dict", "Replace session messages after compaction.");
 capability_method!(
     agent_budget_pre_call_blocked,
     "harness.agent.budget_pre_call_blocked",

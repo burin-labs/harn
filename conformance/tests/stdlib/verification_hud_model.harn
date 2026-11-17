@@ -68,13 +68,19 @@ pipeline test(harness: Harness, task: unknown) {
   assert_eq(model.visible, true)
   assert_eq(model.elapsed, "2m0s")
   assert_eq(model.since_last_edit, "1m0s")
-  assert_eq(model.last_check.age, "11s")
-  assert_eq(model.last_check.freshness.status, "bound_stale")
-  assert_eq(model.next_check.row_id, "tx/parse")
-  assert_eq(model.next_check.command, "toolchainx parse {file}")
-  assert_eq(model.next_check.p95, "0s")
-  assert_eq(model.full_check.row_id, "tx/full")
-  assert_eq(model.full_check.p95, "9s")
+  const last = model.last_check
+  const next = model.next_check
+  const full = model.full_check
+  if last == nil || next == nil || full == nil {
+    throw "the profile rows and last-check fact must be reached"
+  }
+  assert_eq(last.age, "11s")
+  assert_eq(last.freshness.status, "bound_stale")
+  assert_eq(next.row_id, "tx/parse")
+  assert_eq(next.command, "toolchainx parse {file}")
+  assert_eq(next.p95, "0s")
+  assert_eq(full.row_id, "tx/full")
+  assert_eq(full.p95, "9s")
   const text = verification_hud_text(harness.clock, harness.runtime, model)
   assert(contains(text, "[verification]"), "HUD text has header")
   assert(contains(text, "last check: R2 -> failed @11s ago - STALE"), "HUD text labels stale red")

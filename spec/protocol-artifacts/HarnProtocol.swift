@@ -137,6 +137,7 @@ public enum HarnProtocolConstants {
         "subagent_join",
         "subagent_stop",
         "tool_batch_disposition",
+        "tool_batch_proposal_resolution",
         "tool_call_audit",
         "tool_format_override",
         "turn_phase_changed",
@@ -164,6 +165,7 @@ public enum HarnProtocolConstants {
     ]
     public static let promptResultExtensionFields: [String] = [
         "terminal",
+        "goal_outcome",
     ]
     public static let toolCallReceiptStatuses: [String] = [
         "ok",
@@ -1446,6 +1448,10 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
     case currentModeUpdate = "current_mode_update"
     case configOptionUpdate = "config_option_update"
     case sessionInfoUpdate = "session_info_update"
+    case usageUpdate = "usage_update"
+    case notice = "notice"
+    case compactionUpdate = "compaction_update"
+    case compactionSummaryChunk = "compaction_summary_chunk"
     case sessionRedo = "session_redo"
     case sessionRollback = "session_rollback"
     case sessionTruncated = "session_truncated"
@@ -1483,6 +1489,10 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
         "current_mode_update",
         "config_option_update",
         "session_info_update",
+        "usage_update",
+        "notice",
+        "compaction_update",
+        "compaction_summary_chunk",
         "session_redo",
         "session_rollback",
         "session_truncated",
@@ -2104,6 +2114,7 @@ public struct HarnAgentTerminalOutcome: Codable, Sendable, Equatable {
 
 public struct HarnACPPromptResultHarnMetadata: Codable, Sendable, Equatable {
     public var terminal: HarnAgentTerminalOutcome?
+    public var goal_outcome: HarnACPValue?
 }
 
 public struct HarnACPPromptResultMetadata: Codable, Sendable, Equatable {
@@ -2954,44 +2965,6 @@ public struct HarnACPAgentCapabilities: Codable, Sendable, Equatable {
     }
 }
 
-public struct HarnToolArgSchema: Codable, Sendable, Equatable {
-    public var pathParams: [String]
-    public var dependencyKeyParams: [String]
-    public var dependencyRangeParams: [[String: String]]
-    public var argAliases: [String: String]
-    public var required: [String]
-
-    enum CodingKeys: String, CodingKey {
-        case pathParams = "path_params"
-        case dependencyKeyParams = "dependency_key_params"
-        case dependencyRangeParams = "dependency_range_params"
-        case argAliases = "arg_aliases"
-        case required
-    }
-}
-
-public struct HarnToolAnnotations: Codable, Sendable, Equatable {
-    public var kind: HarnACPToolKind
-    public var sideEffectLevel: HarnSideEffectLevel
-    public var completionEvidenceRole: HarnCompletionEvidenceRole?
-    public var argSchema: HarnToolArgSchema
-    public var capabilities: [String: [String]]
-    public var emitsArtifacts: Bool
-    public var resultReaders: [String]
-    public var inlineResult: Bool
-
-    enum CodingKeys: String, CodingKey {
-        case kind
-        case sideEffectLevel = "side_effect_level"
-        case completionEvidenceRole = "completion_evidence_role"
-        case argSchema = "arg_schema"
-        case capabilities
-        case emitsArtifacts = "emits_artifacts"
-        case resultReaders = "result_readers"
-        case inlineResult = "inline_result"
-    }
-}
-
 public struct HarnA2ATaskStatus: Codable, Sendable, Equatable {
     public var state: HarnA2ATaskState
     public var message: HarnACPValue?
@@ -3206,6 +3179,52 @@ public struct HarnMCPOAuthDynamicClientRegistrationRequest: Codable, Sendable, E
         case scope
     }
 }
+public struct HarnToolArgSchema: Codable, Sendable, Equatable {
+    public var pathParams: [String]
+    public var dependencyKeyParams: [String]
+    public var dependencyRangeParams: [[String: String]]
+    public var argAliases: [String: String]
+    public var required: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case pathParams = "path_params"
+        case dependencyKeyParams = "dependency_key_params"
+        case dependencyRangeParams = "dependency_range_params"
+        case argAliases = "arg_aliases"
+        case required
+    }
+}
+
+public struct HarnToolAnnotations: Codable, Sendable, Equatable {
+    public var kind: HarnACPToolKind
+    public var sideEffectLevel: HarnSideEffectLevel
+    public var argSchema: HarnToolArgSchema
+    public var capabilities: [String: [String]]
+    public var emitsArtifacts: Bool
+    public var resultReaders: [String]
+    public var inlineResult: Bool
+    public var completionEvidenceRole: HarnCompletionEvidenceRole?
+    public var destructiveHint: Bool?
+    public var idempotentHint: Bool?
+    public var openWorldHint: Bool?
+    public var readOnlyHint: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case sideEffectLevel = "side_effect_level"
+        case argSchema = "arg_schema"
+        case capabilities
+        case emitsArtifacts = "emits_artifacts"
+        case resultReaders = "result_readers"
+        case inlineResult = "inline_result"
+        case completionEvidenceRole = "completion_evidence_role"
+        case destructiveHint
+        case idempotentHint
+        case openWorldHint
+        case readOnlyHint
+    }
+}
+
 public struct HarnSessionTimelineCursor: Codable, Sendable, Equatable {
     public var topics: [String: UInt64]
 }
@@ -3221,37 +3240,36 @@ public struct HarnSessionTimelineQuery: Codable, Sendable, Equatable {
 
 public struct HarnSessionTimelineReference: Codable, Sendable, Equatable {
     public var kind: String
+    public var eventId: UInt64?
     public var id: String?
     public var topic: String?
-    public var eventId: UInt64?
 }
 
 public struct HarnSessionTimelineLink: Codable, Sendable, Equatable {
     public var kind: String
+    public var eventId: String?
+    public var spanId: String?
     public var targetId: String?
     public var traceId: String?
-    public var spanId: String?
-    public var eventId: String?
 }
 
-/// Harn-owned semantic chronology row. `kind` remains open for forward compatibility.
-public struct HarnSessionTimelineNode: Codable, Sendable, Equatable, Identifiable {
+public struct HarnSessionTimelineNode: Codable, Sendable, Equatable {
     public var id: String
-    public var parentId: String?
     public var children: [String]
     public var category: String
     public var kind: String
     public var name: String
     public var status: String
-    public var traceId: String?
-    public var spanId: String?
-    public var occurredAtMs: Int64?
-    public var startMs: UInt64?
-    public var durationMs: UInt64?
     public var attributes: HarnACPValue
     public var references: [HarnSessionTimelineReference]
     public var links: [HarnSessionTimelineLink]
     public var order: UInt64
+    public var durationMs: UInt64?
+    public var occurredAtMs: Int64?
+    public var parentId: String?
+    public var spanId: String?
+    public var startMs: UInt64?
+    public var traceId: String?
 }
 
 public struct HarnSessionTimelineCoverage: Codable, Sendable, Equatable {
@@ -3273,6 +3291,9 @@ public struct HarnSessionTimelineUpdate: Codable, Sendable, Equatable {
     public var cursor: HarnSessionTimelineCursor
     public var node: HarnSessionTimelineNode
 }
+
+extension HarnSessionTimelineNode: Identifiable {}
+
 
 public struct HarnACPArtifactUpdateMetaHarn: Codable, Sendable, Equatable {
     public var artifactId: String
@@ -6888,6 +6909,56 @@ public struct HarnAgentEventToolBatchDisposition: Codable, Sendable, Equatable {
     public var receipt: HarnACPValue
 }
 
+public struct HarnAgentEventToolBatchProposalResolutionEventResolution: Codable, Sendable, Equatable {
+    public var proposalId: String
+    public var sourceBatchId: String
+    public var sourceToolCallId: String
+    public var toolName: String
+    public var resolution: String
+    public var reason: String
+    public var confirmationCallId: String?
+    public var pendingCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case proposalId = "proposal_id"
+        case sourceBatchId = "source_batch_id"
+        case sourceToolCallId = "source_tool_call_id"
+        case toolName = "tool_name"
+        case resolution
+        case reason
+        case confirmationCallId = "confirmation_call_id"
+        case pendingCount = "pending_count"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        proposalId = try values.decode(String.self, forKey: .proposalId)
+        sourceBatchId = try values.decode(String.self, forKey: .sourceBatchId)
+        sourceToolCallId = try values.decode(String.self, forKey: .sourceToolCallId)
+        toolName = try values.decode(String.self, forKey: .toolName)
+        resolution = try values.decode(String.self, forKey: .resolution)
+        reason = try values.decode(String.self, forKey: .reason)
+        confirmationCallId = try values.decode(String?.self, forKey: .confirmationCallId)
+        pendingCount = try values.decode(Int.self, forKey: .pendingCount)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(proposalId, forKey: .proposalId)
+        try values.encode(sourceBatchId, forKey: .sourceBatchId)
+        try values.encode(sourceToolCallId, forKey: .sourceToolCallId)
+        try values.encode(toolName, forKey: .toolName)
+        try values.encode(resolution, forKey: .resolution)
+        try values.encode(reason, forKey: .reason)
+        try values.encode(confirmationCallId, forKey: .confirmationCallId)
+        try values.encode(pendingCount, forKey: .pendingCount)
+    }
+}
+
+public struct HarnAgentEventToolBatchProposalResolutionEvent: Codable, Sendable, Equatable {
+    public var resolution: HarnAgentEventToolBatchProposalResolutionEventResolution
+}
+
 public struct HarnAgentEventToolCallAudit: Codable, Sendable, Equatable {
     public var toolCallId: String
     public var toolName: String
@@ -6979,6 +7050,7 @@ public enum HarnAgentEventPayload: Sendable, Equatable {
     case subagentJoin(HarnAgentEventSubagentJoin)
     case subagentStop(HarnAgentEventSubagentStop)
     case toolBatchDisposition(HarnAgentEventToolBatchDisposition)
+    case toolBatchProposalResolution(HarnAgentEventToolBatchProposalResolutionEvent)
     case toolCallAudit(HarnAgentEventToolCallAudit)
     case toolFormatOverride(HarnAgentEventToolFormatOverride)
     case turnPhaseChanged(HarnAgentEventTurnPhaseChanged)
@@ -7043,6 +7115,7 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
         case subagentJoin = "subagent_join"
         case subagentStop = "subagent_stop"
         case toolBatchDisposition = "tool_batch_disposition"
+        case toolBatchProposalResolution = "tool_batch_proposal_resolution"
         case toolCallAudit = "tool_call_audit"
         case toolFormatOverride = "tool_format_override"
         case turnPhaseChanged = "turn_phase_changed"
@@ -7102,6 +7175,7 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
             "subagent_join",
             "subagent_stop",
             "tool_batch_disposition",
+            "tool_batch_proposal_resolution",
             "tool_call_audit",
             "tool_format_override",
             "turn_phase_changed",
@@ -7180,6 +7254,7 @@ public struct HarnAgentEventParams: Codable, Sendable, Equatable {
         case .subagentJoin: self.payload = .subagentJoin(try container.decode(HarnAgentEventSubagentJoin.self))
         case .subagentStop: self.payload = .subagentStop(try container.decode(HarnAgentEventSubagentStop.self))
         case .toolBatchDisposition: self.payload = .toolBatchDisposition(try container.decode(HarnAgentEventToolBatchDisposition.self))
+        case .toolBatchProposalResolution: self.payload = .toolBatchProposalResolution(try container.decode(HarnAgentEventToolBatchProposalResolutionEvent.self))
         case .toolCallAudit: self.payload = .toolCallAudit(try container.decode(HarnAgentEventToolCallAudit.self))
         case .toolFormatOverride: self.payload = .toolFormatOverride(try container.decode(HarnAgentEventToolFormatOverride.self))
         case .turnPhaseChanged: self.payload = .turnPhaseChanged(try container.decode(HarnAgentEventTurnPhaseChanged.self))

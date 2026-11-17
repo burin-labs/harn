@@ -21,7 +21,7 @@
 //! the durable transcript as the result of calls the loop declined to dispatch.
 //! This pass only makes whatever history arrives sendable.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 /// What the model reads for a tool call no result answered (harn#8951).
 pub(crate) const UNANSWERED_TOOL_CALL_OBSERVATION: &str =
@@ -39,6 +39,9 @@ pub(crate) const UNPAIRED_TOOL_RESULT_MARKER: &str = "[unpaired durable tool res
 ///   directives, blank assistant turns) move after the results;
 /// - every call still unanswered gets the harness's typed repair result, after
 ///   the real results and before the deferred messages;
+/// - an answered result uses the invoked name belonging to that call id, even
+///   when middleware dispatched a different semantic handler. This projects
+///   provider history only; durable execution facts are not rewritten;
 /// - a result that answers no open call of the preceding assistant turn becomes
 ///   an observation, so its evidence survives without an invalid pairing.
 ///
@@ -48,18 +51,21 @@ pub(crate) fn repair_tool_call_history(messages: Vec<serde_json::Value>) -> Vec<
     let mut messages = messages.into_iter().peekable();
     while let Some(message) = messages.next() {
         let Turn::Calls(calls) = Turn::of(&message) else {
-            repaired.push(settle_results(message, &mut HashSet::new()));
+            repaired.push(settle_results(message, &mut HashMap::new()));
             continue;
         };
         repaired.push(message);
-        let mut open: HashSet<String> = calls.iter().map(|call| call.id.clone()).collect();
+        let mut open: HashMap<String, String> = calls
+            .iter()
+            .map(|call| (call.id.clone(), call.name.clone()))
+            .collect();
         let mut deferred = Vec::new();
         while !open.is_empty() {
             let Some(next) = messages.peek() else {
                 break;
             };
             match Turn::of(next) {
-                Turn::Results(ids) if ids.iter().any(|id| open.contains(id)) => {
+                Turn::Results(ids) if ids.iter().any(|id| open.contains_key(id)) => {
                     let next = messages.next().expect("peeked message");
                     repaired.push(settle_results(next, &mut open));
                 }
@@ -75,7 +81,7 @@ pub(crate) fn repair_tool_call_history(messages: Vec<serde_json::Value>) -> Vec<
         repaired.extend(
             calls
                 .iter()
-                .filter(|call| open.contains(&call.id))
+                .filter(|call| open.contains_key(&call.id))
                 .map(|call| {
                     crate::llm::agent_session_host::harness_repair_tool_result(
                         &call.name,
@@ -87,7 +93,7 @@ pub(crate) fn repair_tool_call_history(messages: Vec<serde_json::Value>) -> Vec<
         repaired.extend(
             deferred
                 .into_iter()
-                .map(|message| settle_results(message, &mut HashSet::new())),
+                .map(|message| settle_results(message, &mut HashMap::new())),
         );
     }
     repaired
@@ -241,11 +247,20 @@ fn block_result_id(block: &serde_json::Value) -> Option<&str> {
     }
 }
 
-/// Pair each result in `message` with an `open` call, closing that call, and
-/// turn every result that pairs with none into an observation.
-fn settle_results(mut message: serde_json::Value, open: &mut HashSet<String>) -> serde_json::Value {
+/// Pair each result with its actual invocation identity, closing that call.
+/// Results that pair with none become observations rather than invented calls.
+fn settle_results(
+    mut message: serde_json::Value,
+    open: &mut HashMap<String, String>,
+) -> serde_json::Value {
     if harn_orchestration::tool_messages::is_tool_result_role(role(&message)) {
-        if open.remove(result_role_id(&message)) {
+        if let Some(name) = open.remove(result_role_id(&message)) {
+            if !name.is_empty() {
+                if message.get("tool_name").is_some() {
+                    message["tool_name"] = serde_json::Value::String(name.clone());
+                }
+                message["name"] = serde_json::Value::String(name);
+            }
             return message;
         }
         let content = message.get("content").cloned().unwrap_or_default();
@@ -261,9 +276,20 @@ fn settle_results(mut message: serde_json::Value, open: &mut HashSet<String>) ->
         return message;
     };
     let mut settled = Vec::with_capacity(blocks.len());
-    for block in std::mem::take(blocks) {
-        match block_result_id(&block) {
-            Some(id) if !open.remove(id) => settled.extend(unpaired_block_parts(&block)),
+    for mut block in std::mem::take(blocks) {
+        match block_result_id(&block).map(|id| open.remove(id)) {
+            Some(Some(name)) => {
+                if !name.is_empty() {
+                    if let Some(response) = block
+                        .get_mut("functionResponse")
+                        .and_then(serde_json::Value::as_object_mut)
+                    {
+                        response.insert("name".into(), serde_json::Value::String(name));
+                    }
+                }
+                settled.push(block);
+            }
+            Some(None) => settled.extend(unpaired_block_parts(&block)),
             _ => settled.push(block),
         }
     }

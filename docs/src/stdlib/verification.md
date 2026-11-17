@@ -5,6 +5,28 @@ facts. It keeps reusable verification substrate in Harn rather than in a
 particular host product: hosts supply file bytes and code-index state, while
 Harn policies consume explicit facts.
 
+## Result types
+
+`std/verification` re-exports the types owned by `std/verification_types`.
+The facade and implementation use the same declarations.
+
+- `VerificationStartedCheck.started` is a `CommandResult`. Its `status` is a
+  string, and its `exit_code` is an optional integer.
+- `VerificationDiagnosticDelta` contains typed `previous` and `current`
+  snapshots, integer counts, boolean gate flags, and string signature lists.
+- `VerificationLadderPlan.selected` and `.skipped` contain typed entries.
+  List indexing can return `nil`. Commands and profile metadata retain their
+  supplied values as `unknown`.
+- `VerificationHudModel` can omit details when no state is available. Its
+  `last_check`, `next_check`, and `full_check` can be `nil` even with state.
+- `VerificationSnapshotStaleness` contains boolean freshness flags and lists
+  of changed paths.
+
+Guard optional records before reading their fields. Decode opaque command or
+metadata values with a caller-owned schema before accessing nested fields.
+These contracts preserve the runtime values, including adapter extension
+fields and nominal records accepted by the existing decoders.
+
 ## File-Hash Snapshots
 
 `verification_file_hash_snapshot(harness.code_index, paths)` captures current on-disk hashes for a

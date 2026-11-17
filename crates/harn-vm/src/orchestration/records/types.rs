@@ -68,6 +68,12 @@ pub struct LlmUsageRecord {
     pub cache_read_tokens: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_write_tokens: Option<i64>,
+    /// Physical-call coverage retained from the canonical provider ledger.
+    /// Absent on older records, whose cache subtotal has unknown coverage.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reported_cache: Option<Box<crate::llm::usage::ReportedCacheTotals>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_call_count: Option<i64>,
     pub models: Vec<String>,
 }
 
@@ -88,6 +94,8 @@ struct LlmUsageRecordWire {
     total_cost: f64,
     cache_read_tokens: Option<i64>,
     cache_write_tokens: Option<i64>,
+    reported_cache: Option<Box<crate::llm::usage::ReportedCacheTotals>>,
+    provider_call_count: Option<i64>,
     models: Vec<String>,
 }
 
@@ -112,6 +120,8 @@ impl From<LlmUsageRecordWire> for LlmUsageRecord {
             total_cost: wire.total_cost,
             cache_read_tokens: wire.cache_read_tokens,
             cache_write_tokens: wire.cache_write_tokens,
+            reported_cache: wire.reported_cache,
+            provider_call_count: wire.provider_call_count,
             models: wire.models,
         }
     }

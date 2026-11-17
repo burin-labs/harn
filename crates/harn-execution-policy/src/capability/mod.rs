@@ -377,6 +377,14 @@ impl CapabilityPolicy {
                 && self.tools.iter().any(|pattern| glob_match(pattern, tool)))
     }
 
+    /// Permission hints, not tool schemas or approval of particular arguments.
+    pub fn tool_name_hints(&self) -> Vec<String> {
+        if self.tools_are_restricted() {
+            return self.allowed_tool_patterns().map(str::to_string).collect();
+        }
+        self.tool_annotations.keys().cloned().collect()
+    }
+
     pub fn capabilities_are_restricted(&self) -> bool {
         !self.capabilities.is_empty()
     }

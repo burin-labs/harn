@@ -1,0 +1,177 @@
+import { read_yaml } from "std/fs"
+
+type StepEnvironment = {HARN_BIN?: string, EVENT_NAME?: string, SOURCE_REF?: string}
+
+type WorkflowStep = {
+  id?: string,
+  name?: string,
+  if?: string,
+  uses?: string,
+  with?: {version?: string},
+  env?: StepEnvironment,
+  run?: string,
+}
+
+type WorkflowSteps = list<WorkflowStep>
+
+type RepeatabilityEnvironment = {FLAKE_CARGO_PROFILE?: string}
+
+type Workflow = {environment: RepeatabilityEnvironment, steps: WorkflowSteps}
+
+fn workflow(fs: HarnessFs) -> Workflow {
+  const document = read_yaml(
+    fs,
+    path_join(fs.source_dir(), "../../.github/workflows/flake-detection.yml"),
+  )
+  return {
+    environment: schema_expect(document.env, schema_of(RepeatabilityEnvironment)),
+    steps: schema_expect(document.jobs.get("flake-rerun").steps, schema_of(WorkflowSteps)),
+  }
+}
+
+pipeline test_filter_selection_bootstraps_without_building_the_workspace(harness: Harness) {
+  const steps = workflow(harness.fs).steps
+  const bootstrap = steps.find({ step -> step.id == "filter_runtime" })
+  assert(bootstrap != nil, "install the released filter runtime before Rust cache preparation")
+  assert_eq(bootstrap.uses, "./.github/actions/setup-harn")
+  assert_eq(bootstrap.with?.version, "0.10.201")
+  let installed = false
+  for step in steps {
+    if step.id == "filter_runtime" {
+      installed = true
+    }
+    if step.id == "touched" {
+      assert(installed)
+      assert_eq(step.env?.HARN_BIN, "$" + "{{ steps.filter_runtime.outputs.path }}")
+    }
+  }
+}
+
+pipeline test_repeatability_uses_its_reader_before_workspace_builds(harness: Harness) {
+  const steps = workflow(harness.fs).steps
+  let reader: WorkflowStep? = nil
+  let prepared_before_build = false
+  for step in steps {
+    if step.id == "inventory_reader" {
+      reader = step
+    }
+    if step.name == "Build test binaries" {
+      prepared_before_build = reader != nil
+    }
+  }
+  assert(prepared_before_build, "stage the inventory reader before workspace builds can relink it")
+  assert_eq(reader?.if, "steps.touched.outputs.has_tests == 'true'")
+  const repeat = steps.find({ step -> step.id == "repeatability" })
+  assert_eq(repeat?.env?.HARN_BIN, "$" + "{{ steps.inventory_reader.outputs.path }}")
+  assert_eq(repeat?.run, "scripts/ci/run_touched_test_repeats.sh")
+}
+
+pipeline test_repeatability_builds_the_same_checked_interpreter_profile(harness: Harness) {
+  const configuration = workflow(harness.fs)
+  assert_eq(configuration.environment.FLAKE_CARGO_PROFILE, "ci-cli")
+  const build = configuration.steps.find({ step -> step.name == "Build test binaries" })
+  assert_eq(
+    build?.run,
+    "cargo test --locked --profile \"$FLAKE_CARGO_PROFILE\" --no-run --workspace",
+  )
+}
+
+fn scope_probe(
+  harness: Harness,
+  script: string,
+  event: string,
+  source_ref: string,
+) -> {stdout: string, outputs: string, selected_paths: string} {
+  const root = harness.fs.mkdtemp_in_workspace("touched-scope-")
+  defer {
+    harness.fs.delete(root)
+  }
+  const bin = path_join(root, "bin")
+  const scripts = path_join(root, "scripts")
+  harness.fs.mkdir(bin)
+  harness.fs.mkdir(scripts)
+  const git = path_join(bin, "git")
+  harness.fs.write_text(
+    git,
+    """
+#!/usr/bin/env bash
+set -euo pipefail
+case "$1" in
+  rev-list) echo before ;;
+  fetch) exit 0 ;;
+  diff)
+    if [[ "$3" == before...HEAD ]]; then
+      echo crates/harn-cli/src/lib.rs
+    elif [[ "$SOURCE_REF" != refs/heads/main ]]; then
+      echo crates/harn-parser/src/lib.rs
+    fi
+    ;;
+  *) exit 99 ;;
+esac
+""",
+  )
+  const filter = path_join(scripts, "nextest_filters_from_paths.sh")
+  harness.fs.write_text(
+    filter,
+    """
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$@" > "$SELECTED_PATHS"
+echo 'package(harn-cli)'
+""",
+  )
+  const chmod = harness.process.run({program: "chmod", args: ["+x", git, filter]})
+  assert(chmod.success, chmod.stderr)
+  const executable = path_join(root, "detect.sh")
+  harness.fs.write_text(executable, script)
+  const outputs = path_join(root, "outputs")
+  const selected = path_join(root, "selected")
+  const inherited_path = harness.env.get("PATH") ?? "/usr/bin:/bin"
+  const result = harness.process.run(
+    {
+      program: "bash",
+      args: ["-e", executable],
+      cwd: root,
+      env: {
+        PATH: "${bin}:${inherited_path}",
+        EVENT_NAME: event,
+        SOURCE_REF: source_ref,
+        GITHUB_OUTPUT: outputs,
+        SELECTED_PATHS: selected,
+      },
+    },
+  )
+  assert(result.success, result.stderr)
+  return {
+    stdout: result.stdout,
+    outputs: harness.fs.read_text(outputs),
+    selected_paths: harness.fs.exists(selected) ? harness.fs.read_text(selected) : "",
+  }
+}
+
+pipeline test_manual_main_measures_the_nightly_window_and_branches_keep_their_diff(
+  harness: Harness,
+) {
+  const steps = workflow(harness.fs).steps
+  const detect = steps.find({ step -> step.id == "touched" })
+  assert_eq(detect.env.EVENT_NAME, "$" + "{{ github.event_name }}")
+  assert_eq(detect.env.SOURCE_REF, "$" + "{{ github.ref }}")
+  for sample in [
+    {event: "schedule", ref: "refs/heads/main", recent: true},
+    {event: "workflow_dispatch", ref: "refs/heads/main", recent: true},
+    {event: "workflow_dispatch", ref: "refs/heads/feature", recent: false},
+  ] {
+    const observed = scope_probe(harness, detect.run, sample.event, sample.ref)
+    const range = sample.recent ? "before...HEAD" : "origin/main...HEAD"
+    const path = sample.recent ? "crates/harn-cli/src/lib.rs" : "crates/harn-parser/src/lib.rs"
+    assert(
+      observed.stdout.contains("Diff range: ${range}"),
+      json_stringify({sample: sample, observed: observed}),
+    )
+    assert(
+      observed.outputs.contains("has_tests=true"),
+      json_stringify({sample: sample, observed: observed}),
+    )
+    assert_eq(observed.selected_paths.trim(), path)
+  }
+}

@@ -8,6 +8,11 @@ on:
         description: Merged main pull request requesting a release
         required: true
         type: string
+      consumer_pull_request:
+        description: Optional consumer pull request; existing source-pairing and containment rules apply
+        required: false
+        default: ''
+        type: string
       dry_run:
         description: Inspect without dispatching or reporting
         required: false
@@ -23,6 +28,11 @@ on:
       pull_request:
         description: Merged main pull request requesting a release
         required: true
+        type: string
+      consumer_pull_request:
+        description: Optional consumer pull request; existing source-pairing and containment rules apply
+        required: false
+        default: ''
         type: string
       dry_run:
         description: Read the merged request and print dispatch plans without writes or builds
@@ -54,6 +64,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_REQUEST_PR: ${{ inputs.pull_request }}
+      RELEASE_REQUEST_CONSUMER_PULL: ${{ inputs.consumer_pull_request }}
       RELEASE_REQUEST_DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
       RELEASE_REQUEST_INSPECT_RUN: ${{ inputs.inspect_candidate_run }}
       RELEASE_REQUEST_REPORT: release-request.json

@@ -112,7 +112,7 @@ pub fn system_prompt(id: &str) -> Option<String> {
     })
 }
 
-const DIRECTIVE_NONCE_METADATA_KEY: &str = "_harn_directive_nonce";
+pub(crate) const DIRECTIVE_NONCE_METADATA_KEY: &str = "_harn_directive_nonce";
 
 /// Read the durable authority nonce owned by this session's transcript.
 pub fn directive_nonce(id: &str) -> Option<String> {
@@ -307,6 +307,33 @@ pub fn workspace_anchor(id: &str) -> Option<WorkspaceAnchor> {
         s.borrow()
             .get(id)
             .and_then(|state| state.workspace_anchor.clone())
+    })
+}
+
+/// Read current workspace facts and their standing delivery record together.
+/// A prior record establishes only that a withdrawal needs delivery; it never
+/// restores a directory grant when the canonical anchor is absent.
+pub(crate) fn workspace_anchor_context(
+    id: &str,
+) -> Option<crate::workspace_anchor::WorkspaceAnchorContext> {
+    use crate::workspace_anchor::{WorkspaceAnchorContext, WORKSPACE_ANCHOR_REMINDER_KEY};
+    SESSIONS.with(|sessions| {
+        let sessions = sessions.borrow();
+        let state = sessions.get(id)?;
+        if let Some(anchor) = &state.workspace_anchor {
+            return Some(WorkspaceAnchorContext::Current(anchor.clone()));
+        }
+        let VmValue::List(events) = state.transcript.as_dict()?.get("events")? else {
+            return None;
+        };
+        events
+            .iter()
+            .filter_map(crate::llm::helpers::reminder_from_event)
+            .any(|reminder| {
+                reminder.source == crate::llm::helpers::ReminderSource::StdlibProvider
+                    && reminder.dedupe_key.as_deref() == Some(WORKSPACE_ANCHOR_REMINDER_KEY)
+            })
+            .then_some(WorkspaceAnchorContext::Cleared)
     })
 }
 

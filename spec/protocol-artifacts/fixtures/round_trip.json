@@ -185,9 +185,13 @@
     },
     "capabilities": {},
     "completion_evidence_role": "verification",
+    "destructiveHint": true,
     "emits_artifacts": false,
+    "idempotentHint": false,
     "inline_result": false,
     "kind": "execute",
+    "openWorldHint": true,
+    "readOnlyHint": false,
     "result_readers": [],
     "side_effect_level": "process_exec"
   },
@@ -622,6 +626,125 @@
       ]
     },
     "state": "available"
+  },
+  "sessionTimeline": {
+    "snapshot": {
+      "coverage": {
+        "available": 1,
+        "returned": 1,
+        "truncated": false
+      },
+      "cursor": {
+        "topics": {
+          "events": 8
+        }
+      },
+      "nodes": [
+        {
+          "attributes": {
+            "nested": [
+              null,
+              true,
+              4
+            ]
+          },
+          "category": "tool",
+          "children": [
+            "child"
+          ],
+          "durationMs": 3,
+          "id": "node",
+          "kind": "future_kind",
+          "links": [
+            {
+              "eventId": "event",
+              "kind": "cause",
+              "spanId": "span",
+              "targetId": "target",
+              "traceId": "trace"
+            }
+          ],
+          "name": "Verify",
+          "occurredAtMs": -1,
+          "order": 8,
+          "parentId": "parent",
+          "references": [
+            {
+              "eventId": 8,
+              "id": "reference",
+              "kind": "source",
+              "topic": "events"
+            }
+          ],
+          "spanId": "span",
+          "startMs": 2,
+          "status": "complete",
+          "traceId": "trace"
+        }
+      ],
+      "query": {
+        "fromCursor": {
+          "topics": {
+            "events": 1
+          }
+        },
+        "limit": 4,
+        "projectId": "project",
+        "runId": "run",
+        "runPath": "/run",
+        "sessionId": "session"
+      },
+      "schemaVersion": 2
+    },
+    "update": {
+      "cursor": {
+        "topics": {
+          "events": 8
+        }
+      },
+      "node": {
+        "attributes": {
+          "nested": [
+            null,
+            true,
+            4
+          ]
+        },
+        "category": "tool",
+        "children": [
+          "child"
+        ],
+        "durationMs": 3,
+        "id": "node",
+        "kind": "future_kind",
+        "links": [
+          {
+            "eventId": "event",
+            "kind": "cause",
+            "spanId": "span",
+            "targetId": "target",
+            "traceId": "trace"
+          }
+        ],
+        "name": "Verify",
+        "occurredAtMs": -1,
+        "order": 8,
+        "parentId": "parent",
+        "references": [
+          {
+            "eventId": 8,
+            "id": "reference",
+            "kind": "source",
+            "topic": "events"
+          }
+        ],
+        "spanId": "span",
+        "startMs": 2,
+        "status": "complete",
+        "traceId": "trace"
+      },
+      "schemaVersion": 2
+    }
   },
   "toolCallReceipt": {
     "args_hash": "0000000000000000000000000000000000000000000000000000000000000000",

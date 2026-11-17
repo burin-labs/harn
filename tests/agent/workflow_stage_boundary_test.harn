@@ -1,0 +1,310 @@
+import { WorkflowFlattenedAgentOptions, WorkflowPreparedStage } from "std/workflow/options"
+import {
+  workflow_evaluate_verification,
+  workflow_execute_stage_attempts,
+  workflow_flatten_agent_loop_options,
+  workflow_prepare_static_stage,
+  workflow_stage_attempt_outcome,
+  workflow_stage_retry_task,
+} from "std/workflow/stage"
+
+fn prepared_result(value: unknown) -> WorkflowPreparedStage {
+  const result = schema_expect(value, schema_of(WorkflowPreparedStage))
+  require result.handled, "the static stage must be handled"
+  return result
+}
+
+struct StageTestPolicy {
+  separator: string
+  output_kinds: list<string>
+  reason: string
+}
+
+struct StageTestCommandPolicy {
+  command_policy: int
+}
+
+struct StageTestVerdict {
+  ok: bool
+  findings: list<string>
+}
+
+struct StageTestRetryPolicy {
+  max_attempts: int
+}
+
+pipeline test_static_stage_nominal_policies_preserve_values(harness: Harness) {
+  const policy = StageTestPolicy {separator: " / ", output_kinds: ["plan"], reason: "needs owner"}
+  const node = {kind: "reduce", reduce_policy: policy, output_contract: policy, extension: [1, 2]}
+  const prepared = workflow_prepare_static_stage(
+    harness.agent,
+    harness.interaction,
+    harness.tools,
+    {node_id: "reduce", node: node, artifacts: [{id: "a", text: "one"}, {id: "b", text: "two"}]},
+  )
+  const checked = prepared_result(prepared)
+  assert_eq(checked.result.text, "one / two")
+  const artifact = checked.artifacts[0]
+  if artifact == nil {
+    throw "the reduced artifact must remain available"
+  }
+  assert_eq(artifact.kind, "plan")
+  assert_eq(artifact.lineage, ["a", "b"])
+  assert_eq(node.extension, [1, 2])
+  assert_eq(node.reduce_policy, policy)
+}
+
+pipeline test_static_stage_unconsumed_and_malformed_containers_keep_fallbacks(harness: Harness) {
+  for value in [nil, false, 7, "legacy", []] {
+    const prepared = workflow_prepare_static_stage(
+      harness.agent,
+      harness.interaction,
+      harness.tools,
+      {
+        node: {kind: "reduce", reduce_policy: value, output_contract: value},
+        artifacts: [{text: "one"}, {text: "two"}],
+      },
+    )
+    const checked = prepared_result(prepared)
+    assert_eq(checked.result.text, "one\n\ntwo")
+    const artifact = checked.artifacts[0]
+    if artifact == nil {
+      throw "the reduced artifact must remain available"
+    }
+    assert_eq(artifact.kind, "summary")
+  }
+}
+
+pipeline test_static_stage_output_kind_consumption_keeps_supported_types(harness: Harness) {
+  const accepted = [nil, "legacy", bytes_from_hex("00ff"), {}, set(1, 2), 1..3, [], [false, "plan"]]
+  for value in accepted {
+    const prepared = workflow_prepare_static_stage(
+      harness.agent,
+      harness.interaction,
+      harness.tools,
+      {node: {kind: "reduce", output_contract: {output_kinds: value}}},
+    )
+    const checked = prepared_result(prepared)
+    const artifact = checked.artifacts[0]
+    if artifact == nil {
+      throw "the reduced artifact must remain available"
+    }
+    assert_eq(artifact.kind, "summary")
+  }
+  for value in [false, 7, 1.5, { _ -> "ignored" }, StageTestCommandPolicy {command_policy: 7}] {
+    assert(
+      is_err(
+        try {
+          workflow_prepare_static_stage(
+            harness.agent,
+            harness.interaction,
+            harness.tools,
+            {node: {kind: "reduce", output_contract: {output_kinds: value}}},
+          )
+        },
+      ),
+    )
+  }
+  const prepared = workflow_prepare_static_stage(
+    harness.agent,
+    harness.interaction,
+    harness.tools,
+    {node: {kind: "reduce", output_contract: {output_kinds: ["plan", false]}}},
+  )
+  const checked = prepared_result(prepared)
+  const artifact = checked.artifacts[0]
+  if artifact == nil {
+    throw "the reduced artifact must remain available"
+  }
+  assert_eq(artifact.kind, "plan")
+}
+
+pipeline test_stage_verifier_callbacks_keep_custom_tags_findings_and_nominal_truthiness() {
+  const custom = workflow_evaluate_verification(
+    {
+      verify: { result ->
+        assert_eq(result.extension, [1, 2])
+        return {kind: "custom", ok: false, findings: [7, false]}
+      },
+      result: {extension: [1, 2]},
+    },
+  )
+  assert_eq(custom.kind, "custom")
+  assert_eq(custom.ok, false)
+  assert_eq(custom.findings ?? [], ["7", "false"])
+  const nominal = workflow_evaluate_verification(
+    {verify: { _ -> return StageTestVerdict {ok: false, findings: ["unconsumed"]} }},
+  )
+  assert_eq(nominal.ok, true)
+  assert_eq(nominal.findings ?? [], [])
+  const thrown = workflow_evaluate_verification(
+    {
+      verify: { _ ->
+        throw "verifier control"
+      },
+    },
+  )
+  assert_eq(thrown.ok, false)
+  assert_eq(thrown.findings ?? [], ["verifier threw: verifier control"])
+}
+
+pipeline test_stage_explicit_verification_metadata_remains_opaque() {
+  for value in [false, 0, "custom", [], StageTestVerdict {ok: false, findings: []}] {
+    const result = workflow_stage_attempt_outcome(
+      {node: {kind: "stage"}, result: {status: "done"}, verification: value},
+    )
+    assert_eq(result.outcome, "success")
+    assert_eq(result.branch, "success")
+    assert_eq(result.verification, value)
+  }
+}
+
+pipeline test_stage_flattening_preserves_extra_fields_precedence_and_raw_policy() {
+  const callback = { value -> value }
+  const options = workflow_flatten_agent_loop_options(
+    {
+      base: {custom: "base", keep: "base", skills: ["base"], tool_search: false, [7]: "base-key"},
+      raw_model_policy: {
+        custom: 0,
+        keep: nil,
+        callback: callback,
+        policy: StageTestCommandPolicy {command_policy: 7},
+        [9]: false,
+      },
+      skills: ["fallback"],
+      policy: {ceiling: true},
+      approval_policy: false,
+      session_id: 7,
+      tool_format: false,
+      auto_compact: {enabled: false},
+    },
+  )
+  assert_eq(options.custom, 0)
+  assert_eq(options.keep, "base")
+  assert_eq(options.skills, ["base"])
+  assert_eq(options.tool_search, false)
+  assert_eq(options.command_policy, 7)
+  assert_eq(type_of(options.callback), type_of(callback))
+  assert_eq(options.policy, {ceiling: true})
+  assert_eq(options.approval_policy, false)
+  assert_eq(options.session_id, "")
+  assert_eq(options.tool_format, "")
+  assert_eq(options.auto_compact, false)
+  assert_eq(options[7], "base-key")
+  assert_eq(options[9], false)
+  const validated = schema_expect(options, schema_of(WorkflowFlattenedAgentOptions))
+  assert_eq(validated[7], "base-key")
+  assert_eq(validated[9], false)
+}
+
+pipeline test_stage_retry_builder_receives_preserved_context() {
+  const task = workflow_stage_retry_task(
+    {
+      task: "base",
+      attempt: 2,
+      node: {extension: [1, 2]},
+      prior: {verification: {findings: ["need control"]}, result: {visible_text: "prior"}},
+      policy: {
+        repair_prompt_builder: { context ->
+          assert_eq(context.task, "base")
+          assert_eq(context.attempt, 2)
+          assert_eq(context.findings, ["need control"])
+          assert_eq(context.prior_text, "prior")
+          assert_eq(context.stage.extension, [1, 2])
+          return "repaired"
+        },
+      },
+    },
+  )
+  assert_eq(task, "repaired")
+}
+
+pipeline test_unhandled_static_stage_keeps_absent_payload(harness: Harness) {
+  const result = workflow_prepare_static_stage(
+    harness.agent,
+    harness.interaction,
+    harness.tools,
+    {node: {kind: "custom", extension: true}},
+  )
+  assert_eq(result, {handled: false})
+  assert(
+    is_err(
+      try {
+        prepared_result(result)
+      },
+    ),
+  )
+}
+
+pipeline test_stage_attempt_loop_retains_opaque_executor_payloads(harness: Harness) {
+  const raw_result = {status: "done", visible_text: "inline-reached", extension: true}
+  const raw_artifacts = [false, {extension: [1, 2]}]
+  const raw_transcript = {opaque: [1, 2]}
+  const verification = {extension: true}
+  const result = workflow_execute_stage_attempts(
+    harness.random,
+    "loop-control",
+    "control",
+    {
+      kind: "subagent",
+      mode: "llm",
+      model_policy: {provider: "mock"},
+      executor: { context ->
+        assert_eq(context.task, "loop-control")
+        return {
+          result: raw_result,
+          artifacts: raw_artifacts,
+          transcript: raw_transcript,
+          outcome: "custom",
+          branch: nil,
+          verification: verification,
+        }
+      },
+    },
+    [],
+    nil,
+    {max_attempts: 1},
+  )
+  assert_eq(result.status, "completed")
+  assert_eq(result.outcome, "custom")
+  assert_eq(result.branch, nil)
+  assert_eq(result.result, raw_result)
+  assert_eq(result.artifacts, raw_artifacts)
+  assert_eq(result.transcript, raw_transcript)
+  assert_eq(result.verification, verification)
+  assert_eq(result.usage.call_count, 0)
+  assert_eq(len(result.attempts), 1)
+  const attempt = result.attempts[0]
+  if attempt == nil {
+    throw "the actual recorded attempt must remain available"
+  }
+  assert_eq(attempt.attempt, 1)
+  assert_eq(attempt.status, "completed")
+  assert_eq(attempt.outcome, "custom")
+  assert_eq(attempt.verification, verification)
+}
+
+pipeline test_stage_attempt_limit_is_consumed_from_the_node(harness: Harness) {
+  for row in [
+    {policy: {max_attempts: 2}, attempts: 2},
+    {policy: {max_attempts: 0}, attempts: 1},
+    {policy: StageTestRetryPolicy {max_attempts: 2}, attempts: 2},
+  ] {
+    const result = workflow_execute_stage_attempts(
+      harness.random,
+      "retry-limit",
+      "control",
+      {
+        kind: "subagent",
+        model_policy: {provider: "mock"},
+        retry_policy: row.policy,
+        executor: { _ ->
+          return {result: {visible_text: "unfinished"}, branch: "failed", outcome: "unfinished"}
+        },
+      },
+    )
+    assert_eq(len(result.attempts), row.attempts)
+    assert_eq(result.status, "failed")
+    assert_eq(result.error, "verification failed")
+  }
+}

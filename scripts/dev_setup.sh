@@ -561,15 +561,21 @@ if [[ "${SETUP_PROFILE}" == "full" ]]; then
     fi
   done
 
-  if ! command -v actionlint >/dev/null 2>&1; then
-    if command -v go >/dev/null 2>&1; then
-      echo "Installing actionlint..."
-      go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 || echo "warning: failed to install actionlint (non-fatal)"
-    else
-      echo "warning: go not found; skipping actionlint install"
+  # Only the pinned fork parses background/wait steps; `make lint-actions-source`
+  # refuses any other actionlint, so replace one rather than keeping it.
+  actionlint_found="$(actionlint --version 2>/dev/null | head -n 1 || true)"
+  # The go-installed build prints `v1.16.1`; the release tarball omits the `v`.
+  if [[ "${actionlint_found/ v/ }" == "actionlint.kjanat.dev 1.16.1" ]]; then
+    echo "actionlint already installed."
+  elif command -v go >/dev/null 2>&1; then
+    echo "Installing actionlint with background/wait step support (found: ${actionlint_found:-none})..."
+    go install actionlint.kjanat.dev/cmd/actionlint@v1.16.1 || echo "warning: failed to install actionlint (non-fatal)"
+    actionlint_found="$(actionlint --version 2>/dev/null | head -n 1 || true)"
+    if [[ -n "$actionlint_found" && "${actionlint_found/ v/ }" != "actionlint.kjanat.dev 1.16.1" ]]; then
+      echo "warning: '$actionlint_found' still shadows the Go-installed actionlint on PATH; put \$(go env GOPATH)/bin first"
     fi
   else
-    echo "actionlint already installed."
+    echo "warning: go not found; skipping actionlint install"
   fi
 fi
 

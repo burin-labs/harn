@@ -12,6 +12,28 @@ private enum RecapBindingProbeError: Error {
     case acceptedMalformedAgentEvent(String)
     case acceptedMissingProviderUsageFact
     case acceptedMissingRequiredNullableField(String)
+    case missingGoalAssessment
+}
+
+private func checkPromptGoalAssessments() throws {
+    for kind in ["not_achieved", "unknown"] {
+        let outcome: [String: Any] = ["kind": kind, "reason": "goal_assessed", "evidence_id": "assessment"]
+        let input: [String: Any] = ["stopReason": "end_turn", "_meta": ["harn": ["goal_outcome": outcome]]]
+        let decoded = try JSONDecoder().decode(HarnACPPromptResult.self,
+            from: JSONSerialization.data(withJSONObject: input))
+        guard decoded._meta?.harn.goal_outcome == .object([
+            "kind": .string(kind), "reason": .string("goal_assessed"), "evidence_id": .string("assessment")
+        ]) else { throw RecapBindingProbeError.missingGoalAssessment }
+        try roundTrip(HarnACPPromptResult.self, input, input)
+    }
+    for harn in [[:], ["goal_outcome": NSNull()]] as [[String: Any]] {
+        let input: [String: Any] = ["stopReason": "end_turn", "_meta": ["harn": harn]]
+        let decoded = try JSONDecoder().decode(HarnACPPromptResult.self,
+            from: JSONSerialization.data(withJSONObject: input))
+        guard decoded._meta?.harn.goal_outcome == nil else {
+            throw RecapBindingProbeError.missingGoalAssessment
+        }
+    }
 }
 
 /// Every emitted agent event decodes into its generated body and re-encodes
@@ -89,6 +111,7 @@ private struct RecapBindingProbe {
             fatalError("usage: protocol-binding-session-recap FIXTURE SESSION_UPDATES SESSION_UPDATE_SCHEMA AGENT_EVENTS")
         }
         try checkAgentEvents(CommandLine.arguments[4])
+        try checkPromptGoalAssessments()
         let fixture = try JSONSerialization.jsonObject(
             with: Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1]))
         ) as! [String: Any]
@@ -168,6 +191,13 @@ private struct RecapBindingProbe {
         }
         let recap = fixture["sessionRecapAvailability"] as! [String: Any]
         let plan = fixture["planDocument"] as! [String: Any]
+        let timeline = fixture["sessionTimeline"] as! [String: Any]
+        let timelineSnapshot = timeline["snapshot"] as! [String: Any]
+        let timelineUpdate = timeline["update"] as! [String: Any]
+        try roundTrip(HarnSessionTimelineSnapshot.self, timelineSnapshot, timelineSnapshot)
+        try roundTrip(HarnSessionTimelineUpdate.self, timelineUpdate, timelineUpdate)
+        let query: [String: Any] = ["fromCursor": ["topics": [String: UInt64]()]]
+        try roundTrip(HarnSessionTimelineQuery.self, query, query)
         try roundTrip(HarnPlanDocument.self, plan, plan)
         try requiredNullableField(HarnPlanStep.self, ["id": "step", "content": "Verify", "status": "pending"], "priority", "high")
         try optionalField(HarnPlanApproval.self, ["state": "unrequested"], "reviewers", ["reviewer"])

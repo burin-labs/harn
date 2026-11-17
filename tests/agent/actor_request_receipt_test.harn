@@ -1,0 +1,157 @@
+import { agent_loop } from "std/agent/loop"
+import { llm_error, llm_text, with_llm_script, with_scenario } from "std/testing"
+
+pipeline test_actor_receipt_names_actual_served_primary_context(harness: Harness) {
+  const sid = harness.agent.open("actor-receipt-${harness.random.uuid()}")
+  const primary = "Exact primary context for this actor."
+  with_llm_script(
+    harness.llm,
+    [llm_text("Done.")],
+    { ->
+      const result = harness.agent.with_run(
+        sid,
+        {session_id: sid},
+        { ->
+          agent_loop(
+            harness,
+            "Answer.",
+            primary,
+            {provider: "mock", session_id: sid, max_iterations: 1},
+          )
+        },
+      )
+      const request = result.llm.actor_request
+      assert(request != nil, "an actual actor dispatch must produce a non-null receipt")
+      assert_eq(request.session_id, result.session_id)
+      assert_eq(request.run_id, result.run_id)
+      assert_eq(request.call_role, "agent.main")
+      assert_eq(request.context_manifest.boundary, "llm_request_payload_egress")
+      assert(request.call_id != "")
+      assert(
+        request.context_manifest.segments.any(
+          { segment ->
+            segment.producer == "primary" && segment.included
+              && segment.digest == llm_context_content_hash(primary)
+          },
+        ),
+        "the dispatched receipt must certify the exact primary bytes",
+      )
+      assert_eq(len(harness.llm.mock_calls()), 1)
+    },
+  )
+  harness.agent.close(sid)
+}
+
+pipeline test_helper_dispatch_does_not_create_an_actor_receipt(harness: Harness) {
+  const sid = harness.agent.open("helper-only-${harness.random.uuid()}")
+  with_scenario(
+    harness,
+    {
+      capabilities: [{capability: "agent", method: "budget_pre_call_blocked", result: true}],
+      llm: [{text: "Helper only."}],
+    },
+    { _ ->
+      const result = harness.agent.with_run(
+        sid,
+        {session_id: sid},
+        { ->
+          const _ = harness.llm.call("Classify this task.", nil, {provider: "mock"})
+          return agent_loop(
+            harness,
+            "Do not dispatch an actor.",
+            "Unserved primary.",
+            {provider: "mock", session_id: sid, max_iterations: 1, budget: {total_budget_usd: 0.0}},
+          )
+        },
+      )
+      assert_eq(len(harness.llm.mock_calls()), 1, "the helper must actually dispatch")
+      assert(
+        result.provider_call_count > 0,
+        "aggregate inference usage must be non-null despite no actor dispatch",
+      )
+      assert_eq(result.stop_reason, "pre_call_budget_block", "the actor must actually be blocked")
+      assert_eq(result.llm.actor_request, nil, "helper inference cannot prove actor delivery")
+    },
+  )
+  harness.agent.close(sid)
+}
+
+pipeline test_failed_actor_dispatch_does_not_claim_context_delivery(harness: Harness) {
+  const sid = harness.agent.open("actor-failed-${harness.random.uuid()}")
+  with_llm_script(
+    harness.llm,
+    [llm_error("HTTP 400 invalid_request_error: rejected request")],
+    { ->
+      const result = harness.agent.with_run(
+        sid,
+        {session_id: sid},
+        { ->
+          agent_loop(
+            harness,
+            "Answer.",
+            "Unaccepted primary.",
+            {provider: "mock", session_id: sid, max_iterations: 1},
+          )
+        },
+      )
+      assert(result.provider_call_count > 0, "the failure must happen after actual dispatch")
+      assert_eq(len(harness.llm.mock_calls()), 1)
+      assert_eq(
+        result.llm.actor_request,
+        nil,
+        "dispatch without a successful response cannot prove delivery",
+      )
+    },
+  )
+  harness.agent.close(sid)
+}
+
+pipeline test_later_transport_failure_retains_earlier_successful_actor_context(harness: Harness) {
+  const sid = harness.agent.open("actor-earlier-success-${harness.random.uuid()}")
+  const primary = "Already delivered primary."
+  with_llm_script(
+    harness.llm,
+    [llm_text("Working."), llm_error("HTTP 400 invalid_request_error: rejected request")],
+    { ->
+      const result = harness.agent.with_run(
+        sid,
+        {session_id: sid},
+        { ->
+          agent_loop(
+            harness,
+            "Answer.",
+            primary,
+            {provider: "mock", session_id: sid, max_iterations: 2, loop_until_done: true},
+          )
+        },
+      )
+      assert_eq(len(harness.llm.mock_calls()), 2, "the later actor dispatch must really fail")
+      assert_eq(result.provider_call_count, 2)
+      const request = result.llm.actor_request
+      assert(request != nil, "a later failure must not erase an earlier successful response")
+      assert_eq(request.run_id, result.run_id)
+      const calls = transcript_events_by_kind(harness.agent.snapshot(sid), "llm_call").filter(
+        { event -> event?.metadata?.call_role == "agent.main" },
+      )
+        .to_list()
+      assert_eq(len(calls), 2, "both actual actor call audit records must be present")
+      const successful_call = calls[0].metadata.call_id
+      const failed_call = calls[1].metadata.call_id
+      assert(successful_call != "" && failed_call != "" && successful_call != failed_call)
+      assert_eq(request.call_id, successful_call, "the receipt must name the first successful call")
+      assert(
+        request.call_id != failed_call,
+        "the later failed dispatch cannot replace delivery evidence",
+      )
+      assert(
+        request.context_manifest.segments.any(
+          { segment ->
+            segment.producer == "primary" && segment.included
+              && segment.digest == llm_context_content_hash(primary)
+          },
+        ),
+      )
+    },
+  )
+  harness.agent.close(sid)
+}

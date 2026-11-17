@@ -1,0 +1,93 @@
+import { shell_exit_evidence } from "std/command"
+
+pipeline test_shell_success_proof_covers_only_required_commands() {
+  for command in [
+    "cargo test",
+    "cargo test && cargo check",
+    "cd packages/server && pnpm test",
+    "printf '%s' 'a && b; c | d'",
+    "set -o pipefail && cargo test 2>&1 | tail -5",
+    "set -o pipefail && cargo test | cat && cargo check",
+    "set -o pipefail; cargo test | cat",
+    "bash scripts/check.sh",
+    "(cd web && ruff check .)",
+    "pytest && (cd web && ruff check .)",
+    "(true && true) && true",
+    "{ true && true; }",
+    "set -o pipefail && (cargo test | cat)",
+    "env CHECK_MODE=strict cargo test",
+    "env -u CHECK_MODE cargo test",
+    "custom-test-runner --split-string ignored",
+  ] {
+    const proof = shell_exit_evidence(command, "bash")
+    assert(proof.scope == "all_commands", command + ": " + proof.reason)
+  }
+  for command in [
+    "false; true",
+    "false\ntrue",
+    "cargo test || true",
+    "cargo test | cat",
+    "cargo test | tail -5; git status --short",
+    "cargo test &",
+  ] {
+    const proof = shell_exit_evidence(command, "bash")
+    assert(proof.scope == "masked", command + ": " + proof.reason)
+  }
+  for command in [
+    "if true; then false; fi",
+    "printf '%s' \"$(false)\"",
+    "cat <(false)",
+    "bash -c 'false; true'",
+    "env bash -c 'false; true'",
+    "env --split-string=\"bash -c 'false; true'\"",
+    "env --split-string \"bash -c 'false; true'\"",
+    "env -S \"bash -c 'false; true'\"",
+    "env -S\"bash -c 'false; true'\"",
+    "command env --split-string=\"bash -c 'false; true'\"",
+    "X=1 command bash -c 'false; true'",
+    "eval 'false; true'",
+    "find . -exec false \\;",
+    "printf x | xargs false",
+    "exec true && false",
+    "exit 0 && false",
+    "$SHELL -c 'false; true'",
+    "bash \"$CHECK\"",
+    "set -o pipefail && set +o pipefail && false | cat",
+    "set -o pipefail && X=1 set +o pipefail && false | cat",
+    "set -o pipefail && command set +o pipefail && false | cat",
+    "echo \"unterminated",
+    "",
+  ] {
+    const proof = shell_exit_evidence(command, "bash")
+    assert(proof.scope == "unmeasured", command + ": " + proof.reason)
+  }
+  assert_eq(shell_exit_evidence("Write-Output ok", "pwsh").scope, "all_commands")
+  assert_eq(shell_exit_evidence("echo ok", "cmd").scope, "all_commands")
+  assert(shell_exit_evidence("false; Write-Output ok", "pwsh").scope != "all_commands")
+  assert(shell_exit_evidence("failed-check & echo ok", "cmd").scope != "all_commands")
+  assert(shell_exit_evidence("echo ok", "unknown-shell").scope == "unmeasured")
+  assert(shell_exit_evidence("set -o pipefail; false | cat", "sh").scope == "masked")
+  assert(shell_exit_evidence("(false; true)", "bash").scope == "masked")
+  assert(shell_exit_evidence("(false || true) && true", "bash").scope == "masked")
+  assert(shell_exit_evidence("(false | cat) && true", "bash").scope == "masked")
+}
+
+pipeline test_request_exit_proof_retains_wrapper_resolution_in_argv_mode() {
+  for argv in [
+    ["env", "--split-string=bash -c 'false; true'"],
+    ["env", "--split-string", "bash -c 'false; true'"],
+    ["env", "-S", "bash -c 'false; true'"],
+    ["env", "-Sbash -c 'false; true'"],
+  ] {
+    const scan = command_risk_scan({request: {mode: "argv", argv: argv}})
+    assert(scan.execution_semantics.exit_evidence.scope == "unmeasured", json_stringify(argv))
+  }
+  for argv in [
+    ["env", "CHECK_MODE=strict", "cargo", "test"],
+    ["env", "-u", "CHECK_MODE", "cargo", "test"],
+    ["custom-test-runner", "--split-string", "ignored"],
+  ] {
+    const scan = command_risk_scan({request: {mode: "argv", argv: argv}})
+    assert(scan.execution_semantics.exit_evidence.scope == "all_commands", json_stringify(argv))
+  }
+}

@@ -16,22 +16,36 @@ pipeline main(harness: Harness) {
   }
   const session = harness.agent.open("reminder-provider-grounded-review")
   harness.agent.reset(session)
+  const payload = {
+    session: {id: session},
+    iteration: 3,
+    tool_name: "exec_command",
+    tool: {name: "exec_command", args: {cmd: "cargo check -p demo"}},
+    result: {
+      text: "error[E0425]: cannot find value `missing` in this scope\n --> src/lib.rs:2:5\n",
+    },
+  }
+  const default_report = agent_reminder_providers_fire(
+    harness.agent,
+    session,
+    "post_tool_use",
+    payload,
+    opts,
+  )
+  harness.stdio.println(default_report.fired_count)
+  harness.stdio.println(
+    len(transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")),
+  )
   const report = agent_reminder_providers_fire(
     harness.agent,
     session,
     "post_tool_use",
-    {
-      session: {id: session},
-      iteration: 3,
-      tool_name: "exec_command",
-      tool: {name: "exec_command", args: {cmd: "cargo check -p demo"}},
-      result: {
-        text: "error[E0425]: cannot find value `missing` in this scope\n --> src/lib.rs:2:5\n",
-      },
-    },
-    opts,
+    payload,
+    opts + {reminders: opts.reminders + {config: {grounded_review: {text_scan: true}}}},
   )
   const reminders = transcript_events_by_kind(harness.agent.snapshot(session), "system_reminder")
+  require report.reports.any({ provider_report -> provider_report.provider == "grounded_review" }),
+    "the same provider path must produce a nonzero read with text scanning enabled"
   const reminder = reminders[0].reminder
   harness.stdio.println(report.fired_count)
   harness.stdio.println(report.reports[0].provider)
@@ -40,6 +54,7 @@ pipeline main(harness: Harness) {
   harness.stdio.println(reminder.ttl_turns)
   harness.stdio.println(reminder.role_hint)
   harness.stdio.println(reminder.propagate)
+  harness.stdio.println(contains(reminder.body, "reported:typecheck"))
   harness.stdio.println(contains(reminder.body, "verified:typecheck"))
   harness.stdio.println(contains(reminder.body, "cannot find value `missing`"))
   harness.stdio.println(contains(reminder.body, "command=cargo check -p demo"))

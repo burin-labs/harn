@@ -1,9 +1,9 @@
 lookup.deferred=0
-network_effect.deferred=1
+network_effect.deferred=0
 phased.status=done
-phased.executed=7
-phased.deferred=11
-phased.reproposed=11
+phased.executed=6
+phased.deferred=3
+phased.reproposed=3
 blocked.status=done
 blocked.skipped=2
 blocked.counters.verify=1

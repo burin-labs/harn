@@ -10,7 +10,7 @@ use crate::llm::pairing_receipts::ToolResultOrigin;
 use crate::value::VmDictExt;
 use std::{cell::RefCell, collections::BTreeMap, sync::Arc};
 
-use crate::agent_events::{emit_provider_usage, AgentEvent};
+use crate::agent_events::{emit_provider_usage, AgentEvent, ToolBatchDisposition};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 use harn_builtin_macros::harn_builtin;
@@ -71,6 +71,7 @@ mod daemon_bridge;
 mod goal_outcome;
 mod inbox;
 mod lifecycle;
+mod loop_budget;
 mod tool_result_messages;
 use crate::agent_session_journal::live as live_transcript_journal;
 use assistant_messages::durable_anthropic_blocks;
@@ -156,6 +157,7 @@ struct AgentHostSession {
     /// Completed physical-call ledgers, including retries and results that an
     /// agent turn later rejects. Kept separate from accepted-turn totals.
     physical_usage: Option<crate::llm::usage::LlmUsage>,
+    actor_request: Option<super::actor_request::ActorRequestReceipt>,
     cache_read_tokens: i64,
     cache_write_tokens: i64,
     /// Physical provider requests dispatched while this agent session was
@@ -182,6 +184,8 @@ struct AgentHostSession {
     /// caused by hitting the cap (→ ACP `max_turn_requests`) from other
     /// budget paths.
     max_iterations: i64,
+    /// Projection supplied by the Harn loop that owns the counters and grants.
+    loop_budget: Option<loop_budget::LoopBudgetSnapshot>,
     daemon_state: Option<String>,
     daemon_snapshot_path: Option<String>,
     resumed_iterations: usize,
@@ -359,6 +363,7 @@ pub(crate) fn seed_host_session_provider_model(session_id: &str, provider: &str,
         input_tokens: 0,
         output_tokens: 0,
         physical_usage: None,
+        actor_request: None,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
         provider_call_count: 0,
@@ -375,6 +380,7 @@ pub(crate) fn seed_host_session_provider_model(session_id: &str, provider: &str,
         current_session_frame: None,
         started_at: now_id(),
         max_iterations: 0,
+        loop_budget: None,
         daemon_state: None,
         daemon_snapshot_path: None,
         resumed_iterations: 0,
@@ -529,6 +535,18 @@ pub(crate) fn record_provider_dispatch(session_id: &str) {
             accounting.provider_call_count = accounting.provider_call_count.saturating_add(1);
         });
     }
+}
+
+/// Keep the first successful actor response's matching request context in the
+/// existing run summary. A helper, refused request, transport failure, or stale
+/// run cannot claim that the actor received this context.
+pub(crate) fn record_actor_request(receipt: &super::actor_request::ActorRequestReceipt) {
+    let _ = with_session(&receipt.session_id, "record_actor_request", |session| {
+        if session.run_id == receipt.run_id && session.actor_request.is_none() {
+            session.actor_request = Some(receipt.clone());
+        }
+        Ok(())
+    });
 }
 
 /// Record one settled physical attempt and publish the owning session ledger.
@@ -1078,10 +1096,25 @@ fn host_agent_session_record_tool_results_builtin(
                 },
             },
         };
-        if ok {
-            successful.push(name.clone());
-        } else {
-            rejected.push(name.clone());
+        let records_outcome = match dict_get(result, "dispatch_receipt") {
+            None | Some(VmValue::Nil) => true,
+            Some(receipt) => {
+                let raw = dict_get(receipt, "disposition").ok_or_else(|| {
+                    VmError::Runtime("tool dispatch receipt is missing its disposition".into())
+                })?;
+                let disposition: ToolBatchDisposition = serde_json::from_value(vm_to_json(raw))
+                    .map_err(|error| {
+                        VmError::Runtime(format!("invalid tool disposition: {error}"))
+                    })?;
+                disposition == ToolBatchDisposition::Executed
+            }
+        };
+        if records_outcome {
+            if ok {
+                successful.push(name.clone());
+            } else {
+                rejected.push(name.clone());
+            }
         }
         // Lethal-trifecta ledger (Layer 1): note that untrusted content entered
         // this session's context so the dispatch gate can require confirmation
@@ -1280,6 +1313,7 @@ pub fn register_agent_session_host_primitives(vm: &mut Vm) {
     daemon_bridge::register_daemon_bridge_primitives(vm);
     inbox::register_inbox_primitives(vm);
     lifecycle::register_lifecycle_primitives(vm);
+    loop_budget::register_loop_budget_primitives(vm);
     live_transcript_journal::register_live_transcript_journal_primitives(vm);
     crate::agent_session_journal::register_run_preparation(vm);
     message_history::register_message_history_primitives(vm);

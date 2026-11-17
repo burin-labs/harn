@@ -449,6 +449,7 @@ pub(crate) struct ObservedAttemptToken {
     rate_limit: super::rate_limit::LlmCallAdmission,
     token_projection: super::cost_context::LlmCallTokenProjection,
     inference_speed: super::inference_speed::InferenceMeter,
+    actor_receipt: Option<Arc<super::actor_request::ActorRequestReceipt>>,
 }
 
 impl ObservedAttemptToken {
@@ -456,6 +457,7 @@ impl ObservedAttemptToken {
         opts: &super::api::LlmCallOptions,
         call_id: &str,
         token_projection: super::cost_context::LlmCallTokenProjection,
+        actor_receipt: Option<super::actor_request::ActorRequestReceipt>,
     ) -> Self {
         let session_id = super::agent_runtime::current_agent_session_id();
         Self {
@@ -470,6 +472,7 @@ impl ObservedAttemptToken {
             reasoning_receipts: super::reasoning_receipt::RequestReceipts::for_call(opts, call_id),
             rate_limit: super::rate_limit::LlmCallAdmission::for_attempt(opts, token_projection),
             token_projection,
+            actor_receipt: actor_receipt.map(Arc::new),
         }
     }
 
@@ -509,6 +512,15 @@ impl ObservedAttemptToken {
         self.dispatches
             .record_for_session(self.session_id.as_deref());
         self.inference_speed.start();
+    }
+
+    /// Called only after this dispatched request returns a parsed provider
+    /// response. Cache/replay bypasses and transport errors cannot claim that
+    /// the actor received the prepared instructions.
+    pub(super) fn record_provider_response(&self) {
+        if let Some(receipt) = self.actor_receipt.as_deref() {
+            super::agent_session_host::record_actor_request(receipt);
+        }
     }
 }
 
@@ -658,15 +670,20 @@ pub(crate) async fn observed_llm_call(
             b.send_call_start(&call_id, "llm", "llm_call", call_start_meta);
         }
 
-        let request = dump_llm_request_with_context(
+        let observed_request = dump_llm_request_with_receipt(
             iteration.unwrap_or(0),
             &call_id,
             &effective_tool_format,
             opts,
             &context_tokens,
         )?;
-        let observed_attempt =
-            ObservedAttemptToken::for_current_session(opts, &call_id, token_projection);
+        let request = observed_request.payload;
+        let observed_attempt = ObservedAttemptToken::for_current_session(
+            opts,
+            &call_id,
+            token_projection,
+            observed_request.actor_receipt,
+        );
 
         let first_token = super::first_token::FirstTokenTimer::for_current_span();
         let start = std::time::Instant::now();

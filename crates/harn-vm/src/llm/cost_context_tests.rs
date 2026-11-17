@@ -12,6 +12,66 @@ fn segment_tokens(breakdown: &LlmContextTokenBreakdown, id: &'static str) -> Opt
 }
 
 #[test]
+fn current_context_matches_ollama_request_overrides() {
+    let _guard = crate::llm::env_guard();
+    let _env = crate::llm::test_env::ScopedEnvVar::set("HARN_OLLAMA_NUM_CTX", "32768");
+    let mut opts = crate::llm::api::options::base_opts("ollama");
+    opts.model = "context-override-control".into();
+    let baseline = project_llm_call_context_breakdown(&opts);
+    assert_eq!(baseline.context_window, Some(32768));
+    for (overrides, expected) in [
+        (serde_json::json!({"num_ctx": 8192}), 8192),
+        (serde_json::json!({"options": {"num_ctx": 16384}}), 16384),
+    ] {
+        opts.provider_overrides = Some(overrides);
+        let payload = crate::llm::api::LlmRequestPayload::from(&opts);
+        let wire = crate::llm::providers::OllamaProvider::build_request_body(&payload);
+        let actual = wire["options"]["num_ctx"].as_u64().unwrap() as usize;
+        assert_eq!(actual, expected);
+        assert_ne!(actual, baseline.context_window.unwrap());
+        assert_eq!(
+            project_llm_call_context_breakdown(&opts).context_window,
+            Some(actual)
+        );
+    }
+}
+
+#[test]
+fn current_context_uses_resident_input_and_preserves_unknown_capacity() {
+    let _guard = crate::llm::env_guard();
+    let mut opts = crate::llm::api::options::base_opts("openai");
+    opts.model = "gpt-4o-mini".into();
+    opts.messages = vec![serde_json::json!({"role": "user", "content": "visible context"})];
+    opts.native_tools = Some(vec![serde_json::json!({
+        "type": "function", "defer_loading": true,
+        "function": {"name": "deferred", "description": "not resident ".repeat(20), "parameters": {"type":"object"}}
+    })]);
+    opts.max_tokens = 128;
+    let context = project_llm_call_context_breakdown(&opts);
+    let deferred = segment_tokens(&context, "deferred_tool_schemas").unwrap();
+    assert!(deferred > 0);
+    assert!(context.resident_input_tokens > 0);
+    assert_eq!(
+        context.resident_input_tokens,
+        context.input_tokens - deferred
+    );
+    assert!(context.resident_input_tokens < context.context_tokens);
+    assert_eq!(
+        context.context_window,
+        Some(
+            crate::llm_config::model_catalog_entry_for_route("openai", "gpt-4o-mini")
+                .unwrap()
+                .context_window as usize
+        )
+    );
+    opts.model = "unregistered-context-capacity-control".into();
+    assert_eq!(
+        project_llm_call_context_breakdown(&opts).context_window,
+        None
+    );
+}
+
+#[test]
 fn wire_output_schema_is_counted_but_prompt_validation_is_not_counted_twice() {
     use crate::llm::api::OutputFormat;
     let mut opts = crate::llm::api::options::base_opts("openai");

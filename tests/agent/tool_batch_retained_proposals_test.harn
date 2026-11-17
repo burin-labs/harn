@@ -1,0 +1,82 @@
+import { tool_batch_inject_resolution_tool } from "std/agent/loop_batch_proposals"
+import { agent_lifecycle_tools } from "std/agent/workers"
+import { assert_direct_mutation_batch } from "./fixtures/direct_mutation_batches"
+import {
+  assert_retained_mutation_barrier,
+  retained_proposal_trial,
+} from "./fixtures/retained_tool_proposals"
+
+@test(cases: [{name: "empty", args: ["empty", false]}, {name: "lifecycle", args: ["lifecycle", false]}, {name: "read", args: ["read", false]}, {name: "edit", args: ["edit", false]}, {name: "execute", args: ["execute", true]}, {name: "fixed_verification", args: ["fixed_verification", false]}, {name: "mixed", args: ["mixed", true]}, {name: "terminal_override", args: ["terminal_override", true]}, {name: "terminal_process", args: ["terminal_process", false]}])
+pipeline test_confirmation_schema_requires_retention_capability(
+  harness: Harness,
+  kind: string,
+  expected: bool,
+) {
+  let tools = tool_registry()
+  if kind == "lifecycle" {
+    tools = agent_lifecycle_tools(harness.agent, tools)
+    assert(tool_find(tools, "agent_await_resumption") != nil, "the lifecycle control must exist")
+  } else if kind != "empty" {
+    tools = tool_define(
+      tools,
+      "first",
+      "Return a deterministic result.",
+      {
+        parameters: {},
+        annotations: if kind == "fixed_verification" {
+          {completion_evidence_role: "verification", side_effect_level: "process_exec"}
+        } else {
+          {
+            kind: if kind == "mixed" {
+              "read"
+            } else if kind == "terminal_override" {
+              "edit"
+            } else if kind == "terminal_process" {
+              "execute"
+            } else {
+              kind
+            },
+          }
+        },
+        handler: { _args -> "observed" },
+      },
+    )
+    if kind == "mixed" || kind == "terminal_override" {
+      tools = tool_define(
+        tools,
+        "second",
+        "Apply a change.",
+        {parameters: {}, annotations: {kind: "edit"}, handler: { _args -> "applied" }},
+      )
+    }
+  }
+  const terminal_tools = if kind == "terminal_override" {
+    ["second"]
+  } else if kind == "terminal_process" {
+    ["first"]
+  } else {
+    []
+  }
+  const projected = tool_batch_inject_resolution_tool(
+    {tools: tools, stop_after_successful_tools: terminal_tools},
+  ).tools
+  assert_eq(tool_find(projected, "__harn_resolve_tool_call") != nil, expected)
+}
+
+@test
+pipeline test_retained_verification_cannot_confirm_past_failed_mutation(harness: Harness) {
+  assert_retained_mutation_barrier(harness)
+}
+
+@test(cases: [{name: "resume", args: ["resume"]}, {name: "discard", args: ["discard"]}, {name: "revise", args: ["revise"]}, {name: "replay", args: ["replay"]}, {name: "denied", args: ["denied"]}, {name: "compacted", args: ["compacted"]}, {name: "new_direction", args: ["new_direction"]}, {name: "reread", args: ["reread"]}, {name: "reread_failed", args: ["reread_failed"]}, {name: "reread_denied", args: ["reread_denied"]}, {name: "reread_injected", args: ["reread_injected"]}, {name: "reread_inbox", args: ["reread_inbox"]}])
+pipeline test_retained_proposals_require_current_explicit_confirmation(
+  harness: Harness,
+  variant: string,
+) {
+  retained_proposal_trial(harness, variant)
+}
+
+@test(cases: [{name: "success", args: ["success"]}, {name: "read_failed", args: ["read_failed"]}, {name: "denied", args: ["denied"]}, {name: "injected", args: ["injected"]}, {name: "inbox", args: ["inbox"]}, {name: "later_phases", args: ["later_phases"]}, {name: "mutation_failed", args: ["mutation_failed"]}])
+pipeline test_fresh_mutations_follow_successful_observations(harness: Harness, variant: string) {
+  assert_direct_mutation_batch(harness, variant)
+}

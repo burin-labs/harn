@@ -29,6 +29,18 @@ function runsConsumer(promote,requires,repaired,prior) {
 }
 
 test('the real workflow skips only a selected prior repair rehearsal',()=>{
+  const checkout=workflow.jobs.authorize.steps.find(step=>step.uses?.startsWith('actions/checkout@'));
+  const history=step=>{
+    assert.equal(step.with.ref,'main');
+    assert.equal(step.with['fetch-depth'],0);
+    assert.equal(step.with['fetch-tags'],true);
+    assert.equal(step.with['persist-credentials'],false);
+  };
+  history(checkout);
+  const shallow=structuredClone(checkout);shallow.with['fetch-depth']=1;
+  assert.throws(()=>history(shallow),'repair reuse cannot assume the original source history exists');
+  const noTags=structuredClone(checkout);delete noTags.with['fetch-tags'];
+  assert.throws(()=>history(noTags),'the original version needs its measured previous stable tag');
   assert.equal(runsConsumer('true','true','true','423'),false);
   assert.equal(runsConsumer('true','true','true',''),true);
   assert.equal(runsConsumer('true','true','false','423'),true);

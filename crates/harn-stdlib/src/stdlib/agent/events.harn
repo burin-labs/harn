@@ -89,8 +89,10 @@ pub type AgentToolBatchDispositionReceipt = {
   tool_name: string,
   phase: AgentToolBatchPhase,
   selected_phase: AgentToolBatchPhase,
-  disposition: "executed" | "deferred" | "skipped_after_blocking_result",
-  proposal_status: "new" | "re_proposed",
+  disposition: "executed" | "deferred" | "skipped_after_blocking_result" | "resolved",
+  proposal_status: "new" | "re_proposed" | "confirmed",
+  retained_proposal_id?: string?,
+  source_tool_call_id?: string?,
   reason: string,
   planned_at_ms: int | float,
   started_at_ms: int | float | nil,
@@ -104,6 +106,23 @@ pub type AgentToolBatchDispositionReceipt = {
 pub type AgentToolBatchDispositionEvent = {
   type: "tool_batch_disposition",
   receipt: AgentToolBatchDispositionReceipt,
+  ...dict,
+}
+
+pub type AgentToolBatchProposalResolution = {
+  proposal_id: string,
+  source_batch_id: string,
+  source_tool_call_id: string,
+  tool_name: string,
+  resolution: "confirmed" | "discarded" | "invalidated" | "superseded",
+  reason: string,
+  confirmation_call_id: string?,
+  pending_count: int,
+}
+
+pub type AgentToolBatchProposalResolutionEvent = {
+  type: "tool_batch_proposal_resolution",
+  resolution: AgentToolBatchProposalResolution,
   ...dict,
 }
 
@@ -305,6 +324,29 @@ pub fn agent_tool_batch_disposition_event_schema() -> Schema<AgentToolBatchDispo
   return __agent_event_fields(
     schema_of(AgentToolBatchDispositionEvent),
     {receipt: agent_tool_batch_disposition_receipt_schema()},
+  )
+}
+
+/**
+ * A retained proposal changed authority without creating another tool attempt.
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_tool_batch_proposal_resolution_event_schema() -> Schema<
+  AgentToolBatchProposalResolutionEvent
+> {
+  return __agent_event_fields(
+    schema_of(AgentToolBatchProposalResolutionEvent),
+    {
+      resolution: __agent_event_fields(
+        __agent_closed_event_schema(schema_of(AgentToolBatchProposalResolution)),
+        {
+          proposal_id: schema_string() + {min_length: 1},
+          source_batch_id: __agent_event_digest_schema(),
+          pending_count: __agent_event_nonnegative_int_schema(),
+        },
+      ),
+    },
   )
 }
 

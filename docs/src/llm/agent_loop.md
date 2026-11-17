@@ -373,7 +373,7 @@ Same as `harness.llm.call`, plus additional options:
 | `intra_turn_resource_fail_fast` | bool | `true` | When an annotated mutating tool call fails, skip later sibling calls in the same assistant response that target the same declared path resource. Set `false` only for legacy dispatch-all behavior |
 | `prefetch_next_turn` | bool | `false` | Start the next planner turn after tool results are recorded while local/custom audit receipt sinks flush in the background. The loop drains those flushes before returning |
 | `tool_surface_narrowing` | bool \| `ToolSurfaceNarrowingOptions` | `{enabled: true, window_turns: 5, mode: "safe"}` | At a new user message, remove model-visible tools unused across the prior recorded-call window. Safe mode narrows unused `read_only` tools while keeping mutating/control/unknown tools by class; record configs may also set `mode: "aggressive"`, `hard_keep`, `prune_classes`, `keep_classes`, and `unknown_tool_policy` |
-| `progress_tool` | bool/dict | `false` | Opt in to a model-facing progress tool that emits `progress_reported` agent events. `true` exposes `agent_progress`; a dict may set `name`, `description`, and `system_prompt_nudge`. ACP clients receive task-list entries as canonical `plan` updates and message-only reports as Harn `progress` narration |
+| `progress_tool` | bool/dict | `false` | Opt in to a model-facing progress tool that emits `progress_reported` agent events. `true` exposes `agent_progress`; a dict may set `name`, `description`, and `system_prompt_nudge`. The nudge follows the tool's guidance: eager without tool search, disclosed with its schema when search is active. ACP clients receive task-list entries as canonical `plan` updates and message-only reports as Harn `progress` narration |
 | `policy` | dict | nil | Capability ceiling applied to this agent loop |
 | `daemon` | bool | `false` | Idle instead of terminating after text-only turns |
 | `persist_path` | string | nil | Persist daemon snapshots to this path on idle/finalize |
@@ -483,16 +483,21 @@ observation, mutation, process/verification, and terminal phases. A process-exec
 call whose resolved command is provably workspace read-only (`git status`,
 `git diff`, or a recognized file-inspection command) joins the observation
 phase. Build, test, lint, and unrecognized commands remain in the process phase.
-A response that mixes phases selects the earliest semantic phase (provider
-native, observation, mutation, process/verification, then terminal), executes
-every call in that phase, and returns synthetic deferred results for the others.
-Model emission order cannot move a mutation ahead of a sibling read. The next
-inference sees those results before it can re-propose later work.
+A response that mixes phases starts with the earliest semantic phase (provider
+native, observation, mutation, process/verification, then terminal). After
+successful observations, authored mutations execute in the same response through
+ordinary policy, approval, middleware and resource checks, provided both control
+queues are clear and the original run, control revision and context remain
+current. Model emission order cannot move a mutation ahead of a sibling read.
+These reads do not inform the already-authored arguments: request any evidence
+needed to decide an edit in an earlier response. Verification and completion
+keep their phase boundaries. Failed observations retain mutations with reason
+`observation_failed`; a pending control prevents continuation.
 Calls inside an independent read-only set still fan out up to
 `max_concurrent_tools`, and one tool call containing several atomic
-same-resource operations remains one call. Deferred call signatures survive
-turns that produce no deferrals, so a verbatim re-proposal is marked
-`re_proposed`.
+same-resource operations remains one call. Actually deferred calls retain their
+arguments until explicitly resumed, discarded or invalidated; see
+[Retained tool proposals](../agent/retained-tool-proposals.md).
 
 Every proposed call emits a `tool_batch_disposition` event with a typed
 `harn.agent_tool_batch_disposition.v1` receipt. The receipt records its phase,
@@ -698,6 +703,35 @@ the budget's `max` wins for the host's autonomy/ACP tracking.
 Explicit `max_iterations`, `initial`, `max`, and adaptive `extend_by` values
 must be positive integers, and `initial` must be less than or equal to `max`;
 invalid fields raise an `agent_loop` error before the first provider call.
+
+### Read the active loop budget
+
+Tools and lifecycle callbacks can call
+`harness.agent.session_loop_budget(session_id)` to read the loop's current
+iteration budget. The read returns `nil` before the loop publishes a
+measurement. A session without live host state raises an error. Retaining a
+completed session's transcript doesn't retain its callable budget.
+
+The snapshot uses schema `harn.agent_loop_budget_snapshot.v1`:
+
+| Field | Meaning |
+|---|---|
+| `iteration` | Number of model turns consumed by this loop |
+| `max_iterations` | Current iteration limit, or `nil` when unmeasured |
+| `remaining` | Turns left before that limit; measured zero differs from `nil` |
+| `reserve` | Initial verification, recovery, and terminal-report grant allowances, plus their `total` |
+| `grants_remaining` | Unspent allowances for those same three grant categories |
+
+The loop publishes before each model call, after consuming its response, and
+before the terminal callback. A tool therefore sees the current turn already
+spent. Reads don't advance counters or grant more work. Iteration counts
+aren't physical provider-request counts; use `provider_call_count` for that.
+
+Grant allowances describe permission to extend the loop under its existing
+terminal policy. They don't promise admission past spend, wall, or forced-stop
+limits. A terminal callback can request a bounded continuation after an
+iteration ceiling; the completed result records an accepted grant in
+`adaptive_budget.decisions` when `expose_decisions` is enabled.
 
 ### loop_control policy
 

@@ -37,7 +37,7 @@ mod tool_data;
 mod turn_phase;
 use budget_exhausted::{empty_budget_exhausted_event, fixture_budget_exhausted_event};
 use compaction_events::fixture_compaction_receipt;
-use extension_fixtures::extension_fixture_events;
+use extension_fixtures::extension_notifications;
 use plan_document::fixture_plan_document_event;
 
 pub(super) use schema_contract::collect_notifications;
@@ -468,7 +468,7 @@ async fn loop_checkpoint_surfaces_typed_host_injection_delivery_count() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn harn_extension_session_update_fixtures_are_pinned() {
-    let actual = collect_notifications(extension_fixture_events()).await;
+    let actual = extension_notifications().await;
     let expected: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../tests/fixtures/acp/session_update_extensions.json"
     ))
@@ -735,7 +735,7 @@ async fn skill_narrow_serializes_policy_details_under_harn_meta() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn vendor_extension_session_update_fields_live_under_meta_harn() {
-    let actual = collect_notifications(extension_fixture_events()).await;
+    let actual = extension_notifications().await;
     let schema: serde_json::Value = serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../conformance/protocols/schemas/acp-session-update.schema.json"

@@ -43,6 +43,8 @@ use crate::workspace_anchor::{
 };
 
 mod changed_paths;
+mod compaction;
+pub(crate) use compaction::apply_compacted_session_messages;
 mod continuation;
 pub(crate) use continuation::{
     cached_transcript, has_continuation_checkpoint, remember_flushed_transcript,
@@ -339,6 +341,7 @@ pub enum LiveClientMode {
 
 mod control_events;
 mod delegation;
+mod directive_nonce;
 mod goal;
 mod host_injection;
 mod live_clients;
@@ -351,7 +354,9 @@ mod transcript_lifecycle;
 mod types;
 mod workspace_roots;
 
+pub use directive_nonce::directive_nonce_for_session;
 pub(crate) use metadata::prepare_workspace_mount_verified;
+pub(crate) use metadata::DIRECTIVE_NONCE_METADATA_KEY;
 
 pub(crate) use text_tool_call_seq::{next_text_tool_call_seq_for_parse, restore_text_call_seq};
 use text_tool_call_seq::{
@@ -385,8 +390,8 @@ use runtime_store::{
 pub(crate) use transcript_lifecycle::settle_assistant_publication;
 pub use transcript_lifecycle::*;
 pub(crate) use transcript_lifecycle::{
-    append_event_to_state, canonical_prompt_snapshot, replay_transcript_change,
-    replay_transcript_snapshot,
+    append_event_to_state, canonical_directive_envelope_matches, canonical_prompt_snapshot,
+    goal_envelope_reminders, replay_transcript_change, replay_transcript_snapshot,
 };
 pub use types::*;
 pub use workspace_roots::{PreparedWorkspaceRoots, WorkspaceRootsError};

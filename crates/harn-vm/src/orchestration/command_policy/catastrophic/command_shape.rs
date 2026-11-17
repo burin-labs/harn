@@ -34,10 +34,45 @@ pub(crate) struct ShellShapeSegment {
     pub(crate) stages: Vec<ShellShapeStage>,
 }
 
-/// `segments` is `None` when the line was not measured.
+/// `segments` is `None` when no operator tree is exposed for this dialect.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ShellCommandShape {
     pub(crate) segments: Option<Vec<ShellShapeSegment>>,
+    pub(crate) exit_evidence: ShellExitEvidence,
+}
+
+/// What a zero shell exit establishes about the commands visible in its AST.
+/// This never supplies constituent exit statuses or changes shell execution.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ShellExitEvidence {
+    pub(crate) scope: &'static str,
+    pub(crate) reason: &'static str,
+}
+
+impl ShellCommandShape {
+    pub(crate) fn with_shell(mut self, shell: &str, source: &str) -> Self {
+        let name = shell
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(shell)
+            .to_ascii_lowercase();
+        let pipefail_supported = matches!(name.as_str(), "bash" | "zsh");
+        if let Some(dialect @ (ShellDialect::PowerShell | ShellDialect::Cmd)) =
+            crate::shells::shell_dialect_for_id(shell)
+        {
+            self.exit_evidence = windows_exit_evidence(dialect, source, self.segments.as_deref());
+            return self;
+        }
+        self.exit_evidence = exit_evidence(
+            source,
+            self.segments.as_deref(),
+            crate::shells::shell_dialect_for_id(shell) == Some(ShellDialect::Posix),
+            pipefail_supported,
+            false,
+            0,
+        );
+        self
+    }
 }
 
 pub(crate) fn shell_command_shape(dialect: ShellDialect, source: &str) -> ShellCommandShape {
@@ -46,9 +81,265 @@ pub(crate) fn shell_command_shape(dialect: ShellDialect, source: &str) -> ShellC
         ShellDialect::PowerShell => powershell_shape(source),
         ShellDialect::Cmd => None,
     };
+    let segments = segments.filter(|segments| !segments.is_empty());
+    let exit_evidence = if dialect != ShellDialect::Posix {
+        windows_exit_evidence(dialect, source, segments.as_deref())
+    } else {
+        exit_evidence(
+            source,
+            segments.as_deref(),
+            dialect == ShellDialect::Posix,
+            false,
+            false,
+            0,
+        )
+    };
     ShellCommandShape {
-        segments: segments.filter(|segments| !segments.is_empty()),
+        segments,
+        exit_evidence,
     }
+}
+
+fn windows_exit_evidence(
+    dialect: ShellDialect,
+    source: &str,
+    segments: Option<&[ShellShapeSegment]>,
+) -> ShellExitEvidence {
+    let evidence = |scope, reason| ShellExitEvidence { scope, reason };
+    if source.len() > 65_536 {
+        return evidence("unmeasured", "syntax");
+    }
+    let commands = if dialect == ShellDialect::Cmd {
+        let Some(commands) = super::semantic_shell::cmd_status_chain(source) else {
+            return evidence("unmeasured", "syntax");
+        };
+        commands
+    } else {
+        let Some(segments) = segments.filter(|segments| !segments.is_empty()) else {
+            return evidence("unmeasured", "syntax");
+        };
+        let mut commands = Vec::new();
+        for (index, segment) in segments.iter().enumerate() {
+            if (index > 0 && segment.operator != "&&") || segment.stages.len() != 1 {
+                return evidence("masked", "chain_status");
+            }
+            let stage = &segment.stages[0];
+            if stage.kind != "command" {
+                return evidence("unmeasured", "compound_command");
+            }
+            let (words, dynamic, unresolved) = lex_powershell_words(&stage.text);
+            if unresolved || dynamic.iter().any(|dynamic| *dynamic) {
+                return evidence("unmeasured", "nested_execution");
+            }
+            commands.push(words);
+        }
+        commands
+    };
+    for words in commands {
+        let Some(program) = words.first() else {
+            return evidence("unmeasured", "syntax");
+        };
+        if crate::shells::shell_dialect_for_id(program).is_some()
+            || super::semantic_shell::has_argument_execution(&words)
+        {
+            return evidence("unmeasured", "nested_execution");
+        }
+    }
+    evidence("all_commands", "all_commands")
+}
+
+fn exit_evidence(
+    source: &str,
+    segments: Option<&[ShellShapeSegment]>,
+    posix: bool,
+    pipefail_supported: bool,
+    inherited_pipefail: bool,
+    depth: usize,
+) -> ShellExitEvidence {
+    let evidence = |scope, reason| ShellExitEvidence { scope, reason };
+    if depth > 32 || source.len() > 65_536 {
+        return evidence("unmeasured", "syntax");
+    }
+    let Some(segments) = segments else {
+        return evidence("unmeasured", "syntax");
+    };
+    // PowerShell's native-command exit status is not its pipeline success
+    // status. Never transfer POSIX implications to another dialect.
+    if !posix {
+        return evidence("unmeasured", "dialect");
+    }
+    let Some(tree) = parse(harn_grammars::bash(), source) else {
+        return evidence("unmeasured", "syntax");
+    };
+    if contains_background_operator(tree.root_node()) {
+        return evidence("masked", "chain_status");
+    }
+    if contains_nested_execution(tree.root_node()) {
+        return evidence("unmeasured", "nested_execution");
+    }
+    let dynamic_arguments = contains_expansion(tree.root_node());
+    let mut pipefail = inherited_pipefail;
+    for (index, segment) in segments.iter().enumerate() {
+        let setup =
+            segment.stages.len() == 1 && segment.stages[0].words == ["set", "-o", "pipefail"];
+        // A known supported leading option setter cannot hide a failed check.
+        // All later commands must still require the preceding check to pass.
+        let supported_prefix =
+            index == 1 && pipefail && pipefail_supported && matches!(segment.operator, ";" | "\n");
+        if index > 0 && segment.operator != "&&" && !supported_prefix {
+            return evidence("masked", "chain_status");
+        }
+        for stage in segment
+            .stages
+            .iter()
+            .filter(|stage| stage.kind != "command")
+        {
+            let nested =
+                grouped_exit_evidence(&stage.text, pipefail_supported, pipefail, depth + 1);
+            if nested.scope != "all_commands" {
+                return nested;
+            }
+        }
+        if segment.stages.iter().any(|stage| {
+            if stage.kind != "command" {
+                return false;
+            }
+            let invocation =
+                super::shell::unwrapped_shell_command(&stage.words, 0, stage.words.len());
+            let index = invocation.command_index;
+            !invocation.resolved
+                || stage.words[..index.min(stage.words.len())]
+                    .iter()
+                    .any(|word| word == "exec")
+                || stage.words.get(index).is_none_or(|word| {
+                    let shell = crate::shells::shell_dialect_for_id(word);
+                    // A literal script file is an external verifier program, just
+                    // like an executable script. Its internals remain outside this
+                    // command-line proof. Inline or dynamically chosen shell input
+                    // is not a file-program boundary.
+                    let script_file = shell == Some(ShellDialect::Posix)
+                        && !dynamic_arguments
+                        && match super::semantic_shell::posix_shell_input(&stage.words[index + 1..])
+                        {
+                            super::semantic_shell::PosixShellInput::File(file_index) => stage
+                                .words
+                                .get(index + 1 + file_index)
+                                .is_some_and(|file| !file.is_empty()),
+                            _ => false,
+                        };
+                    super::semantic_shell::has_argument_execution(&stage.words[index..])
+                        || matches!(
+                            word.as_str(),
+                            "exec" | "exit" | "return" | "break" | "continue"
+                        )
+                        || (shell.is_some() && !script_file)
+                })
+        }) {
+            return evidence("unmeasured", "nested_execution");
+        }
+        if segment.stages.len() > 1 && !pipefail {
+            return evidence("masked", "pipeline_status");
+        }
+        if setup {
+            pipefail = true;
+        } else if segment.stages.iter().any(|stage| {
+            let index = super::shell::unwrapped_shell_command(&stage.words, 0, stage.words.len())
+                .command_index;
+            stage
+                .words
+                .get(index)
+                .is_some_and(|word| matches!(word.as_str(), "set" | "emulate"))
+        }) {
+            // Unknown option changes can undo pipefail or terminate the shell.
+            return evidence("unmeasured", "shell_state");
+        }
+    }
+    evidence("all_commands", "all_commands")
+}
+
+fn grouped_exit_evidence(
+    source: &str,
+    pipefail_supported: bool,
+    pipefail: bool,
+    depth: usize,
+) -> ShellExitEvidence {
+    let unmeasured = || ShellExitEvidence {
+        scope: "unmeasured",
+        reason: "compound_command",
+    };
+    let Some(tree) = parse(harn_grammars::bash(), source) else {
+        return unmeasured();
+    };
+    let Some(mut group) = tree.root_node().named_child(0) else {
+        return unmeasured();
+    };
+    if group.kind() == "redirected_statement" {
+        let Some(body) = group.child_by_field_name("body") else {
+            return unmeasured();
+        };
+        group = body;
+    }
+    if !matches!(group.kind(), "subshell" | "compound_statement") {
+        return unmeasured();
+    }
+    let children = group
+        .named_children(&mut group.walk())
+        .filter(|child| child.kind() != "comment")
+        .collect::<Vec<_>>();
+    let (Some(first), Some(last)) = (children.first(), children.last()) else {
+        return unmeasured();
+    };
+    let Some(body) = source.get(first.start_byte()..last.end_byte()) else {
+        return unmeasured();
+    };
+    let segments = posix_shape(body);
+    exit_evidence(
+        body,
+        segments.as_deref(),
+        true,
+        pipefail_supported,
+        pipefail,
+        depth,
+    )
+}
+
+fn contains_nested_execution(node: Node<'_>) -> bool {
+    if matches!(node.kind(), "command_substitution" | "process_substitution") {
+        return true;
+    }
+    if node.kind() == "command"
+        && node
+            .child_by_field_name("name")
+            .is_some_and(contains_expansion)
+    {
+        return true;
+    }
+    let mut cursor = node.walk();
+    let found = node
+        .named_children(&mut cursor)
+        .any(contains_nested_execution);
+    found
+}
+
+fn contains_expansion(node: Node<'_>) -> bool {
+    if matches!(
+        node.kind(),
+        "expansion" | "simple_expansion" | "arithmetic_expansion"
+    ) {
+        return true;
+    }
+    let mut cursor = node.walk();
+    let found = node.named_children(&mut cursor).any(contains_expansion);
+    found
+}
+
+fn contains_background_operator(node: Node<'_>) -> bool {
+    if node.kind() == "&" {
+        return true;
+    }
+    let mut cursor = node.walk();
+    let found = node.children(&mut cursor).any(contains_background_operator);
+    found
 }
 
 fn parse(language: tree_sitter::Language, source: &str) -> Option<tree_sitter::Tree> {
@@ -449,5 +740,193 @@ mod tests {
         assert_eq!(summary(ShellDialect::Posix, "echo \"unterminated"), None);
         assert_eq!(summary(ShellDialect::Posix, "   "), None);
         assert_eq!(summary(ShellDialect::Cmd, "dir && echo ok"), None);
+    }
+
+    #[test]
+    fn windows_status_proof_uses_each_dialects_literal_success_chain() {
+        for (dialect, source, proven) in [
+            (ShellDialect::Cmd, "cargo test --all", true),
+            (ShellDialect::Cmd, "cargo check && cargo test", true),
+            (ShellDialect::Cmd, "cargo check & cargo test", false),
+            (ShellDialect::Cmd, "cargo check || cargo test", false),
+            (ShellDialect::Cmd, "cargo check | more", false),
+            (ShellDialect::Cmd, "if exist foo cargo test", false),
+            (ShellDialect::Cmd, "call checks.cmd", false),
+            (ShellDialect::Cmd, "%CHECK% test", false),
+            (ShellDialect::Cmd, "cargo check &&", false),
+            (ShellDialect::Cmd, "\"cargo check & cargo test\"", false),
+            (ShellDialect::PowerShell, "dotnet test", true),
+            (ShellDialect::PowerShell, "cargo check && cargo test", true),
+            (ShellDialect::PowerShell, "Write-Output 'a | b'", true),
+            (
+                ShellDialect::PowerShell,
+                "cargo check; Write-Output ok",
+                false,
+            ),
+            (ShellDialect::PowerShell, "cargo test | Out-String", false),
+            (ShellDialect::PowerShell, "& $check", false),
+            (
+                ShellDialect::PowerShell,
+                "Start-Process cargo -ArgumentList test",
+                false,
+            ),
+            (
+                ShellDialect::PowerShell,
+                "IEX 'cargo check; Write-Output ok'",
+                false,
+            ),
+            (
+                ShellDialect::PowerShell,
+                "Write-Output $(cargo test)",
+                false,
+            ),
+            (
+                ShellDialect::PowerShell,
+                "Start-Job -FilePath check.ps1",
+                false,
+            ),
+            (ShellDialect::PowerShell, "sajb -FilePath check.ps1", false),
+            (
+                ShellDialect::PowerShell,
+                "Start-ThreadJob -FilePath check.ps1",
+                false,
+            ),
+            (
+                ShellDialect::PowerShell,
+                "python -c 'pass' --% && failing-check",
+                false,
+            ),
+        ] {
+            assert_eq!(
+                shell_command_shape(dialect, source).exit_evidence.scope == "all_commands",
+                proven,
+                "{dialect:?} {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn literal_shell_file_options_share_the_inline_input_decoder() {
+        for (source, proven) in [
+            ("zsh -f scripts/check.zsh", true),
+            ("bash -e -o pipefail scripts/check.sh", true),
+            ("bash --norc -- scripts/check.sh", true),
+            ("bash --rcfile setup.sh scripts/check.sh", true),
+            ("bash -c 'false; true'", false),
+            ("bash -s scripts/check.sh", false),
+            ("bash --unknown-option scripts/check.sh", false),
+        ] {
+            assert_eq!(
+                shell_command_shape(ShellDialect::Posix, source)
+                    .exit_evidence
+                    .scope
+                    == "all_commands",
+                proven,
+                "{source:?}"
+            );
+        }
+        assert!(matches!(
+            super::super::semantic_shell::posix_shell_input(&words(&["--", "-c"])),
+            super::super::semantic_shell::PosixShellInput::File(1)
+        ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_status_proof_matches_native_shell_exits() {
+        for (shell, dialect, flags, source, success, proven) in [
+            (
+                "cmd.exe",
+                ShellDialect::Cmd,
+                vec!["/D", "/C"],
+                "where.exe cmd.exe",
+                true,
+                true,
+            ),
+            (
+                "cmd.exe",
+                ShellDialect::Cmd,
+                vec!["/D", "/C"],
+                "where.exe __harn_missing_status_probe__",
+                false,
+                true,
+            ),
+            (
+                "cmd.exe",
+                ShellDialect::Cmd,
+                vec!["/D", "/C"],
+                "where.exe __harn_missing_status_probe__ && where.exe cmd.exe",
+                false,
+                true,
+            ),
+            (
+                "cmd.exe",
+                ShellDialect::Cmd,
+                vec!["/D", "/C"],
+                "where.exe cmd.exe && where.exe __harn_missing_status_probe__",
+                false,
+                true,
+            ),
+            (
+                "cmd.exe",
+                ShellDialect::Cmd,
+                vec!["/D", "/C"],
+                "where.exe __harn_missing_status_probe__ & where.exe cmd.exe",
+                true,
+                false,
+            ),
+            (
+                "cmd.exe",
+                ShellDialect::Cmd,
+                vec!["/D", "/C"],
+                "where.exe __harn_missing_status_probe__ || where.exe cmd.exe",
+                true,
+                false,
+            ),
+            (
+                "powershell.exe",
+                ShellDialect::PowerShell,
+                vec!["-NoProfile", "-NonInteractive", "-Command"],
+                "where.exe cmd.exe",
+                true,
+                true,
+            ),
+            (
+                "powershell.exe",
+                ShellDialect::PowerShell,
+                vec!["-NoProfile", "-NonInteractive", "-Command"],
+                "where.exe __harn_missing_status_probe__",
+                false,
+                true,
+            ),
+            (
+                "powershell.exe",
+                ShellDialect::PowerShell,
+                vec!["-NoProfile", "-NonInteractive", "-Command"],
+                "where.exe __harn_missing_status_probe__; Write-Output ok",
+                true,
+                false,
+            ),
+        ] {
+            let output = std::process::Command::new(shell)
+                .args(flags)
+                .arg(source)
+                .output()
+                .expect("Windows shell and native status probe must execute");
+            assert_eq!(
+                output.status.success(),
+                success,
+                "{shell} {source:?}: {output:?}"
+            );
+            assert_eq!(
+                shell_command_shape(dialect, source)
+                    .with_shell(shell, source)
+                    .exit_evidence
+                    .scope
+                    == "all_commands",
+                proven,
+                "{shell} {source:?}"
+            );
+        }
     }
 }

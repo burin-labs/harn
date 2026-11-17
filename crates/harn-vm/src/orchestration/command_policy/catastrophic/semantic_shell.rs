@@ -14,13 +14,17 @@ use tree_sitter::Node;
 use wait_timeout::ChildExt;
 
 use super::{
-    command_basename, parse_env_invocation, unwrapped_command, ShellCommandStage, MAX_DEPTH,
+    command_basename, parse_env_invocation, unwrapped_command, ShellCommandStage,
+    ShellWordExpansion, MAX_DEPTH,
 };
+
+mod word;
+use word::{shell_word, WordPosition};
 
 /// Commands and argument words that a policy classifier can reason about.
 ///
-/// `unresolved` is set whenever syntax recovery or dynamic execution prevents
-/// the parser from naming an executable. Callers must not interpret an empty
+/// `unresolved` is set when syntax recovery, dynamic execution, or unknown
+/// descriptor routing prevents complete execution analysis. Do not interpret an empty
 /// `stages` list as evidence of safety when this bit is set.
 #[derive(Debug, Default)]
 pub(crate) struct ShellAnalysis {
@@ -30,7 +34,7 @@ pub(crate) struct ShellAnalysis {
     /// substitutions and quoted words. The catastrophic floor consumes these
     /// rather than trying to rediscover AST nesting from flattened text.
     pub(crate) redirects: Vec<ShellRedirect>,
-    /// I/O syntax not represented by redirects and executed argv.
+    /// I/O targets or syntax that are not fully resolved.
     pub(crate) io_unresolved: bool,
     /// An invoked self-recursive colon function was identified structurally.
     pub(crate) fork_bomb: bool,
@@ -62,6 +66,10 @@ impl ShellRedirect {
 }
 
 impl ShellAnalysis {
+    pub(crate) fn has_dynamic_redirect(&self) -> bool {
+        self.redirects.iter().any(|redirect| redirect.dynamic)
+    }
+
     pub(crate) fn unresolved() -> Self {
         Self {
             unresolved: true,
@@ -88,14 +96,22 @@ pub(crate) fn analyze_argv(argv: &[String]) -> ShellAnalysis {
 /// Parse a POSIX/bash program and collect every potentially executed command.
 pub(crate) fn analyze_shell(command: &str) -> ShellAnalysis {
     let mut analysis = ShellAnalysis::default();
-    collect_shell(command, 0, &mut analysis);
+    collect_shell(command, None, 0, &mut analysis);
     analysis
 }
 
 /// Parse shell text through the single dialect registry.
-pub(crate) fn analyze_shell_dialect(dialect: ShellDialect, command: &str) -> ShellAnalysis {
+pub(crate) fn analyze_shell_dialect(
+    dialect: ShellDialect,
+    command: &str,
+    shell_id: Option<&str>,
+) -> ShellAnalysis {
     match dialect {
-        ShellDialect::Posix => analyze_shell(command),
+        ShellDialect::Posix => {
+            let mut analysis = ShellAnalysis::default();
+            collect_shell(command, shell_id, 0, &mut analysis);
+            analysis
+        }
         ShellDialect::PowerShell => analyze_powershell(command),
         ShellDialect::Cmd => analyze_cmd(command),
     }
@@ -119,7 +135,7 @@ fn collect_argv(argv: &[String], depth: usize, analysis: &mut ShellAnalysis) {
                 text: argv.join(" "),
                 argv: argv.to_vec(),
                 source_argv: argv.to_vec(),
-                dynamic: vec![false; argv.len()],
+                expansions: vec![ShellWordExpansion::Literal; argv.len()],
             });
         }
         return;
@@ -131,7 +147,7 @@ fn collect_argv(argv: &[String], depth: usize, analysis: &mut ShellAnalysis) {
             analysis.io_unresolved |= index > 0;
             collect_path_words(&effective[script_index + 2..], analysis);
             let script = &effective[script_index + 1];
-            collect_shell(script, depth + 1, analysis);
+            collect_shell(script, Some(executable), depth + 1, analysis);
             return;
         }
         if !shell_is_introspection_only(&effective[1..]) {
@@ -159,12 +175,18 @@ fn collect_argv(argv: &[String], depth: usize, analysis: &mut ShellAnalysis) {
         }
         return;
     }
-    collect_argument_execution(effective, &vec![false; effective.len()], depth, analysis);
+    collect_argument_execution(
+        effective,
+        &vec![false; effective.len()],
+        None,
+        depth,
+        analysis,
+    );
     analysis.stages.push(ShellCommandStage {
         text: effective.join(" "),
         argv: effective.to_vec(),
         source_argv: argv.to_vec(),
-        dynamic: vec![false; effective.len()],
+        expansions: vec![ShellWordExpansion::Literal; effective.len()],
     });
 }
 
@@ -279,12 +301,15 @@ fn visit_powershell_command(
         }
         return;
     }
-    collect_argument_execution(effective, &word_dynamic[index..], depth, analysis);
+    collect_argument_execution(effective, &word_dynamic[index..], None, depth, analysis);
     analysis.stages.push(ShellCommandStage {
         text: node_text(command, source).unwrap_or_default().to_string(),
         argv: effective.to_vec(),
         source_argv: argv.clone(),
-        dynamic: word_dynamic[index..].to_vec(),
+        expansions: word_dynamic[index..]
+            .iter()
+            .map(|value| ShellWordExpansion::from_dynamic(*value))
+            .collect(),
     });
 }
 
@@ -320,6 +345,10 @@ pub(super) fn lex_powershell_words(command: &str) -> (Vec<String>, Vec<bool>, bo
             },
             (Quote::None | Quote::Double, '$') => {
                 dynamic = true;
+                word.push(ch);
+            }
+            (Quote::None, '%') if word == "--" => {
+                unresolved = true;
                 word.push(ch);
             }
             (Quote::None, '@' | '{' | '}' | '(' | ')') => {
@@ -361,7 +390,7 @@ fn collect_cmd(command: &str, depth: usize, analysis: &mut ShellAnalysis) {
         analysis.unresolved = true;
         return;
     }
-    for stage in lex_cmd_stages(command, analysis) {
+    for stage in lex_cmd_stages(command, analysis).0 {
         for word in &stage {
             record_argument_word(analysis, word, false);
         }
@@ -380,43 +409,70 @@ fn collect_cmd(command: &str, depth: usize, analysis: &mut ShellAnalysis) {
             }
             continue;
         }
-        collect_argument_execution(effective, &vec![false; effective.len()], depth, analysis);
+        collect_argument_execution(
+            effective,
+            &vec![false; effective.len()],
+            None,
+            depth,
+            analysis,
+        );
         analysis.stages.push(ShellCommandStage {
             text: effective.join(" "),
             argv: effective.to_vec(),
             source_argv: stage.clone(),
-            dynamic: vec![false; effective.len()],
+            expansions: vec![ShellWordExpansion::Literal; effective.len()],
         });
     }
 }
 
-fn lex_cmd_stages(command: &str, analysis: &mut ShellAnalysis) -> Vec<Vec<String>> {
+/// Literal CMD commands whose status can only advance through successful AND clauses.
+pub(super) fn cmd_status_chain(command: &str) -> Option<Vec<Vec<String>>> {
+    let mut analysis = ShellAnalysis::default();
+    let (stages, status_chain) = lex_cmd_stages(command, &mut analysis);
+    (status_chain && !analysis.unresolved && !stages.is_empty()).then_some(stages)
+}
+
+fn lex_cmd_stages(command: &str, analysis: &mut ShellAnalysis) -> (Vec<Vec<String>>, bool) {
     let mut stages = Vec::new();
     let mut stage = Vec::new();
     let mut word = String::new();
     let mut quoted = false;
+    let mut status_chain = true;
     let mut chars = command.chars().peekable();
     while let Some(ch) = chars.next() {
         match ch {
-            '^' => match chars.next() {
-                Some(escaped) => word.push(escaped),
-                None => analysis.unresolved = true,
-            },
-            '"' => quoted = !quoted,
+            '^' => {
+                status_chain = false;
+                match chars.next() {
+                    Some(escaped) => word.push(escaped),
+                    None => analysis.unresolved = true,
+                }
+            }
+            '"' => {
+                quoted = !quoted;
+                status_chain = false;
+            }
             '%' | '!' => {
                 analysis.unresolved = true;
                 word.push(ch);
             }
             '&' | '|' | '\n' | '\r' if !quoted => {
                 push_cmd_word(&mut stage, &mut word);
+                status_chain &= !stage.is_empty();
                 push_cmd_stage(&mut stages, &mut stage);
-                if chars.peek() == Some(&ch) {
+                let doubled = chars.peek() == Some(&ch);
+                status_chain &= ch == '&' && doubled;
+                if doubled {
                     chars.next();
                 }
             }
             '(' | ')' if !quoted => {
                 analysis.unresolved = true;
                 push_cmd_word(&mut stage, &mut word);
+            }
+            '<' | '>' | '\0' => {
+                status_chain = false;
+                word.push(ch);
             }
             ch if ch.is_whitespace() && !quoted => push_cmd_word(&mut stage, &mut word),
             _ => word.push(ch),
@@ -426,8 +482,18 @@ fn lex_cmd_stages(command: &str, analysis: &mut ShellAnalysis) -> Vec<Vec<String
         analysis.unresolved = true;
     }
     push_cmd_word(&mut stage, &mut word);
+    status_chain &= !stage.is_empty();
     push_cmd_stage(&mut stages, &mut stage);
-    stages
+    status_chain &= stages.iter().all(|stage| {
+        stage.first().is_some_and(|word| {
+            !word.starts_with('@')
+                && !matches!(
+                    word.to_ascii_lowercase().as_str(),
+                    "if" | "for" | "call" | "start" | "exit" | "goto" | "rem"
+                )
+        })
+    });
+    (stages, status_chain)
 }
 
 fn push_cmd_word(stage: &mut Vec<String>, word: &mut String) {
@@ -577,7 +643,12 @@ fn native_powershell_candidates() -> Vec<PathBuf> {
     vec![PathBuf::from("pwsh")]
 }
 
-fn collect_shell(command: &str, depth: usize, analysis: &mut ShellAnalysis) {
+fn collect_shell(
+    command: &str,
+    shell_id: Option<&str>,
+    depth: usize,
+    analysis: &mut ShellAnalysis,
+) {
     if depth > MAX_DEPTH {
         analysis.unresolved = true;
         return;
@@ -594,7 +665,14 @@ fn collect_shell(command: &str, depth: usize, analysis: &mut ShellAnalysis) {
     let root = tree.root_node();
     analysis.unresolved |= root.has_error();
     analysis.fork_bomb |= structural_fork_bomb(root, command.as_bytes());
-    visit_tree(root, command.as_bytes(), depth, analysis);
+    let shell_id = shell_id.map(crate::shells::shell_id_from_path);
+    visit_tree(
+        root,
+        command.as_bytes(),
+        shell_id.as_deref(),
+        depth,
+        analysis,
+    );
 }
 
 /// Recognize the canonical shell fork-bomb family from executable structure,
@@ -656,7 +734,13 @@ fn command_name<'a>(command: Node<'_>, source: &'a [u8]) -> Option<&'a str> {
         .and_then(|name| node_text(name, source))
 }
 
-fn visit_tree(root: Node<'_>, source: &[u8], depth: usize, analysis: &mut ShellAnalysis) {
+fn visit_tree(
+    root: Node<'_>,
+    source: &[u8],
+    shell_id: Option<&str>,
+    depth: usize,
+    analysis: &mut ShellAnalysis,
+) {
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
         match node.kind() {
@@ -667,10 +751,10 @@ fn visit_tree(root: Node<'_>, source: &[u8], depth: usize, analysis: &mut ShellA
                 analysis.unresolved = true;
                 continue;
             }
-            "command" => visit_command(node, source, depth, analysis),
+            "command" => visit_command(node, source, shell_id, depth, analysis),
             "file_redirect" => {
                 analysis.unresolved |= names_redirect_descriptor(node, source);
-                collect_redirect(node, source, analysis);
+                collect_redirect(node, source, shell_id, analysis);
             }
             "heredoc_redirect" | "herestring_redirect" => {
                 analysis.unresolved |= names_redirect_descriptor(node, source);
@@ -684,17 +768,24 @@ fn visit_tree(root: Node<'_>, source: &[u8], depth: usize, analysis: &mut ShellA
     }
 }
 
-fn visit_command(command: Node<'_>, source: &[u8], depth: usize, analysis: &mut ShellAnalysis) {
+fn visit_command(
+    command: Node<'_>,
+    source: &[u8],
+    shell_id: Option<&str>,
+    depth: usize,
+    analysis: &mut ShellAnalysis,
+) {
     let Some(name_node) = command.child_by_field_name("name") else {
         analysis.unresolved = true;
         return;
     };
-    let (command_name, command_dynamic) = shell_word(name_node, source);
+    let (command_name, command_dynamic) =
+        shell_word(name_node, source, shell_id, WordPosition::Argument);
     let Some(command_name) = command_name else {
         analysis.unresolved = true;
         return;
     };
-    analysis.unresolved |= command_dynamic;
+    analysis.unresolved |= command_dynamic.requires_expansion();
     record_argument_word(analysis, &command_name, false);
 
     let mut source_prefix = Vec::new();
@@ -710,7 +801,7 @@ fn visit_command(command: Node<'_>, source: &[u8], depth: usize, analysis: &mut 
     let mut word_dynamic = vec![command_dynamic];
     let mut cursor = command.walk();
     for argument in command.children_by_field_name("argument", &mut cursor) {
-        let (value, dynamic) = shell_word(argument, source);
+        let (value, dynamic) = shell_word(argument, source, shell_id, WordPosition::Argument);
         let Some(value) = value else {
             // Argument expansion does not obscure the executable identity, but
             // retaining a lossy word would create false path classifications.
@@ -721,7 +812,11 @@ fn visit_command(command: Node<'_>, source: &[u8], depth: usize, analysis: &mut 
         argv.push(value);
         word_dynamic.push(dynamic);
     }
-    collect_env_split_execution(&argv, &word_dynamic, depth, analysis);
+    let execution_dynamic = word_dynamic
+        .iter()
+        .map(|value| value.requires_expansion())
+        .collect::<Vec<_>>();
+    collect_env_split_execution(&argv, &execution_dynamic, depth, analysis);
 
     let invocation = unwrapped_command(&argv, 0, argv.len());
     collect_path_words(&invocation.path_operands, analysis);
@@ -733,12 +828,12 @@ fn visit_command(command: Node<'_>, source: &[u8], depth: usize, analysis: &mut 
                 text: node_text(command, source).unwrap_or_default().to_string(),
                 argv: argv.clone(),
                 source_argv: source_prefix,
-                dynamic: word_dynamic,
+                expansions: word_dynamic,
             });
         }
         return;
     }
-    if index > 0 && word_dynamic.get(index).copied().unwrap_or(true) {
+    if index > 0 && execution_dynamic.get(index).copied().unwrap_or(true) {
         analysis.unresolved = true;
     }
     let effective = &argv[index..];
@@ -748,10 +843,14 @@ fn visit_command(command: Node<'_>, source: &[u8], depth: usize, analysis: &mut 
             let argument_index = index + 1 + script_index;
             analysis.io_unresolved |= index > 0 || !source_prefix.is_empty();
             collect_path_words(&argv[argument_index + 1..], analysis);
-            if word_dynamic.get(argument_index).copied().unwrap_or(true) {
+            if execution_dynamic
+                .get(argument_index)
+                .copied()
+                .unwrap_or(true)
+            {
                 analysis.unresolved = true;
             } else if let Some(script) = argv.get(argument_index) {
-                collect_shell(script, depth + 1, analysis);
+                collect_shell(script, Some(executable), depth + 1, analysis);
             }
             return;
         }
@@ -779,13 +878,19 @@ fn visit_command(command: Node<'_>, source: &[u8], depth: usize, analysis: &mut 
         }
         return;
     }
-    collect_argument_execution(effective, &word_dynamic[index..], depth, analysis);
+    collect_argument_execution(
+        effective,
+        &execution_dynamic[index..],
+        shell_id,
+        depth,
+        analysis,
+    );
     source_prefix.extend(argv.iter().cloned());
     analysis.stages.push(ShellCommandStage {
         text: node_text(command, source).unwrap_or_default().to_string(),
         argv: effective.to_vec(),
         source_argv: source_prefix,
-        dynamic: word_dynamic[index..].to_vec(),
+        expansions: word_dynamic[index..].to_vec(),
     });
 }
 
@@ -810,7 +915,12 @@ fn names_redirect_descriptor(redirect: Node<'_>, source: &[u8]) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
 }
 
-fn collect_redirect(redirect: Node<'_>, source: &[u8], analysis: &mut ShellAnalysis) {
+fn collect_redirect(
+    redirect: Node<'_>,
+    source: &[u8],
+    shell_id: Option<&str>,
+    analysis: &mut ShellAnalysis,
+) {
     let operator = redirect
         .child_by_field_name("operator")
         .and_then(|node| node_text(node, source))
@@ -825,9 +935,13 @@ fn collect_redirect(redirect: Node<'_>, source: &[u8], analysis: &mut ShellAnaly
         analysis.unresolved |= !matches!(operator.as_str(), ">&-" | "<&-");
         return;
     };
-    let (destination, dynamic) = shell_word(destination_node, source);
-    analysis.unresolved |= dynamic;
-    if !dynamic && matches!(operator.as_str(), ">&" | "<&" | ">&-" | "<&-") {
+    let (destination, expansion) =
+        shell_word(destination_node, source, shell_id, WordPosition::Redirect);
+    let dynamic = expansion.requires_expansion();
+    analysis.io_unresolved |= dynamic;
+    let descriptor = matches!(operator.as_str(), ">&" | "<&" | ">&-" | "<&-");
+    analysis.unresolved |= dynamic && descriptor;
+    if !dynamic && descriptor {
         match destination.as_deref() {
             // Duplicating or closing a literal descriptor touches no file.
             Some(fd) if fd == "-" || (!fd.is_empty() && fd.bytes().all(|b| b.is_ascii_digit())) => {
@@ -875,55 +989,85 @@ fn redirect_operator_from_children(redirect: Node<'_>, source: &[u8]) -> Option<
     })
 }
 
-fn shell_word(node: Node<'_>, source: &[u8]) -> (Option<String>, bool) {
-    let Some(raw) = node_text(node, source) else {
-        return (None, true);
-    };
-    let dynamic =
-        !(raw.starts_with('\'') && raw.ends_with('\'')) && contains_dynamic_expansion(node);
-    match shell_words::split(raw) {
-        Ok(words) if words.len() == 1 => (words.into_iter().next(), dynamic),
-        _ => (None, dynamic),
-    }
+pub(super) enum PosixShellInput {
+    Inline(usize),
+    File(usize),
+    Stdin,
+    Unresolved,
 }
 
-fn contains_dynamic_expansion(root: Node<'_>) -> bool {
-    let mut stack = vec![root];
-    while let Some(node) = stack.pop() {
-        if matches!(
-            node.kind(),
-            "arithmetic_expansion"
-                | "command_substitution"
-                | "expansion"
-                | "process_substitution"
-                | "simple_expansion"
-        ) {
-            return true;
-        }
-        let mut cursor = node.walk();
-        stack.extend(node.named_children(&mut cursor));
-    }
-    false
-}
-
-fn shell_c_script_index(args: &[String]) -> Option<usize> {
+/// Decode the shell's input boundary before policy or exit proof reads it.
+pub(super) fn posix_shell_input(args: &[String]) -> PosixShellInput {
     let mut index = 0;
     while index < args.len() {
         let token = &args[index];
         if token == "--" {
+            return match args.get(index + 1) {
+                Some(file) if file != "-" => PosixShellInput::File(index + 1),
+                _ => PosixShellInput::Stdin,
+            };
+        }
+        if token == "-" {
+            return PosixShellInput::Stdin;
+        }
+        if matches!(
+            token.as_str(),
+            "-o" | "+o" | "-O" | "+O" | "--rcfile" | "--init-file"
+        ) {
+            if index + 1 >= args.len() {
+                return PosixShellInput::Unresolved;
+            }
+            index += 2;
+            continue;
+        }
+        if matches!(
+            token.as_str(),
+            "--noprofile"
+                | "--norc"
+                | "--posix"
+                | "--restricted"
+                | "--verbose"
+                | "--login"
+                | "--noediting"
+        ) {
             index += 1;
             continue;
         }
-        if token.starts_with('-') && token != "-" {
-            if token.chars().skip(1).any(|flag| flag == 'c') {
-                return (index + 1 < args.len()).then_some(index + 1);
+        if let Some(flags) = token
+            .strip_prefix('-')
+            .or_else(|| token.strip_prefix('+'))
+            .filter(|flags| !flags.is_empty())
+        {
+            if token.starts_with("--")
+                || !flags
+                    .chars()
+                    .all(|flag| "abcefhkmnpstuvxBCEFHPTilrD".contains(flag))
+            {
+                return PosixShellInput::Unresolved;
+            }
+            if flags.contains('c') {
+                return if token.starts_with('-') && !flags.contains('s') && index + 1 < args.len() {
+                    PosixShellInput::Inline(index + 1)
+                } else {
+                    PosixShellInput::Unresolved
+                };
+            }
+            if flags.contains('s') {
+                return PosixShellInput::Stdin;
             }
             index += 1;
             continue;
         }
-        return None;
+        return PosixShellInput::File(index);
     }
-    None
+    PosixShellInput::Stdin
+}
+
+fn shell_c_script_index(args: &[String]) -> Option<usize> {
+    match posix_shell_input(args) {
+        PosixShellInput::Inline(index) => Some(index),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -944,14 +1088,24 @@ enum ArgumentExecution {
 }
 
 fn argument_execution(command: &str) -> Option<ArgumentExecution> {
-    match command {
-        "eval" | "source" | "." => Some(ArgumentExecution::Opaque),
+    match command.to_ascii_lowercase().as_str() {
+        "eval" | "source" | "." | "&" | "invoke-expression" | "iex" | "invoke-command" | "icm"
+        | "start-process" | "saps" | "start" | "start-job" | "sajb" | "start-threadjob" => {
+            Some(ArgumentExecution::Opaque)
+        }
         "xargs" => Some(ArgumentExecution::InputArgv),
         "parallel" => Some(ArgumentExecution::InputShell),
         "trap" => Some(ArgumentExecution::ShellLiteral),
         "find" => Some(ArgumentExecution::FindExec),
         _ => None,
     }
+}
+
+/// The canonical registry of programs whose arguments carry more execution.
+/// Exit proof cannot assume those child statuses propagate to the program.
+pub(super) fn has_argument_execution(argv: &[String]) -> bool {
+    argv.first()
+        .is_some_and(|program| argument_execution(command_basename(program)).is_some())
 }
 
 fn collect_path_words(words: &[String], analysis: &mut ShellAnalysis) {
@@ -963,6 +1117,7 @@ fn collect_path_words(words: &[String], analysis: &mut ShellAnalysis) {
 fn collect_argument_execution(
     argv: &[String],
     dynamic: &[bool],
+    shell_id: Option<&str>,
     depth: usize,
     analysis: &mut ShellAnalysis,
 ) {
@@ -984,7 +1139,7 @@ fn collect_argument_execution(
                 {
                     return;
                 }
-                collect_shell(&argv[1..].join(" "), depth + 1, analysis);
+                collect_shell(&argv[1..].join(" "), shell_id, depth + 1, analysis);
             }
         }
         Some(ArgumentExecution::InputArgv) => {
@@ -1025,7 +1180,7 @@ fn collect_argument_execution(
                 return;
             }
             let command = argv[start..end].join(" ");
-            collect_shell(&command, depth + 1, analysis);
+            collect_shell(&command, None, depth + 1, analysis);
         }
         Some(ArgumentExecution::ShellLiteral) => {
             let Some(script_index) = trap_script_index(&argv[1..]).map(|index| index + 1) else {
@@ -1037,7 +1192,7 @@ fn collect_argument_execution(
             if dynamic.get(script_index).copied().unwrap_or(true) {
                 analysis.unresolved = true;
             } else {
-                collect_shell(&argv[script_index], depth + 1, analysis);
+                collect_shell(&argv[script_index], shell_id, depth + 1, analysis);
             }
         }
         Some(ArgumentExecution::FindExec) => {

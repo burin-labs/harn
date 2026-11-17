@@ -1225,6 +1225,7 @@ mod tests {
             serde_json::json!({
                 "role": "tool",
                 "tool_call_id": "tool-1",
+                "name": "verify",
                 "content": recent_failure,
             }),
         ];

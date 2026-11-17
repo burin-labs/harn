@@ -1,11 +1,9 @@
 //! Centralized compaction lifecycle.
 //!
-//! Every transcript compaction in the runtime — manual `transcript_compact()`,
-//! `harness.agent.compact()`, `transcript_auto_compact()`, worker-transcript
-//! compaction during resume, and host-script-driven auto-compaction — funnels
-//! through [`run_compaction_lifecycle`] so the hook contract, reminder
-//! lifecycle, and `AgentEvent::TranscriptCompacted` payload are identical
-//! regardless of entry point.
+//! Manual, host, workflow, and worker compaction use [`run_compaction_lifecycle`].
+//! The stdlib agent loop owns its outer hooks and receipt application separately.
+//! Both paths use the lower transcript helper's single reminder lifecycle;
+//! active-session message replacement belongs to `agent_sessions`.
 //!
 //! Lifecycle ordering:
 //!
@@ -33,11 +31,11 @@ use serde_json::Value as JsonValue;
 
 use crate::agent_events::AgentEvent;
 use crate::llm::api::LlmCallOptions;
-use crate::llm::helpers::{
-    emit_reminder_lifecycle_event, normalize_transcript_asset, reminder_from_event,
-    reminder_lifecycle_payload, replace_reminder_payload, SystemReminder,
-    REMINDER_DEDUPED_EVENT_KIND, REMINDER_EXPIRED_EVENT_KIND,
+pub use crate::llm::helpers::{
+    compact_reminder_events, transcript_compactable_events, ReminderCompactReport,
+    ReminderDedupeRecord,
 };
+use crate::llm::helpers::{emit_reminder_lifecycle_records, normalize_transcript_asset};
 use crate::value::{VmError, VmValue};
 
 use super::{
@@ -266,37 +264,6 @@ pub struct TranscriptCompactedEventMetrics {
     /// kept_results_count, dropped_count, carried_prior_recap}`. `None` for the
     /// LLM/truncate/custom strategies, which do not spend a recap budget.
     pub recap: Option<JsonValue>,
-}
-
-/// Reminder-lifecycle bookkeeping produced before the compaction runs and
-/// consumed by both the persisted transcript and the AgentEvent payload.
-#[derive(Debug, Default)]
-pub struct ReminderCompactReport {
-    /// Non-reminder events plus reminders flagged `preserve_on_compact`.
-    /// Callers re-attach these to the compacted transcript.
-    pub preserved_events: Vec<VmValue>,
-    /// Reminder values handed to `custom_compactor` callbacks so user
-    /// scripts can fold pending reminders into their summarization output.
-    pub custom_reminders: Vec<VmValue>,
-    /// Reminders whose `ttl_turns` reached zero this compaction.
-    pub expired: Vec<SystemReminder>,
-    /// Reminders that were folded into the compacted summary because
-    /// they had no `preserve_on_compact` flag.
-    pub compacted: Vec<SystemReminder>,
-    /// Reminders dropped because a newer reminder with the same
-    /// `dedupe_key` was retained.
-    pub deduped: Vec<ReminderDedupeRecord>,
-    /// Count of reminders whose `ttl_turns` were decremented (still alive).
-    pub decremented_count: usize,
-    /// Count of reminders that carried `preserve_on_compact = true`.
-    pub preserved_count: usize,
-}
-
-#[derive(Clone, Debug)]
-pub struct ReminderDedupeRecord {
-    pub replaced_id: String,
-    pub replacing_id: String,
-    pub dedupe_key: String,
 }
 
 /// Run a transcript compaction through the canonical lifecycle. The
@@ -627,22 +594,7 @@ fn build_hook_payload(
             if let Some(id) = snapshot_asset_id {
                 map.insert("snapshot_asset_id".to_string(), serde_json::json!(id));
             }
-            map.insert(
-                "reminders_decremented".to_string(),
-                serde_json::json!(reminder_report.decremented_count),
-            );
-            map.insert(
-                "reminders_expired".to_string(),
-                serde_json::json!(reminder_report.expired.len()),
-            );
-            map.insert(
-                "reminders_deduped".to_string(),
-                serde_json::json!(reminder_report.deduped.len()),
-            );
-            map.insert(
-                "reminders_preserved".to_string(),
-                serde_json::json!(reminder_report.preserved_count),
-            );
+            map.extend(reminder_report.count_fields());
         }
     }
     payload
@@ -695,12 +647,9 @@ fn build_event_metadata(
         "estimated_tokens_after": metrics.estimated_tokens_after,
         "new_summary_len": summary.len(),
         "snapshot_asset_id": metrics.snapshot_asset_id.as_deref(),
-        "reminders_decremented": reminder_report.decremented_count,
-        "reminders_expired": reminder_report.expired.len(),
-        "reminders_deduped": reminder_report.deduped.len(),
-        "reminders_preserved": reminder_report.preserved_count,
     });
     if let Some(map) = metadata.as_object_mut() {
+        map.extend(reminder_report.count_fields());
         for (key, value) in compaction_policy_metadata_fields(&config.policy) {
             map.insert(key.to_string(), value);
         }
@@ -714,190 +663,6 @@ fn build_event_metadata(
         map.insert("receipt".to_string(), receipt.to_json());
     }
     metadata
-}
-
-enum CompactEvent {
-    Other(VmValue),
-    Reminder {
-        event: VmValue,
-        reminder: SystemReminder,
-        reminder_index: usize,
-    },
-}
-
-/// Process a list of reminder events through the canonical lifecycle:
-/// expire by TTL, decrement remaining TTLs, dedupe by `dedupe_key`, and
-/// retain `preserve_on_compact` reminders for re-attachment.
-pub fn compact_reminder_events(extra_events: Vec<VmValue>) -> ReminderCompactReport {
-    let mut events = Vec::with_capacity(extra_events.len());
-    let mut reminders = Vec::new();
-    let mut expired = Vec::new();
-    let mut decremented_count = 0;
-
-    for event in extra_events {
-        let Some(reminder) = reminder_from_event(&event) else {
-            events.push(CompactEvent::Other(event));
-            continue;
-        };
-
-        let (event, reminder) = match reminder.ttl_turns {
-            Some(ttl) if ttl <= 1 => {
-                expired.push(reminder);
-                continue;
-            }
-            Some(ttl) => {
-                let mut updated = reminder;
-                updated.ttl_turns = Some(ttl - 1);
-                decremented_count += 1;
-                (replace_reminder_payload(&event, &updated), updated)
-            }
-            None => (event, reminder),
-        };
-
-        let reminder_index = reminders.len();
-        reminders.push(reminder.clone());
-        events.push(CompactEvent::Reminder {
-            event,
-            reminder,
-            reminder_index,
-        });
-    }
-
-    let mut newest_by_dedupe_key = BTreeMap::new();
-    for (index, reminder) in reminders.iter().enumerate() {
-        if let Some(dedupe_key) = reminder.dedupe_key.as_deref() {
-            newest_by_dedupe_key.insert(dedupe_key.to_string(), index);
-        }
-    }
-
-    let mut kept_reminders = Vec::new();
-    let mut preserved_events = Vec::new();
-    let mut compacted = Vec::new();
-    let mut deduped = Vec::new();
-    let mut preserved_count = 0;
-
-    for event in events {
-        match event {
-            CompactEvent::Other(event) => preserved_events.push(event),
-            CompactEvent::Reminder {
-                event,
-                reminder,
-                reminder_index,
-            } => {
-                let keep = reminder
-                    .dedupe_key
-                    .as_deref()
-                    .and_then(|key| newest_by_dedupe_key.get(key))
-                    .is_none_or(|newest| *newest == reminder_index);
-                if !keep {
-                    let replacing_id = reminder
-                        .dedupe_key
-                        .as_deref()
-                        .and_then(|key| newest_by_dedupe_key.get(key))
-                        .and_then(|index| reminders.get(*index))
-                        .map(|newest| newest.id.clone())
-                        .unwrap_or_default();
-                    deduped.push(ReminderDedupeRecord {
-                        replaced_id: reminder.id.clone(),
-                        replacing_id,
-                        dedupe_key: reminder.dedupe_key.clone().unwrap_or_default(),
-                    });
-                    continue;
-                }
-
-                kept_reminders.push(crate::stdlib::json_to_vm_value(
-                    &serde_json::to_value(&reminder).unwrap_or(JsonValue::Null),
-                ));
-                if reminder.preserve_on_compact {
-                    preserved_count += 1;
-                    preserved_events.push(event);
-                } else {
-                    compacted.push(reminder);
-                }
-            }
-        }
-    }
-
-    ReminderCompactReport {
-        preserved_events,
-        custom_reminders: kept_reminders,
-        expired,
-        compacted,
-        deduped,
-        decremented_count,
-        preserved_count,
-    }
-}
-
-fn emit_reminder_lifecycle_records(transcript_id: Option<&str>, report: &ReminderCompactReport) {
-    for reminder in &report.expired {
-        let mut payload = reminder_lifecycle_payload(transcript_id, reminder);
-        if let Some(obj) = payload.as_object_mut() {
-            obj.insert(
-                "transcript_id".to_string(),
-                serde_json::json!(transcript_id),
-            );
-            obj.insert("reason".to_string(), JsonValue::String("ttl".to_string()));
-            obj.insert(
-                "ttl_turns_before".to_string(),
-                serde_json::json!(reminder.ttl_turns),
-            );
-            obj.insert("expired_at_turn".to_string(), JsonValue::Null);
-            obj.insert(
-                "expired_at_boundary".to_string(),
-                JsonValue::String("pre_compact".to_string()),
-            );
-            obj.insert(
-                "phase".to_string(),
-                JsonValue::String("pre_compact".to_string()),
-            );
-        }
-        emit_reminder_lifecycle_event(REMINDER_EXPIRED_EVENT_KIND, payload);
-    }
-
-    for reminder in &report.compacted {
-        let mut payload = reminder_lifecycle_payload(transcript_id, reminder);
-        if let Some(obj) = payload.as_object_mut() {
-            obj.insert(
-                "transcript_id".to_string(),
-                serde_json::json!(transcript_id),
-            );
-            obj.insert(
-                "reason".to_string(),
-                JsonValue::String("compaction".to_string()),
-            );
-            obj.insert(
-                "expired_at_boundary".to_string(),
-                JsonValue::String("pre_compact".to_string()),
-            );
-            obj.insert(
-                "phase".to_string(),
-                JsonValue::String("pre_compact".to_string()),
-            );
-        }
-        emit_reminder_lifecycle_event(REMINDER_EXPIRED_EVENT_KIND, payload);
-    }
-
-    if !report.deduped.is_empty() {
-        let dropped_reminder_ids = report
-            .deduped
-            .iter()
-            .map(|record| record.replaced_id.clone())
-            .collect::<Vec<_>>();
-        emit_reminder_lifecycle_event(
-            REMINDER_DEDUPED_EVENT_KIND,
-            serde_json::json!({
-                "transcript_id": transcript_id,
-                "boundary": "pre_compact",
-                "replaced_id": report.deduped.first().map(|record| &record.replaced_id),
-                "replacing_id": report.deduped.first().map(|record| &record.replacing_id),
-                "dedupe_key": report.deduped.first().map(|record| &record.dedupe_key),
-                "replaced_ids": &dropped_reminder_ids,
-                "dropped_reminder_ids": &dropped_reminder_ids,
-                "dropped_count": dropped_reminder_ids.len(),
-            }),
-        );
-    }
 }
 
 fn build_snapshot_asset(
@@ -961,37 +726,11 @@ fn snapshot_asset_id_of(asset: &VmValue) -> String {
         .unwrap_or_default()
 }
 
-/// Extract the events from a transcript-shaped dict that should be routed
-/// through [`run_compaction_lifecycle`] (everything except `message` and
-/// `tool_result` events). This is the canonical filter used by every
-/// transcript-having compaction caller — keeping it in one place stops the
-/// trivial-but-load-bearing filter list from drifting per-callsite.
-pub fn transcript_compactable_events(transcript: &crate::value::DictMap) -> Vec<VmValue> {
-    transcript
-        .get("events")
-        .and_then(|events| match events {
-            VmValue::List(list) => Some(
-                list.iter()
-                    .filter(|event| {
-                        event
-                            .as_dict()
-                            .and_then(|dict| dict.get("kind"))
-                            .map(|value| value.display())
-                            .is_some_and(|kind| kind != "message" && kind != "tool_result")
-                    })
-                    .cloned()
-                    .collect(),
-            ),
-            _ => None,
-        })
-        .unwrap_or_default()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::llm::helpers::{
-        DirectiveAuthority, ReminderPropagate, ReminderRoleHint, ReminderSource,
+        DirectiveAuthority, ReminderPropagate, ReminderRoleHint, ReminderSource, SystemReminder,
     };
     use crate::value::VmDictExt;
 

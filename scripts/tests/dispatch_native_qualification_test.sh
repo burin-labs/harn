@@ -15,20 +15,25 @@ cat > "$tmp/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$FAKE_GH_LOG"
 case "$*" in
+  *workflows/macos-nightly.yml/dispatches*)
+    cat > "$FAKE_GH_REQUEST"
+    printf '%s\n' "$FAKE_DISPATCH" ;;
   *workflows/macos-nightly.yml/runs*)
     jq -n --argjson runs "$FAKE_RUNS" '[{total_count:($runs|length),workflow_runs:$runs}]' ;;
   *workflows/macos-nightly.yml*) exit 1 ;;
-  "workflow run"*) ;;
   *) echo "unexpected gh $*" >&2; exit 2 ;;
 esac
 EOF
 chmod +x "$tmp/bin/gh"
+reply=$(jq -nc '{workflow_run_id:9,run_url:"https://api.github.com/repos/o/r/actions/runs/9",html_url:"https://github.com/o/r/actions/runs/9"}')
 
 run() {
   : > "$tmp/gh.log"
+  : > "$tmp/output"
   set +e
   env PATH="$tmp/bin:$PATH" FAKE_GH_LOG="$tmp/gh.log" \
-    GH_REPO=o/r SOURCE_SHA="$sha" FAKE_RUNS="$1" \
+    GH_REPO=o/r SOURCE_SHA="$sha" FAKE_RUNS="$1" FAKE_DISPATCH="${2:-$reply}" \
+    FAKE_GH_REQUEST="$tmp/request" GITHUB_OUTPUT="$tmp/output" \
     bash "$root/scripts/ci/dispatch_native_qualification.sh" > "$tmp/out" 2>&1
   status=$?
   set -e
@@ -36,20 +41,27 @@ run() {
 
 live=$(jq -nc --arg source "$sha" '[{id:5,head_sha:$source,head_branch:"main",event:"workflow_dispatch",path:".github/workflows/macos-nightly.yml",display_title:("Native qualification " + $source),repository:{full_name:"o/r"},head_repository:{full_name:"o/r"},status:"in_progress",conclusion:null}]')
 run "$live"
-if [[ $status != 0 ]] || grep -q 'workflow run' "$tmp/gh.log"; then fail "a live run was not reused: $(cat "$tmp/out")"; fi
+if [[ $status != 0 ]] || grep -q 'dispatches' "$tmp/gh.log"; then fail "a live run was not reused: $(cat "$tmp/out")"; fi
+[[ $(cat "$tmp/output") == run_id=5 ]] || fail 'reused run ID was not carried to the reader'
 
 run "$(jq '.[0].status="completed"|.[0].conclusion="failure"' <<< "$live")"
 [[ $status == 0 ]] || fail "a fresh dispatch failed: $(cat "$tmp/out")"
-grep -q "^workflow run macos-nightly.yml --repo o/r --ref main -f source_sha=$sha" "$tmp/gh.log" \
+grep -q '^api repos/o/r/actions/workflows/macos-nightly.yml/dispatches --method POST -H X-GitHub-Api-Version: 2026-03-10 --input -$' "$tmp/gh.log" \
   || fail "the qualification was not dispatched from main with the selected source"
+jq -e --arg source "$sha" '.ref == "main" and .inputs.source_sha == $source and .return_run_details == true' "$tmp/request" >/dev/null
+[[ $(cat "$tmp/output") == run_id=9 ]] || fail 'returned dispatch ID was not carried to the reader'
 
 run '[]'
-if [[ $status != 0 ]] || grep -q 'POST' "$tmp/gh.log" || ! grep -q '^workflow run' "$tmp/gh.log"; then
+if [[ $status != 0 ]] || ! grep -q 'dispatches --method POST' "$tmp/gh.log"; then
   fail "an empty census did not dispatch"
 fi
 
 run "$(jq '.[0].status="completed"|.[0].conclusion="success"' <<< "$live")"
-if [[ $status != 0 ]] || ! grep -q '^workflow run' "$tmp/gh.log"; then fail "a successful title without an authenticated receipt was reused"; fi
+if [[ $status != 0 ]] || ! grep -q 'dispatches --method POST' "$tmp/gh.log"; then fail "a successful title without an authenticated receipt was reused"; fi
+for defect in '.workflow_run_id=0' '.run_url="https://api.github.com/repos/other/repo/actions/runs/9"' '.html_url="https://github.com/o/r/actions/runs/10"'; do
+  run '[]' "$(jq "$defect" <<< "$reply")"
+  [[ $status != 0 && ! -s "$tmp/output" ]] || fail 'unconfirmed dispatch wrote an observing identity'
+done
 
 # Exercise admission before a candidate can execute on a trusted runner.
 mkdir -p "$tmp/repo/scripts/ci" "$tmp/repo/scripts/lib" "$tmp/runner"

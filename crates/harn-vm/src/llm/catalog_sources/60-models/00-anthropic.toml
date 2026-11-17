@@ -191,7 +191,8 @@ models_dev = {provider = "anthropic", model = "claude-sonnet-5", fields = ["name
 provider = "anthropic"
 equivalence_group = "frontier-agent-coding"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.50, cache_write_1h_per_mtok = 4.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
+# https://platform.claude.com/docs/en/models/sonnet-5-5/overview, verified 2026-11-15: cache hits cost $0.10/MTok.
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 2.50, cache_write_1h_per_mtok = 4.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
 tier = "frontier"
 strengths = ["coding", "reasoning", "tool_use", "long_context", "agentic"]
 complementary_with = ["openai-gpt", "google-gemini", "qwen", "deepseek", "kimi"]

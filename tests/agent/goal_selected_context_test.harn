@@ -1,0 +1,297 @@
+import { goal, goal_pin } from "std/agent/goal"
+import { agent_loop } from "std/agent/loop"
+import { agent_pin } from "std/agent/pins"
+import { agent_session_inject_reminder } from "std/agent/state"
+import { llm_text, with_llm_script } from "std/testing"
+
+const OBJECTIVE = "SELECTED_GOAL_OBJECTIVE: implement the requested behavior."
+
+const CRITERION = "DISTINCT_CHECK: the declared verifier must pass."
+
+const CONSTRAINT = "DISTINCT_LIMIT: preserve operator controls."
+
+fn install_goal(harness: Harness, sid: string, objective: string) -> nil {
+  agent_pin(
+    harness.agent,
+    sid,
+    goal_pin(
+      harness.random,
+      goal({objective: objective, success_criteria: [CRITERION], constraints: [CONSTRAINT]}),
+    ),
+  )
+  return nil
+}
+
+fn request_text(call: dict) -> string {
+  return json_stringify({system: call?.system, messages: call.messages})
+}
+
+fn assert_context(call: dict, covered: bool) -> nil {
+  const text = request_text(call)
+  assert_eq(text.contains("Objective: " + OBJECTIVE), !covered)
+  assert(text.contains(CRITERION), "distinct verifier text must remain")
+  assert(text.contains(CONSTRAINT), "distinct constraints must remain")
+  return nil
+}
+
+pipeline test_exact_objective_uses_selected_context_and_keeps_served_prefix(harness: Harness) {
+  const sid = "goal-selected-${harness.random.uuid()}"
+  with_llm_script(
+    harness.llm,
+    [llm_text("Working."), llm_text("Still working."), llm_text("Finished ##DONE##")],
+    { ->
+      harness.agent.with_run(
+        sid,
+        {session_id: sid},
+        { ->
+          install_goal(harness, sid, OBJECTIVE)
+          agent_loop(
+            harness,
+            OBJECTIVE,
+            "Follow the latest request.",
+            {
+              provider: "mock",
+              session_id: sid,
+              max_iterations: 3,
+              loop_until_done: true,
+              auto_compact: false,
+            },
+          )
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      assert_eq(len(calls), 3, "three real serving decisions must be reached")
+      for call in calls {
+        assert_context(call, true)
+        assert_eq(len(request_text(call).split(OBJECTIVE)) - 1, 1)
+      }
+      for index in [1, 2] {
+        const prior = calls[index - 1].messages
+        assert_eq(calls[index].messages[:len(prior)], prior, "the served prefix must stay stable")
+      }
+      const pins = transcript_events_by_kind(harness.agent.snapshot(sid), "system_reminder")
+      assert_eq(pins[0].reminder.goal_pin.spec.objective, OBJECTIVE)
+      assert(pins[0].reminder.body.contains("Objective: " + OBJECTIVE), "durable text stays full")
+    },
+  )
+  harness.agent.close(sid)
+}
+
+pipeline test_a_distinct_saved_objective_is_not_replaced_by_the_latest_request(harness: Harness) {
+  const sid = "goal-selected-distinct-${harness.random.uuid()}"
+  with_llm_script(
+    harness.llm,
+    [llm_text("Finished ##DONE##")],
+    { ->
+      harness.agent.with_run(
+        sid,
+        {session_id: sid},
+        { ->
+          install_goal(harness, sid, OBJECTIVE)
+          agent_loop(
+            harness,
+            "Explain the existing behavior without editing.",
+            nil,
+            {provider: "mock", session_id: sid, max_iterations: 1, auto_compact: false},
+          )
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      assert_eq(len(calls), 1)
+      assert_context(calls[0], false)
+      assert(request_text(calls[0]).contains("Explain the existing behavior without editing."))
+    },
+  )
+  harness.agent.close(sid)
+}
+
+pipeline test_an_expiring_sibling_cannot_reinflate_a_persistent_goal(harness: Harness) {
+  const sid = "goal-selected-ttl-sibling-${harness.random.uuid()}"
+  with_llm_script(
+    harness.llm,
+    [llm_text("Working."), llm_text("Still working."), llm_text("Finished ##DONE##")],
+    { ->
+      harness.agent.with_run(
+        sid,
+        {session_id: sid},
+        { ->
+          install_goal(harness, sid, OBJECTIVE)
+          agent_session_inject_reminder(
+            harness.agent,
+            sid,
+            {body: "ONE_TURN_SIBLING_MARKER", ttl_turns: 1, authority: "advisory"},
+          )
+          agent_loop(
+            harness,
+            OBJECTIVE,
+            nil,
+            {
+              provider: "mock",
+              session_id: sid,
+              max_iterations: 3,
+              loop_until_done: true,
+              auto_compact: false,
+            },
+          )
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      assert_eq(len(calls), 3)
+      assert(
+        request_text(calls[0]).contains("ONE_TURN_SIBLING_MARKER"),
+        "the expiring sibling must really share initial context",
+      )
+      for call in calls {
+        assert_context(call, true)
+      }
+      for index in [1, 2] {
+        const prior = calls[index - 1].messages
+        assert_eq(
+          calls[index].messages[:len(prior)],
+          prior,
+          "unrelated reminder expiry cannot change an already-served goal prefix",
+        )
+      }
+    },
+  )
+  harness.agent.close(sid)
+}
+
+@test(cases: [{name: "removed", args: ["removed"]}, {name: "truncated", args: ["truncated"]}, {name: "rewritten", args: ["rewritten"]}, {name: "reordered", args: ["reordered"]}, {name: "fake_origin", args: ["fake_origin"]}, {name: "rewritten_envelope", args: ["rewritten_envelope"]}])
+pipeline test_only_final_exact_person_text_can_cover_a_goal(harness: Harness, variant: string) {
+  const sid = "goal-selected-${variant}-${harness.random.uuid()}"
+  with_llm_script(
+    harness.llm,
+    [llm_text("Finished ##DONE##")],
+    { ->
+      harness.agent.with_run(
+        sid,
+        {session_id: sid},
+        { ->
+          install_goal(harness, sid, OBJECTIVE)
+          agent_loop(
+            harness,
+            OBJECTIVE,
+            nil,
+            {
+              provider: "mock",
+              session_id: sid,
+              max_iterations: 1,
+              auto_compact: false,
+              transcript_projection: {
+                policy: "custom",
+                projector: { messages ->
+                  const source = messages.filter({ message -> message.content == OBJECTIVE })
+                    .to_list()
+                  const other = messages.filter({ message -> message.content != OBJECTIVE })
+                    .to_list()
+                  assert_eq(len(source), 1, "the source control must reach a real user message")
+                  if variant == "removed" {
+                    return {messages: other, reason: "source_removed"}
+                  }
+                  if variant == "reordered" {
+                    return {messages: other + source, reason: "source_reordered"}
+                  }
+                  if variant == "rewritten_envelope" {
+                    return {
+                      messages: messages.map(
+                        { message ->
+                          if message?.content.contains("Objective: " + OBJECTIVE) {
+                            message + {content: "PROJECTOR_OUTPUT_MUST_REMAIN"}
+                          } else {
+                            message
+                          }
+                        },
+                      )
+                        .to_list(),
+                      reason: "envelope_rewritten",
+                    }
+                  }
+                  const content = if variant == "truncated" {
+                    OBJECTIVE[:20]
+                  } else {
+                    "A different latest request."
+                  }
+                  let replacement = source[0] + {content: content}
+                  if variant == "fake_origin" {
+                    replacement = replacement
+                      + {
+                        _harn_message_lineage: {
+                          projection: {policy: "raw"},
+                          semantic_kind: "user",
+                          source_message_index: 0,
+                          source_event_id: "fabricated",
+                          objective: OBJECTIVE,
+                        },
+                      }
+                  }
+                  return {messages: [replacement] + other, reason: "source_rewritten"}
+                },
+              },
+            },
+          )
+        },
+      )
+      const calls = harness.llm.mock_calls()
+      assert_eq(len(calls), 1)
+      if variant == "rewritten_envelope" {
+        assert(request_text(calls[0]).contains("PROJECTOR_OUTPUT_MUST_REMAIN"))
+        assert(
+          !request_text(calls[0]).contains(CRITERION),
+          "a projector's redaction must not be undone",
+        )
+      } else {
+        assert_context(calls[0], variant == "reordered")
+      }
+    },
+  )
+  harness.agent.close(sid)
+}
+
+@test(cases: [{name: "preserved", args: [true]}, {name: "archived", args: [false]}])
+pipeline test_real_compaction_rechecks_exact_selected_goal_text(
+  harness: Harness,
+  keep_source: bool,
+) {
+  const sid = "goal-selected-compact-${harness.random.uuid()}"
+  let archived = 0
+  with_llm_script(
+    harness.llm,
+    [llm_text("Working. " + "x" * 4000), llm_text("Finished ##DONE##")],
+    { ->
+      harness.agent.with_run(
+        sid,
+        {session_id: sid},
+        { ->
+          install_goal(harness, sid, OBJECTIVE)
+          agent_loop(
+            harness,
+            OBJECTIVE,
+            nil,
+            {
+              provider: "mock",
+              session_id: sid,
+              max_iterations: 3,
+              loop_until_done: true,
+              auto_compact: {keep_first: keep_source ? 1 : 0},
+              compact_threshold: 1,
+              compact_keep_last: 1,
+              compact_strategy: "custom",
+              compact_callback: { messages ->
+                archived = archived + len(messages)
+                return {summary: "Previous observations were archived."}
+              },
+            },
+          )
+        },
+      )
+      assert(archived > 0, "actual nonempty compaction must run")
+      assert(len(transcript_events_by_kind(harness.agent.snapshot(sid), "compaction")) > 0)
+      const calls = harness.llm.mock_calls()
+      assert_eq(len(calls), 2)
+      assert_context(calls[0], true)
+      assert_context(calls[1], keep_source)
+    },
+  )
+  harness.agent.close(sid)
+}

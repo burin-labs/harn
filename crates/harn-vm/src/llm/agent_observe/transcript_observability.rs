@@ -440,6 +440,7 @@ pub(super) fn dump_llm_request(
 /// Emit the request receipt for one provider attempt and return its payload.
 /// `context` is the attempt's context-token breakdown, projected once by the
 /// caller and shared with its admission consumers.
+#[cfg(test)]
 pub(super) fn dump_llm_request_with_context(
     iteration: usize,
     call_id: &str,
@@ -447,6 +448,22 @@ pub(super) fn dump_llm_request_with_context(
     opts: &super::api::LlmCallOptions,
     context: &crate::llm::cost_context::LlmContextTokenBreakdown,
 ) -> Result<super::api::LlmRequestPayload, VmError> {
+    dump_llm_request_with_receipt(iteration, call_id, tool_format, opts, context)
+        .map(|request| request.payload)
+}
+
+pub(super) struct ObservedRequest {
+    pub(super) payload: super::api::LlmRequestPayload,
+    pub(super) actor_receipt: Option<crate::llm::actor_request::ActorRequestReceipt>,
+}
+
+pub(super) fn dump_llm_request_with_receipt(
+    iteration: usize,
+    call_id: &str,
+    tool_format: &str,
+    opts: &super::api::LlmCallOptions,
+    context: &crate::llm::cost_context::LlmContextTokenBreakdown,
+) -> Result<ObservedRequest, VmError> {
     opts.context_manifest
         .validate(opts.system.as_deref())
         .map_err(|error| {
@@ -507,6 +524,18 @@ pub(super) fn dump_llm_request_with_context(
         .transpose()
         .unwrap_or(None)
         .unwrap_or(serde_json::Value::Null);
+    if let Some(session_id) = opts.session_id.as_deref().filter(|id| !id.is_empty()) {
+        crate::llm::agent_runtime::emit_agent_event_sync(
+            &crate::agent_events::AgentEvent::ContextUsage {
+                session_id: session_id.to_string(),
+                call_id: call_id.to_string(),
+                used_tokens: context.resident_input_tokens.max(0) as u64,
+                capacity_tokens: context
+                    .context_window
+                    .and_then(|size| u64::try_from(size).ok()),
+            },
+        );
+    }
     let context_token_breakdown = serde_json::to_value(context).unwrap_or(serde_json::Value::Null);
     emit_context_token_breakdown_checkpoint(
         opts,
@@ -551,6 +580,12 @@ pub(super) fn dump_llm_request_with_context(
         call_id,
         session_id,
         served_lineage_head(session_id).as_ref(),
+    );
+    let actor_receipt = crate::llm::actor_request::ActorRequestReceipt::from_request(
+        session_id,
+        call_id,
+        &served_context,
+        &served_manifest,
     );
     let mut request_event = serde_json::json!({
         "type": "provider_call_request",
@@ -619,7 +654,10 @@ pub(super) fn dump_llm_request_with_context(
     if append_llm_transcript_entry(&request_event) {
         record_served_lineage_head(session_id, lineage_head);
     }
-    Ok(payload)
+    Ok(ObservedRequest {
+        payload,
+        actor_receipt,
+    })
 }
 
 pub(super) fn emit_context_token_breakdown_checkpoint(

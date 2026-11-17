@@ -1,0 +1,67 @@
+// Trigger: a dirty Git-tracked file is targeted by a command write.
+// Effect: the scanner reports ordinary write intent, not a catastrophic ban.
+// Negative: sinks and quoted prose are not writes; destructive floors remain.
+import { with_temp_dir } from "std/testing"
+import { contract_effect } from "./lib/mechanism_contract"
+
+fn scan(command: string, root: string) -> dict {
+  return command_risk_scan(
+    {
+      request: {
+        mode: "shell",
+        shell: {id: "sh", path: "/bin/sh", platform: "unix"},
+        command: command,
+        cwd: root,
+      },
+      workspace_roots: [root],
+    },
+  )
+}
+
+fn main(harness: Harness) {
+  with_temp_dir(
+    harness.fs,
+    { root ->
+      const config = path_join(root, "git-config")
+      const source = path_join(root, "source.txt")
+      harness.fs.write_text(config, "")
+      harness.fs.write_text(source, "initial\n")
+      for args in [["init", "-q"], ["add", "source.txt"]] {
+        const result = harness.process.run(
+          {
+            program: "git",
+            args: args,
+            cwd: root,
+            env: {GIT_CONFIG_GLOBAL: config, GIT_CONFIG_NOSYSTEM: "1"},
+            env_remove: ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE"],
+          },
+        )
+        assert_eq(result.exit_code, 0, "the tracked fixture must actually exist")
+      }
+      harness.fs.write_text(source, "initial\nuser change\n")
+      for command in [
+        "printf updated > source.txt",
+        "printf appended >> source.txt",
+        "truncate -s 0 source.txt",
+      ] {
+        const observed = scan(command, root)
+        assert(observed.risk_labels.contains("write_intent"))
+        assert(!observed.risk_labels.contains("catastrophic"))
+      }
+      contract_effect(harness.stdio, "tracked_writes_are_ordinary_risks", true)
+      for command in ["printf '%s' \"$(: > source.txt)\"", "printf updated > 123"] {
+        const observed = scan(command, root)
+        assert(observed.risk_labels.contains("write_intent"))
+        assert(!observed.risk_labels.contains("catastrophic"))
+      }
+      contract_effect(harness.stdio, "nested_and_numeric_redirects_remain_writes", true)
+      for command in ["printf x > /dev/null", "printf x 2>&1", "printf '%s' ': > source.txt'"] {
+        assert(!scan(command, root).risk_labels.contains("write_intent"))
+      }
+      contract_effect(harness.stdio, "sinks_and_literal_prose_are_not_writes", true)
+      assert(scan("git reset --hard", root).risk_labels.contains("catastrophic"))
+      assert(scan("rm -rf /", root).risk_labels.contains("catastrophic"))
+      contract_effect(harness.stdio, "unrelated_destruction_retains_floor", true)
+    },
+  )
+}

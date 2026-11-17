@@ -3832,7 +3832,9 @@ audit:
 import { triage_start_my_day } from "std/triage"
 
 const connector_events = []
-const feed = triage_start_my_day(connector_events, {emit: true})
+const feed = triage_start_my_day(
+  harness.obs, connector_events, {emit: true},
+)
 for event in feed.events {
   harness.stdio.log(event.summary)
 }
@@ -3845,7 +3847,7 @@ for event in feed.events {
   source provenance, not transport delivery ids.
 - `triage_dedupe_events(events)` keeps first-seen order while dropping
   duplicate triage keys.
-- `triage_emit(input, options?)` validates the envelope and appends
+- `triage_emit(obs, input, options?)` validates the envelope and appends
   `kind = "triage_event"` to `triage.inbox.events` by default.
 - Non-navigation action intents must set `requires_approval: true`; hosts own
   write execution for dismiss, snooze, and convert-to-task actions.
@@ -4975,10 +4977,13 @@ For multi-tool turns, set `max_concurrent_tools: N` on `agent_loop` to
 fan out dispatch across siblings inside one independent effect phase (capped at
 N). Tool annotations classify calls as observation, mutation,
 process/verification, terminal, or provider-native. A response that crosses a
-local effect boundary selects the earliest semantic phase rather than the first
-emitted phase, executes every call in that phase wherever it sits in the batch,
-and returns typed deferred results for the rest, forcing the
-next inference to observe those results before re-proposing the deferred calls.
+local effect boundary starts at the earliest semantic phase rather than the
+first emitted phase. Successful observations can be followed by authored
+mutations in the same response, through ordinary policy and resource checks
+with current controls and context. Request reads needed to decide an edit in
+an earlier response. Failed observations hold mutations; verification and
+completion keep their phase boundaries. Actually held calls return typed
+retained proposals for explicit resume or discard.
 Each proposal emits a
 `tool_batch_disposition` event with phase, disposition, re-proposal, and
 monotonic timing fields. Middleware-backed

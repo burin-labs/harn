@@ -1,0 +1,11 @@
+import { triage_start_my_day } from "std/triage"
+
+fn invalid_metadata(obs: HarnessObs) -> string {
+  const feed = triage_start_my_day(obs, [])
+  const wrong_title: string = feed.title
+  return wrong_title
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(type_of(invalid_metadata))
+}

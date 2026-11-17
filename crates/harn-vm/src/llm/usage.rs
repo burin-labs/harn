@@ -1286,6 +1286,9 @@ impl LlmUsage {
             (meta::OUTPUT_TOKENS, serde_json::json!(self.output_tokens)),
             ("reported_cache", serde_json::json!(self.reported_cache)),
         ];
+        if let Some(calls) = self.provider_call_count {
+            pairs.push(("provider_call_count", serde_json::json!(calls)));
+        }
         if let Some(cache) = self.reported_cache.as_deref() {
             if let Some(read) = cache.reported_read_tokens() {
                 pairs.push((meta::CACHE_READ_TOKENS, serde_json::json!(read)));

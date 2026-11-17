@@ -952,6 +952,12 @@ category = "runtime_registry"
 plan = "arc_registry_scope"
 
 [[thread_local]]
+path = "src/tool_registry/contract.rs"
+statics = ["OFFLINE_REGISTRY_PREPARATIONS"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
 path = "src/tracing.rs"
 statics = ["ACTIVE_TRACING_RUNTIME"]
 category = "runtime_registry"
@@ -1032,5 +1038,11 @@ plan = "thread_private_test"
 [[thread_local]]
 path = "src/test_panic_silence.rs"
 statics = ["SILENT"]
+category = "thread_private"
+plan = "thread_private_test"
+
+[[thread_local]]
+path = "src/llm/helpers/options/system_prompt.rs"
+statics = ["SYSTEM_PROMPT_METADATA_PROJECTIONS"]
 category = "thread_private"
 plan = "thread_private_test"

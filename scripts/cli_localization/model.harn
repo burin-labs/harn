@@ -56,8 +56,6 @@ pub fn message_plan(template: string, arity: int) -> MessagePlan {
 
 type AstNode = {kind: string, fields: unknown, ...dict<string, unknown>}
 
-type AstObject = dict<string, unknown>
-
 type AstList = list<unknown>
 
 type AstString = string
@@ -75,22 +73,26 @@ type ParsedProgram = {
 
 fn localization_calls(value: unknown) -> list<CallFields> {
   let calls: list<CallFields> = []
-  if schema_is(value, schema_of(AstList)) {
-    for item in value {
-      calls.extend(localization_calls(item))
-    }
-  } else if schema_is(value, schema_of(AstObject)) {
-    if value.keys().contains("kind") && value.keys().contains("fields") {
-      const node: AstNode = schema_expect(value, schema_of(AstNode))
-      if node.kind == "FunctionCall" {
-        const call: CallFields = schema_expect(node.fields, schema_of(CallFields))
-        if call.name == "cli_message" {
-          calls.push(call)
+  let pending: list<unknown> = [value]
+  while len(pending) > 0 {
+    const current = pending.pop()
+    if type_of(current) == "dict" {
+      if current.kind == "FunctionCall" && current.fields?.name == "cli_message" {
+        const call: CallFields = schema_expect(current.fields, schema_of(CallFields))
+        calls.push(call)
+      }
+      for (key, item) in current.iter() {
+        if key != "span" && !key.ends_with("_span")
+          && (type_of(item) == "dict" || type_of(item) == "list") {
+          pending.push(item)
         }
       }
-    }
-    for (_, item) in value.iter() {
-      calls.extend(localization_calls(item))
+    } else if type_of(current) == "list" {
+      for item in current {
+        if type_of(item) == "dict" || type_of(item) == "list" {
+          pending.push(item)
+        }
+      }
     }
   }
   return calls
