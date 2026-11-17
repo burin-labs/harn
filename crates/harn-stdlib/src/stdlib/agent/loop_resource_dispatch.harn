@@ -427,12 +427,12 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls: list, tools: any, options
       blocking_result = __tool_batch_blocking_result(entry, raw_result)
     }
   }
-  // A model may explicitly request a verification after its mutations. Run it
+  // A model may explicitly request one process call after its mutations. Run it
   // only when the producer established a usable state, all mutations precede
   // it in the response, and the normal control queues have nothing to deliver.
   let executed = selected
   if plan.selected_phase == "mutation" && len(deferred) == 1
-    && deferred[0].declared_verification
+    && deferred[0].phase == "process_verification"
     && selected.all({ entry -> entry.declared_mutation && entry.index < deferred[0].index })
     && raw_selected.all(
       { result ->
@@ -441,7 +441,13 @@ fn __tool_batch_dispatch(harness: Harness, tool_calls: list, tools: any, options
           && !__batch_mutation_needs_observation(result)
       },
     )
-    && __batch_control_boundary_clear(harness.agent, to_string(options?.session_id ?? "")) {
+    && __batch_control_boundary_clear(harness.agent, to_string(options?.session_id ?? ""))
+    && tool_batch_scope_is_current(
+      harness.agent,
+      to_string(options?.session_id ?? ""),
+      options,
+      plan.scope,
+    ) {
     const entry = deferred[0]
     const verified = __dispatch_tool_calls_with_middleware(
       harness,
