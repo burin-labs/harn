@@ -1358,12 +1358,15 @@ mod tests {
     #[test]
     fn yaml_stringify_encodes_the_deepest_accepted_value() {
         // The depth guard is the only thing between the YAML serializer's
-        // recursion and the stack, so the deepest value it admits must encode.
-        let deep = deep_list(MAX_SERIALIZE_DEPTH);
-        let encoded = yaml_stringify_impl(std::slice::from_ref(&deep), &mut String::new())
-            .expect("a value at the depth limit encodes");
-        assert!(matches!(encoded, VmValue::String(text) if !text.is_empty()));
-        crate::value::recursion::dismantle(deep);
+        // recursion and the stack, so the deepest value it admits must encode
+        // on the VM's stack, where builtins run.
+        crate::runtime_stack::on_vm_stack(|| {
+            let deep = deep_list(MAX_SERIALIZE_DEPTH);
+            let encoded = yaml_stringify_impl(std::slice::from_ref(&deep), &mut String::new())
+                .expect("a value at the depth limit encodes");
+            assert!(matches!(encoded, VmValue::String(text) if !text.is_empty()));
+            crate::value::recursion::dismantle(deep);
+        });
     }
 
     #[test]
