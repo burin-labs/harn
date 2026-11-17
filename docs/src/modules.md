@@ -1938,6 +1938,13 @@ operation data are stable for durable orchestration; `command_policy`,
 and may grow additively. Compose adapters with these aliases instead of copying
 their record shapes or widening them to `dict`.
 
+`GitCommandResult` exposes optional `stdout_truncated` and `stderr_truncated`
+booleans from the process adapter. `true` means inline output was truncated;
+`false` means the adapter did not report truncation, including when capture
+was disabled. An absent field reads as `nil` and does not prove completeness.
+These fields report the adapter's evidence; they do not enable bounded capture on an adapter that
+doesn't support it.
+
 `git_tools(...)` defaults to read-only helpers (`git_status`,
 `git_current_branch`, `git_log`, `git_diff`, `git_branch_list`, and
 `git_remote_list`). Mutating helpers such as `git_switch` and
