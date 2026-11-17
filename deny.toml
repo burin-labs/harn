@@ -26,6 +26,8 @@ all-features = true
 ignore = [
     # --- Unmaintained/unsound transitive deps, no vuln, no safe upgrade ---
     { id = "RUSTSEC-2024-0436", reason = "paste 1.x unmaintained proc-macro; transitive, no vuln, no drop-in replacement. Review by 2027-01-24. https://rustsec.org/advisories/RUSTSEC-2024-0436" },
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained; no vulnerability, no safe upgrade. Direct dependency of several workspace crates; migration to jiff tracked in burin-labs/harn#11459. Review by 2027-02-17. https://github.com/chronotope/chrono/issues/1768" },
+    { id = "RUSTSEC-2026-0555", reason = "chrono-tz unmaintained alongside chrono; no vulnerability, no safe upgrade. Leaves with the chrono migration to jiff. Review by 2027-02-17. https://rustsec.org/advisories/RUSTSEC-2026-0555" },
     { id = "RUSTSEC-2026-0441", reason = "pin-utils 0.1 unmaintained after upstream archived it; no vulnerability, no safe upgrade. Transitive through aws-smithy-http. Review by 2027-02-05. https://rustsec.org/advisories/RUSTSEC-2026-0441" },
     # Linux keyring adapters still require zbus 5; zbus 6 absorbed these crates.
     # Remove these informational exceptions when both adapters support zbus 6.
