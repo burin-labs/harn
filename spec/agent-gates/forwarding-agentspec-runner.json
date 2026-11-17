@@ -1,6 +1,16 @@
 [
   {
     "scope": "AgentSpec",
+    "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
+    "expression": "__sync_tool_search_state(opts, turn_opts)",
+    "owner": "__sync_tool_search_state",
+    "evidence": "The post-dispatch fold carries the final options after any registered command completion through the existing tool-search state owner. Its opts parameter remains independently scanned.",
+    "consumers": [
+      {"scope": "AgentSpec", "function": "__sync_tool_search_state", "parameter": "opts"}
+    ]
+  },
+  {
+    "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/preflight.harn",
     "expression": "render_agent_prompt_id(harness.fs, \"agent.operating_guidance\", {}, opts)",
     "owner": "render_agent_prompt_id",
@@ -327,7 +337,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_post_turn.harn",
-    "expression": "agent_compute_post_turn(\n        render_harness,\n        session,\n        context.normalized\n          + {raw_text: context.raw_text, parsed_done_marker: context.parsed_done_marker},\n        context.dispatch,\n        post_turn_opts,\n        context.iteration_index,\n        context.tool_calls,\n      )",
+    "expression": "agent_compute_post_turn(\n        render_harness,\n        session,\n        context.normalized\n          + pick(context, [\"raw_text\", \"parsed_done_marker\"]),\n        context.dispatch,\n        post_turn_opts,\n        context.iteration_index,\n        context.tool_calls,\n      )",
     "owner": "agent_compute_post_turn",
     "evidence": "Consumer agent_compute_post_turn.opts in crates/harn-stdlib/src/stdlib/agent/postturn.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
     "consumers": [
@@ -682,7 +692,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "__agent_loop_post_dispatch(\n          harness,\n          session.session_id,\n          llm_result,\n          turn_llm_opts,\n          iteration_index,\n          tool_calls,\n          visible_text,\n          loop_start_ms,\n          current_max,\n          dispatch,\n          stall_prev_dispatch,\n        )",
+    "expression": "__agent_loop_post_dispatch(\n          harness,\n          session.session_id,\n          llm_result,\n          turn_llm_opts,\n          iteration_index,\n          tool_calls,\n          visible_text,\n          loop_start_ms,\n          current_max,\n          dispatch,\n          stall_prev_dispatch,\n          { totals ->\n            const boundary = __agent_loop_budget_exhaustion(\n              harness.agent,\n              harness.clock,\n              session.session_id,\n              budget,\n              iteration,\n              totals,\n              loop_start_ms,\n              current_max,\n            )\n            if boundary.exhausted || agent_budget_post_call_stop_reason(totals, turn_opts) != \"\" {\n              return nil\n            }\n            return agent_loop_command_hold_transition(\n              harness,\n              session.session_id,\n              {\n                ledger: command_ledger,\n                command_wait: command_wait,\n                hold_state: command_hold_state,\n                reentry_cap: command_hold_cap_tokens,\n                iteration: iteration_index + 1,\n                tool_count: len(tool_calls),\n                turn_opts: turn_opts,\n              },\n            )\n          },\n        )",
     "owner": "__agent_loop_post_dispatch",
     "evidence": "Consumer __agent_loop_post_dispatch.turn_llm_opts in crates/harn-stdlib/src/stdlib/agent/loop_denial_cutoff.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
     "consumers": [
@@ -1259,7 +1269,7 @@
   {
     "scope": "AgentSpec",
     "file": "crates/harn-stdlib/src/stdlib/agent/loop_run.harn",
-    "expression": "agent_compute_terminal_callback(\n        harness.agent,\n        session,\n        opts,\n        {\n          iteration: iteration,\n          final_status: terminal.final_status,\n          stop_reason: terminal.stop_reason,\n          terminal_error: terminal?.error,\n          max_iterations: current_max,\n          iteration_budget: iteration_budget,\n          session_successful_tools: successful_tools_seen,\n          session_rejected_tools: rejected_tools_seen,\n        },\n      )",
+    "expression": "agent_compute_terminal_callback(\n        harness.agent,\n        session,\n        opts,\n        {\n          iteration: iteration,\n          final_status: terminal.final_status,\n          stop_reason: terminal.stop_reason,\n          terminal_error: terminal.error,\n          max_iterations: current_max,\n          iteration_budget: iteration_budget,\n          session_successful_tools: successful_tools_seen,\n          session_rejected_tools: rejected_tools_seen,\n        },\n      )",
     "owner": "agent_compute_terminal_callback",
     "evidence": "The error epilogue notifies through the same terminal invoker the in-loop boundary uses, so an exit by throw reaches the embedder exactly as an ordinary seal does. Consumer agent_compute_terminal_callback.opts in crates/harn-stdlib/src/stdlib/agent/state.harn is an independently required binding origin for AgentSpec; its literal reads are audited under that owner.",
     "consumers": [

@@ -30,8 +30,9 @@
 //! after the waiter has taken the `Child`, we store the raw OS process ID
 //! in the entry and kill by PID when needed. On Unix we call `kill(2)`
 //! directly via an `extern "C"` declaration (no `libc` crate required).
-//! A shared `cancelled` flag suppresses the feedback push when the waiter
-//! sees an exit caused by cancellation. Callers that need artifact-stable
+//! A shared `cancelled` flag suppresses full result feedback when the waiter
+//! sees an exit caused by cancellation. A metadata-only status wakes command
+//! owners; callers that need artifact-stable
 //! cancellation can opt into waiting for the waiter result through
 //! `cancel_handle`.
 
@@ -41,7 +42,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 
-use harn_vm::VmDictExt;
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
@@ -52,6 +52,10 @@ use crate::process::{
 };
 use crate::tools::args::to_agent_path;
 use crate::tools::proc::{self, CaptureConfig, CommandStatus, EnvMode};
+
+#[path = "long_running_handles.rs"]
+mod handles;
+pub(crate) use handles::list_session_handles;
 
 #[path = "long_running_output.rs"]
 mod output;
@@ -258,6 +262,7 @@ struct HandleEntry {
 #[derive(Clone)]
 struct TerminalResult {
     session_id: String,
+    lease: LeaseTag,
     value: VmValue,
 }
 
@@ -303,7 +308,7 @@ type HandleNotifiers = (
     Vec<std::sync::mpsc::SyncSender<VmValue>>,
 );
 
-fn complete_handle(handle_id: &str, result: &VmValue) -> HandleNotifiers {
+fn complete_handle(handle_id: &str, result: &VmValue, publish: impl FnOnce()) -> HandleNotifiers {
     let mut store = HANDLE_STORE
         .lock()
         .expect("long-running handle store poisoned");
@@ -319,10 +324,16 @@ fn complete_handle(handle_id: &str, result: &VmValue) -> HandleNotifiers {
             handle_id.to_string(),
             TerminalResult {
                 session_id: entry.session_id,
+                lease: entry.lease,
                 value: result.clone(),
             },
         );
     }
+    // Queue/feed observers must not outrun the retained result. Readers join
+    // this same store lock, so an observed terminal always permits wait(0).
+    // Publication only updates the output feed and inbox; it invokes no user
+    // callbacks while the store is locked.
+    publish();
     notifiers
 }
 
@@ -398,6 +409,7 @@ struct WaiterContext {
     command_id: String,
     handle_id: String,
     session_id: String,
+    lease: LeaseTag,
     started_at: String,
     cwd: PathBuf,
     process_group_id: Option<u32>,
@@ -580,6 +592,7 @@ pub(crate) fn spawn_long_running_with_options(
         command_id: command_id.clone(),
         handle_id: handle_id.clone(),
         session_id: options.session_id,
+        lease: options.lease,
         started_at: started_at.clone(),
         cwd: effective_cwd.clone(),
         process_group_id,
@@ -976,30 +989,42 @@ fn waiter_thread(
     }
 
     let result_value = harn_vm::json_to_vm_value(&serde_json::Value::Object(payload.clone()));
-    {
-        let mut state = context
-            .output_feed
-            .state
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        state.terminal = Some(result_value.clone());
-    }
-    context.output_feed.notify.notify_waiters();
-    if !cancelled {
-        let content = serde_json::to_string(&payload).unwrap_or_default();
-        harn_vm::orchestration::agent_inbox::push(
-            &context.session_id,
-            "tool_result",
-            &content,
-            "hostlib.long_running.exit",
-        );
-    }
-    // Remove our entry from the store only after the public feedback path is
-    // published. An explicit `wait_command` can register a direct waiter while
-    // the child has exited but artifacts are still being finalized; waking that
-    // waiter after the inbox push lets `wait_command` consume the matching
-    // inbox entry and preserve the old no-duplicate-feedback contract.
-    let (completion_tx, result_txs) = complete_handle(&context.handle_id, &result_value);
+    let content = serde_json::to_string(&payload).unwrap_or_default();
+    let (completion_tx, result_txs) = complete_handle(&context.handle_id, &result_value, || {
+        {
+            let mut state = context
+                .output_feed
+                .state
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            state.terminal = Some(result_value.clone());
+        }
+        context.output_feed.notify.notify_waiters();
+        if !cancelled {
+            harn_vm::orchestration::agent_inbox::push(
+                &context.session_id,
+                "tool_result",
+                &content,
+                harn_vm::orchestration::agent_inbox::COMMAND_TERMINAL_SOURCE,
+            );
+        } else {
+            // Cancellation must wake an already parked owner, without
+            // replaying full output as ordinary model feedback. The retained
+            // result is committed under this same store lock before the wake;
+            // the normal registered completion tool still owns its delivery.
+            let status = serde_json::json!({
+                "handle_id": &context.handle_id,
+                "status": command_status.as_str(),
+                "lease": context.lease.as_str(),
+            });
+            harn_vm::orchestration::agent_inbox::push(
+                &context.session_id,
+                "tool_progress",
+                &status.to_string(),
+                harn_vm::orchestration::agent_inbox::COMMAND_PROGRESS_SOURCE,
+            );
+        }
+    });
     for tx in result_txs {
         let _ = tx.try_send(result_value.clone());
     }
@@ -1101,7 +1126,7 @@ fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHan
                 &context.session_id,
                 "tool_progress",
                 &payload.to_string(),
-                "hostlib.long_running.progress",
+                harn_vm::orchestration::agent_inbox::COMMAND_PROGRESS_SOURCE,
             );
         }
     })
@@ -1326,34 +1351,6 @@ pub(crate) fn drain_handle_feedback(
         };
         payload.get("handle_id").and_then(serde_json::Value::as_str) == Some(handle_id)
     })
-}
-
-/// Live handles for `session_id`, for the agent loop's ledger reconciliation and
-/// digest rendering. Each row carries the spawn-time lease tag, command display,
-/// and start timestamp; scheduling and lease transitions live in the loop. An
-/// entry disappears from this list the instant its waiter thread removes it on
-/// process exit, so a completed-and-drained command is never reported as live.
-pub(crate) fn list_session_handles(session_id: &str) -> VmValue {
-    let store = HANDLE_STORE
-        .lock()
-        .expect("long-running handle store poisoned");
-    let handles: Vec<VmValue> = store
-        .entries
-        .iter()
-        .filter(|(_id, entry)| entry.session_id == session_id)
-        .map(|(id, entry)| {
-            let mut row = harn_vm::value::DictMap::new();
-            row.put_str("handle_id", id.clone());
-            row.put_str("session_id", entry.session_id.clone());
-            row.put_str("lease", entry.lease.as_str());
-            row.put_str("command_or_op_descriptor", entry.command_display.clone());
-            row.put_str("started_at", entry.started_at.clone());
-            VmValue::dict(row)
-        })
-        .collect();
-    let mut response = harn_vm::value::DictMap::new();
-    response.put("handles", VmValue::list(handles));
-    VmValue::dict(response)
 }
 
 /// Tuple shape used by `cancel_session_handles` to drain entries while

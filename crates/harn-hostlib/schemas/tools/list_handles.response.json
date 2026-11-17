@@ -4,6 +4,22 @@
   "title": "tools.list_handles response",
   "type": "object",
   "properties": {
+    "completed_handles": {
+      "type": "array",
+      "description": "Only requested retained terminal identities belonging to this session; omitted when no completed IDs were requested.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "handle_id": { "type": "string" },
+          "session_id": { "type": "string" },
+          "lease": { "type": "string", "enum": ["awaited", "service"] },
+          "status": { "type": "string" },
+          "command_or_op_descriptor": { "type": "string" }
+        },
+        "required": ["handle_id", "session_id", "lease", "status", "command_or_op_descriptor"],
+        "additionalProperties": false
+      }
+    },
     "handles": {
       "type": "array",
       "description": "Live long-running command handles for the session, empty when none are running. An entry disappears the instant its process exits and its waiter drains it.",

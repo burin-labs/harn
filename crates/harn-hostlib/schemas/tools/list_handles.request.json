@@ -7,6 +7,12 @@
     "session_id": {
       "type": "string",
       "description": "Session whose live long-running command handles to enumerate. Defaults to the current agent session when omitted."
+    },
+    "completed_handle_ids": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "description": "Return retained completion identity and original lease for these handles in this session. Unknown or expired handles are omitted. Does not consume their terminal result."
     }
   },
   "additionalProperties": false

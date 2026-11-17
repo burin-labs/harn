@@ -1,5 +1,26 @@
 [
   {
+    "default": "empty; generic command-status delivery remains the default",
+    "evidence": "The normalizer trims the configured tool name; the command-hold transition requires its current registry definition and uses ordinary dispatch. Native qualification is pending.",
+    "expiry": "2026-12-16",
+    "kind": "configuration",
+    "layer": "runner",
+    "name": "CommandWaitOptions.completion_tool",
+    "reachability": "unknown",
+    "readers": [
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "reader": "command_wait_normalize"
+      },
+      {
+        "file": "crates/harn-stdlib/src/stdlib/agent/command_ledger.harn",
+        "reader": "command_ledger_hold"
+      }
+    ],
+    "reason": "Hosts select an existing registered completion handler to preserve their terminal-result contract; this cannot introduce an unregistered host fallback.",
+    "verdict": "KEEP-with-expiry"
+  },
+  {
     "default": "kill unless explicitly release; owner command_ledger.harn:107",
     "evidence": "Static declaration/read only; downstream headless binding not observed.",
     "expiry": "2026-09-13",
