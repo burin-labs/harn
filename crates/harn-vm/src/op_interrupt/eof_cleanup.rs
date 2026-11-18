@@ -25,7 +25,7 @@ impl ActiveProcessCleanupGuard {
         // One table answers all three questions: descendants, the token
         // cohort, and peers still in the root's process group.
         let mut children = BTreeMap::new();
-        if let Some(table) = ProcessTable::read(true) {
+        if let Some(table) = ProcessTable::read(Some(&entry.cleanup_token)) {
             children.extend(
                 table
                     .descendants(pid)
