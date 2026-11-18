@@ -761,6 +761,69 @@ fn signal_pid_preserving_group(pid: u32, preserved_pgid: i32, signal: i32) {
     }
 }
 
+/// How long a token census waits for a possible token holder whose
+/// environment could not be read, in polls of [`ENVIRONMENT_SETTLE_POLL`].
+#[cfg(target_os = "macos")]
+const ENVIRONMENT_SETTLE_POLLS: u32 = 25;
+#[cfg(target_os = "macos")]
+const ENVIRONMENT_SETTLE_POLL: Duration = Duration::from_millis(2);
+
+/// Re-read the processes that could hold `token` but whose environment came
+/// back empty.
+///
+/// macOS cannot read a process's environment while it is between exec images,
+/// and a framework Python re-executes itself right after it starts. A
+/// command's escaped descendant caught in that window reads as carrying no
+/// token, so the kill pass would skip it and a later census would find it
+/// alive. Many of this user's own system processes are never readable, so the
+/// wait is limited to this user's processes born no earlier than the token, a
+/// time-ordered UUID: nothing older can have inherited it. A process that
+/// stays unreadable is left counted as unreadable.
+#[cfg(target_os = "macos")]
+fn settle_unread_environments(
+    sys: &mut sysinfo::System,
+    kind: sysinfo::ProcessRefreshKind,
+    token: &str,
+) {
+    // Microseconds since the epoch, the unit of a process's birth identity.
+    let Some(token_born) = token
+        .strip_prefix("harn-cleanup-")
+        .and_then(|id| uuid::Uuid::try_parse(id).ok())
+        .and_then(|id| id.get_timestamp())
+        .map(|timestamp| {
+            let (secs, nanos) = timestamp.to_unix();
+            secs.saturating_mul(1_000_000)
+                .saturating_add(u64::from(nanos / 1_000))
+        })
+    else {
+        return;
+    };
+    let own_uid = unsafe { libc::geteuid() };
+    let own_pid = std::process::id();
+    for _ in 0..ENVIRONMENT_SETTLE_POLLS {
+        let unread = sys
+            .processes()
+            .iter()
+            .filter(|(pid, process)| {
+                pid.as_u32() != own_pid
+                    && process.environ().is_empty()
+                    && process_status_can_execute(process.status())
+                    && process
+                        .effective_user_id()
+                        .is_some_and(|uid| **uid == own_uid)
+                    && crate::process_liveness::process_identity(pid.as_u32())
+                        .is_some_and(|born| born >= token_born)
+            })
+            .map(|(pid, _)| *pid)
+            .collect::<Vec<_>>();
+        if unread.is_empty() {
+            return;
+        }
+        std::thread::sleep(ENVIRONMENT_SETTLE_POLL);
+        sys.refresh_processes_specifics(sysinfo::ProcessesToUpdate::Some(&unread), false, kind);
+    }
+}
+
 /// One read of the host process table: parent edges and command names, plus
 /// environments when a cleanup token must be matched. Each scan costs a pass
 /// over every process on the host, so a cleanup pass reads one table and asks
@@ -770,16 +833,21 @@ struct ProcessTable(sysinfo::System);
 
 #[cfg(unix)]
 impl ProcessTable {
-    /// Nil when the platform cannot enumerate processes.
-    fn read(with_environ: bool) -> Option<Self> {
+    /// Nil when the platform cannot enumerate processes. Environments are read
+    /// only when a cleanup `token` must be matched against them.
+    fn read(token: Option<&str>) -> Option<Self> {
         use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
         let mut sys = System::new().ok()?;
         let mut kind = ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always);
-        if with_environ {
+        if token.is_some() {
             kind = kind.with_environ(UpdateKind::Always);
         }
         sys.refresh_processes_specifics(ProcessesToUpdate::All, false, kind);
+        #[cfg(target_os = "macos")]
+        if let Some(token) = token {
+            settle_unread_environments(&mut sys, kind, token);
+        }
         Some(Self(sys))
     }
 
@@ -808,7 +876,7 @@ fn descendants_and_token_cohort(
     cleanup_token: Option<&str>,
 ) -> (Vec<ProcessCleanupChild>, Vec<ProcessCleanupChild>) {
     let token = cleanup_token.filter(|token| !token.is_empty());
-    let Some(table) = ProcessTable::read(token.is_some()) else {
+    let Some(table) = ProcessTable::read(token) else {
         return (Vec::new(), Vec::new());
     };
     let descendants = table.descendants(pid);
@@ -831,7 +899,7 @@ fn cleanup_token_processes(token: &str) -> Vec<ProcessCleanupChild> {
 
 #[cfg(unix)]
 fn cleanup_token_census(token: &str) -> (Vec<ProcessCleanupChild>, ProcessCleanupCensus) {
-    match ProcessTable::read(true) {
+    match ProcessTable::read(Some(token)) {
         Some(table) => token_census(&table, token),
         None => (Vec::new(), ProcessCleanupCensus::default()),
     }
@@ -972,15 +1040,15 @@ fn process_exists(pid: u32) -> bool {
     process_liveness(pid) != Some(false)
 }
 
+/// An exited process its parent has not reaped runs no code, so a killed
+/// orphan still waiting for launchd or init is not a survivor.
 #[cfg(unix)]
 fn process_liveness(pid: u32) -> Option<bool> {
-    if unsafe { libc::kill(pid as i32, 0) } == 0 {
-        return Some(true);
-    }
-    match std::io::Error::last_os_error().raw_os_error() {
-        Some(libc::ESRCH) => Some(false),
-        Some(libc::EPERM) => Some(true),
-        _ => None,
+    use crate::process_liveness::ProcessLiveness;
+    match crate::process_liveness::process_liveness(pid) {
+        ProcessLiveness::Alive => Some(true),
+        ProcessLiveness::Dead => Some(false),
+        ProcessLiveness::Unknown => None,
     }
 }
 
