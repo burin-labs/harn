@@ -81,12 +81,14 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `cloudflare_ai_gateway` | `*` | `any` | no | `none` | no | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `cohere` | `north-mini-code-1-0 \| north-small-translate-1-0` | `any` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `cohere` | `command-*` | `any` | `adaptive` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `dashscope` | `dashscope/qwen4-max \| qwen4-max` | `any; extends` | `enabled,effort` | `none` | yes | no | no | yes | yes | no | no | `plain` | `none` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `dashscope` | `qwen3.6-plus` | `any; extends` | `enabled` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `dashscope` | `dashscope/qwen3.8-max*` | `any; extends` | no | `none` | yes | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | yes |
 | `dashscope` | `dashscope/qwen3.6*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `dashscope` | `dashscope/qwen*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `dashscope` | `qwen3.6*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `dashscope` | `qwen*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `deepinfra` | `deepinfra/Qwen/Qwen4-Max \| Qwen/Qwen4-Max` | `any; extends` | no | `none` | yes | no | no | yes | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | yes |
 | `deepinfra` | `deepinfra/deepseek-ai/DeepSeek-V4.1-Flash-1017 \| deepseek-ai/DeepSeek-V4.1-Flash-1017` | `any` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | no | `unknown` | no | no |
 | `deepinfra` | `thinkingmachines/Inkling-Small \| deepinfra/thinkingmachines/Inkling-Small` | `any` | `enabled,effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `deepinfra` | `nvidia/NVIDIA-Nemotron-3.5-Lightning \| deepinfra/nvidia/NVIDIA-Nemotron-3.5-Lightning` | `any` | `enabled` | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
@@ -108,7 +110,9 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `deepinfra` | `*` | `any` | no | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `deepseek` | `deepseek-v4-pro*` | `any` | `enabled,effort` | `temperature,top_p,presence_penalty,frequency_penalty` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `deepseek` | `deepseek-flash \| deepseek-v4-flash*` | `any` | `enabled,effort` | `temperature,top_p,presence_penalty,frequency_penalty` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
-| `fireworks` | `accounts/fireworks/models/deepseek-v4p1-flash-1017 \| accounts/fireworks/models/minimax-m3p1-flash` | `any` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | no | `unknown` | no | no |
+| `fireworks` | `accounts/fireworks/models/minimax-m3p1-flash` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | yes |
+| `fireworks` | `accounts/fireworks/models/kimi-k3p1-pro` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
+| `fireworks` | `accounts/fireworks/models/deepseek-v4p1-flash-1017` | `any` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | no | `unknown` | no | no |
 | `fireworks` | `accounts/fireworks/models/inkling` | `any` | `enabled` | `none` | yes | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `fireworks` | `accounts/fireworks/models/ember-1` | `any` | `enabled` | `none` | yes | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `fireworks` | `accounts/fireworks/models/muse-spark-open` | `any` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
@@ -175,7 +179,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `local` | `*` | `any` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `meta` | `muse-wonder-1.0` | `any` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `meta` | `muse-spark-*` | `any` | `enabled` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
-| `minimax` | `MiniMax-M3.1-Flash` | `any` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `developer` | `json` | `reasoning_summary` | `json` | no | no | `unknown` | no | no |
+| `minimax` | `MiniMax-M3.1-Flash` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | yes |
 | `minimax` | `minimax-m3*` | `any` | `adaptive` | `none` | yes | no | no | yes | yes | no | `delimited` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `minimax` | `minimax-m2.7*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `delimited` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `json` | yes | yes | `native_unreliable` | yes | yes |
 | `minimax` | `minimax-m2.5*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `delimited` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
@@ -191,6 +195,8 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `mlx` | `*` | `any` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `mock` | `mock-minimal*` | `any` | no | `none` | no | no | no | no | yes | no | no | `markdown` | `none` | no | `system` | `json` | `none` | `text` | no | yes | `text_only` | yes | no |
 | `mock` | `mock \| mock-*` | `any` | `adaptive,effort` | `none` | yes | yes | yes | no | yes | yes | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | yes |
+| `moonshot` | `moonshot/kimi-k3.1-pro \| kimi-k3.1-pro` | `any; extends` | `effort` | `none` | yes | no | no | yes | yes | no | no | `plain` | `none` | no | `developer` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
+| `moonshot` | `moonshot/kimi-k3.1-pro-highspeed \| kimi-k3.1-pro-highspeed` | `any; extends` | `effort` | `none` | yes | no | no | yes | yes | no | no | `plain` | `none` | no | `developer` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `moonshot` | `*kimi-k3*` | `any` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `interchangeable` | yes | yes |
 | `moonshot` | `*kimi-k2.7-code*` | `any` | `enabled` | `none` | yes | no | no | yes | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `json` | yes | yes | `native_unreliable` | yes | yes |
 | `moonshot` | `*kimi*` | `any` | `enabled` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
@@ -250,7 +256,9 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `openai` | `openai/o1*` | `any` | `effort` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openai` | `openai/o3*` | `any` | `effort` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openai` | `openai/o4*` | `any` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `openrouter` | `minimax/minimax-m3.1-flash` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `anthropic/claude-fable-5.2` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | yes |
+| `openrouter` | `qwen/qwen4-max` | `any; extends` | `enabled,effort` | `none` | yes | no | no | yes | yes | no | no | `plain` | `none` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `google/gemini-4-carbon` | `any; extends` | `effort` | `none` | yes | yes | yes | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `google/gemini-4-hydrogen` | `any; extends` | `effort` | `none` | yes | yes | yes | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `google/gemini-4-neon` | `any; extends` | `effort` | `none` | yes | yes | yes | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
@@ -260,6 +268,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `openrouter` | `openai/gpt-6.2-astra-pro` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `openai/gpt-6.2-sol` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `openai/gpt-6.2-sol-pro` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `openrouter` | `moonshotai/kimi-k3.1-pro` | `any; extends` | `effort` | `none` | yes | no | no | yes | yes | no | no | `plain` | `none` | no | `developer` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `openrouter/perplexity/pplx-decider-v1.3:free \| perplexity/pplx-decider-v1.3:free` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `openrouter` | `openrouter/typesafe/jev*` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `openrouter` | `openai/gpt-5.4-nano \| openai/gpt-5.4-mini` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
@@ -414,6 +423,8 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `together` | `together/nvidia/nemotron-3*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `together` | `moonshotai/*` | `any` | no | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `typesafe` | `jev-* \| typesafe/jev-*` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
+| `vercel_ai_gateway` | `vercel/minimax/minimax-m3.1-flash \| minimax/minimax-m3.1-flash` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | yes |
+| `vercel_ai_gateway` | `vercel/alibaba/qwen4-max \| alibaba/qwen4-max` | `any; extends` | `enabled,effort` | `none` | yes | no | no | yes | yes | no | no | `plain` | `none` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `vercel_ai_gateway` | `vercel/google/gemini-4-carbon \| google/gemini-4-carbon` | `any; extends` | `effort` | `none` | yes | yes | yes | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `vercel_ai_gateway` | `vercel/google/gemini-4-hydrogen \| google/gemini-4-hydrogen` | `any; extends` | `effort` | `none` | yes | yes | yes | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `vercel_ai_gateway` | `vercel/google/gemini-4-neon \| google/gemini-4-neon` | `any; extends` | `effort` | `none` | yes | yes | yes | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
@@ -423,11 +434,13 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `vercel_ai_gateway` | `vercel/openai/gpt-6.2-astra-fast \| openai/gpt-6.2-astra-fast` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `vercel_ai_gateway` | `vercel/openai/gpt-6.2-sol \| openai/gpt-6.2-sol` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `vercel_ai_gateway` | `vercel/openai/gpt-6.2-sol-fast \| openai/gpt-6.2-sol-fast` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `vercel_ai_gateway` | `vercel/moonshotai/kimi-k3.1-pro \| moonshotai/kimi-k3.1-pro` | `any; extends` | `effort` | `none` | yes | no | no | yes | yes | no | no | `plain` | `none` | no | `developer` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
+| `vercel_ai_gateway` | `vercel/moonshotai/kimi-k3.1-pro-highspeed \| moonshotai/kimi-k3.1-pro-highspeed` | `any; extends` | `effort` | `none` | yes | no | no | yes | yes | no | no | `plain` | `none` | no | `developer` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `vercel_ai_gateway` | `typesafe-ai/jev* \| vercel/typesafe-ai/jev*` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `vercel_ai_gateway` | `convaiinnovations/laya` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `vercel_ai_gateway` | `liquid/d1-ultra` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `vercel_ai_gateway` | `perplexity/pplx-decider-v1.1-27b` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
-| `vercel_ai_gateway` | `vercel/minimax/minimax-m3.1-flash \| minimax/minimax-m3.1-flash \| vercel/deepseek/deepseek-v4.1-flash-1017-fast \| deepseek/deepseek-v4.1-flash-1017-fast \| vercel/inception/mercury-3 \| inception/mercury-3 \| vercel/elorian/glimpse \| elorian/glimpse` | `any` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | no | `unknown` | no | no |
+| `vercel_ai_gateway` | `vercel/deepseek/deepseek-v4.1-flash-1017-fast \| deepseek/deepseek-v4.1-flash-1017-fast \| vercel/inception/mercury-3 \| inception/mercury-3 \| vercel/elorian/glimpse \| elorian/glimpse` | `any` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | no | `unknown` | no | no |
 | `vercel_ai_gateway` | `vercel/deepseek/deepseek-v4.1-flash-1017 \| deepseek/deepseek-v4.1-flash-1017` | `any` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `native` | yes | no | `unknown` | yes | no |
 | `vercel_ai_gateway` | `google/gemini-3.1*` | `any; extends` | `enabled,adaptive` | `none` | yes | yes | yes | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `vercel_ai_gateway` | `*` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
@@ -499,6 +512,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `dashscope` | `dashscope/qwen3.7-max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `dashscope` | `dashscope/qwen3.8-max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `dashscope` | `dashscope/qwen3.8-max-0902` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `dashscope` | `dashscope/qwen4-max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/MiniMaxAI/MiniMax-M2.7-Turbo` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/MiniMaxAI/MiniMax-M3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/Qwen/Qwen3-235B-A22B-Instruct-2507` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -508,6 +522,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `deepinfra` | `deepinfra/Qwen/Qwen3.6-35B-A3B` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-24 forced-format sweep (N=5): DeepInfra Qwen3.6-35B-A3B native bills empty completions (1/5) and fenced-JSON is flaky (2/5); heredoc text carried a backslash-heavy Zig body byte-clean 5/5. |
 | `deepinfra` | `deepinfra/Qwen/Qwen3.7-Max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/Qwen/Qwen3.8-Max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `deepinfra` | `deepinfra/Qwen/Qwen4-Max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/deepseek-ai/DeepSeek-V3.2` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/deepseek-ai/DeepSeek-V4-Flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/deepseek-ai/DeepSeek-V4-Pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -541,8 +556,9 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `fireworks` | `accounts/fireworks/models/kimi-k2p6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `fireworks` | `accounts/fireworks/models/kimi-k2p7-code` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `fireworks` | `accounts/fireworks/models/kimi-k3` | `native` | `unknown` | - | - | - | - | - | catalog note: 2026-09-26 probe: one-tool `tool_choice: auto` request returned a single native `message.tool_calls` entry with empty content. |
+| `fireworks` | `accounts/fireworks/models/kimi-k3p1-pro` | `native` | `unknown` | - | - | - | - | - | catalog note: 2026-09-26 probe: one-tool `tool_choice: auto` request returned a single native `message.tool_calls` entry with empty content. |
 | `fireworks` | `accounts/fireworks/models/minimax-m3` | `native` | `interchangeable` | - | - | - | - | - | catalog note: 2026-07-18 credentialed probe (harn 0.10.23, direct Fireworks /v1, N=2): native carried the large backslash/quote/unicode string argument byte-exact on tool_choice auto and required (2/2); the Harn text-tool channel parsed byte-exact 2/2 (finish=stop, no reasoning over-run). |
-| `fireworks` | `accounts/fireworks/models/minimax-m3p1-flash` | `json` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `fireworks` | `accounts/fireworks/models/minimax-m3p1-flash` | `native` | `interchangeable` | - | - | - | - | - | catalog note: 2026-07-18 credentialed probe (harn 0.10.23, direct Fireworks /v1, N=2): native carried the large backslash/quote/unicode string argument byte-exact on tool_choice auto and required (2/2); the Harn text-tool channel parsed byte-exact 2/2 (finish=stop, no reasoning over-run). |
 | `fireworks` | `accounts/fireworks/models/muse-spark-open` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `fireworks` | `accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b` | `native` | `unknown` | - | - | - | - | - | catalog note: 2026-09-26 probe: one-tool `tool_choice: auto` request returned a single native `message.tool_calls` entry with empty content. |
 | `fireworks` | `accounts/fireworks/models/qwen3p8-max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -596,7 +612,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `minimax` | `MiniMax-M2.7` | `json` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and prose claiming the tool had run; fenced JSON text-channel tools completed the loop. |
 | `minimax` | `MiniMax-M2.7-highspeed` | `json` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and prose claiming the tool had run; fenced JSON text-channel tools completed the loop. |
 | `minimax` | `MiniMax-M3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `minimax` | `MiniMax-M3.1-Flash` | `json` | `unknown` | - | - | - | - | - | catalog note: Read-only catalog evidence, 2026-10-21; inference validation requires separate spend authorization. |
+| `minimax` | `MiniMax-M3.1-Flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `mistral` | `codestral-2508` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `mistral` | `mistral-large-2512` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `mistral` | `mistral-large-4-0` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -608,6 +624,8 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `moonshot` | `moonshot/kimi-k2.7-code` | `json` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and claimed the tool was unavailable. Harn JSON tools completed the loop; text tools also pass after fixing text-mode history projection. |
 | `moonshot` | `moonshot/kimi-k2.7-code-highspeed` | `json` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-20 Harn agent-loop smoke after parser fix: forced native/off emitted no dispatchable tool_calls and claimed the tool was unavailable. Harn JSON tools completed the loop; text tools also pass after fixing text-mode history projection. |
 | `moonshot` | `moonshot/kimi-k3` | `native` | `interchangeable` | - | - | - | - | - | catalog note: 2026-07-18 credentialed probe (harn 0.10.23, direct Moonshot /v1, tool_choice=auto, N=2): native carried the large backslash/quote/unicode string argument byte-exact 2/2, and the Harn text-tool channel parsed byte-exact 2/2 with no reasoning over-run. A 2026-08-26 direct control confirmed that K3 accepts tool_choice=required with reasoning_effort=max and returns a native tool call. |
+| `moonshot` | `moonshot/kimi-k3.1-pro` | `native` | `interchangeable` | - | - | - | - | - | catalog note: 2026-07-18 credentialed probe (harn 0.10.23, direct Moonshot /v1, tool_choice=auto, N=2): native carried the large backslash/quote/unicode string argument byte-exact 2/2, and the Harn text-tool channel parsed byte-exact 2/2 with no reasoning over-run. A 2026-08-26 direct control confirmed that K3 accepts tool_choice=required with reasoning_effort=max and returns a native tool call. |
+| `moonshot` | `moonshot/kimi-k3.1-pro-highspeed` | `native` | `interchangeable` | - | - | - | - | - | catalog note: 2026-07-18 credentialed probe (harn 0.10.23, direct Moonshot /v1, tool_choice=auto, N=2): native carried the large backslash/quote/unicode string argument byte-exact 2/2, and the Harn text-tool channel parsed byte-exact 2/2 with no reasoning over-run. A 2026-08-26 direct control confirmed that K3 accepts tool_choice=required with reasoning_effort=max and returns a native tool call. |
 | `nvidia` | `nvidia/deepseek-v4-flash-0731` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/deepseek-v4.1-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `nvidia` | `nvidia/glm-5.3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -711,6 +729,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `minimax/minimax-m2.5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `minimax/minimax-m2.7` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `minimax/minimax-m3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `minimax/minimax-m3.1-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `minimax/minimax-m3.1-flash:free` | `json` | `unknown` | - | - | - | - | - | catalog note: Read-only catalog evidence, 2026-10-21; inference validation requires separate spend authorization. |
 | `openrouter` | `mistralai/mistral-large-4-0` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `mistralai/mistral-medium-3-5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -719,6 +738,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `moonshotai/kimi-k2.6` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `moonshotai/kimi-k2.7-code` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-24 forced-format sweep (N=5): OpenRouter Kimi-K2.7-Code native dispatched 5/5 but double-escaped backslash bodies (1/5 fidelity); fenced-JSON emitted no parseable Harn call (0/5). Heredoc text carried the body byte-clean 5/5. |
 | `openrouter` | `moonshotai/kimi-k3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `moonshotai/kimi-k3.1-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `nex-agi/nex-n2.5-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `nvidia/nemotron-3-super-120b-a12b:free` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `nvidia/nemotron-3.5-lightning` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -790,6 +810,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `qwen/qwen3.8-max-0902` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `qwen/qwen3.8-max-prime` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `qwen/qwen3.8-omni-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `qwen/qwen4-max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `reflection/beam-1.0-501b-a23b` | `json` | `unknown` | - | - | - | - | - | catalog note: Read-only catalog evidence, 2026-10-21; inference validation requires separate spend authorization. |
 | `openrouter` | `stepfun/step-3.7-flash` | `native` | `interchangeable` | - | - | - | - | - | catalog note: Live OpenRouter probe on 2026-06-12 returned a valid provider-native tool call for Step 3.7 Flash with reasoning enabled. |
 | `openrouter` | `stepfun/step-5-preview` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -850,6 +871,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `typesafe` | `typesafe/jev-1.14.0` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `typesafe` | `typesafe/jev-latest` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `typesafe` | `typesafe/jev-preview` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `vercel_ai_gateway` | `vercel/alibaba/qwen4-max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `vercel_ai_gateway` | `vercel/anthropic/claude-haiku-4.5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `vercel_ai_gateway` | `vercel/convaiinnovations/laya` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `vercel_ai_gateway` | `vercel/deepseek/deepseek-v4.1-flash-1017` | `native` | `unknown` | - | - | - | - | - | catalog note: One live native tool call succeeded on 2026-10-25; the text tool grammar was not probed, so text tools stay undeclared. |
@@ -865,7 +887,9 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `vercel_ai_gateway` | `vercel/meta/muse-glimmer-30b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `vercel_ai_gateway` | `vercel/meta/muse-spark-open` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `vercel_ai_gateway` | `vercel/meta/muse-wonder-1.0` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `vercel_ai_gateway` | `vercel/minimax/minimax-m3.1-flash` | `json` | `unknown` | - | - | - | - | - | catalog note: Read-only catalog evidence, 2026-10-21; inference validation requires separate spend authorization. |
+| `vercel_ai_gateway` | `vercel/minimax/minimax-m3.1-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `vercel_ai_gateway` | `vercel/moonshotai/kimi-k3.1-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `vercel_ai_gateway` | `vercel/moonshotai/kimi-k3.1-pro-highspeed` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `vercel_ai_gateway` | `vercel/nvidia/nemotron-3.5-super-vl` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `vercel_ai_gateway` | `vercel/openai/gpt-5.4-nano` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `vercel_ai_gateway` | `vercel/openai/gpt-6.1-terra` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |

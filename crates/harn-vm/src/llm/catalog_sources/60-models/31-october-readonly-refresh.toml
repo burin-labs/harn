@@ -11,6 +11,7 @@ availability = "unknown"
 deprecated = true
 sunset_date = "2026-10-22"
 deprecation_note = "OpenRouter's October 26 response confirms the free launch ended October 22. The October 30 public model catalog omits this route and retains the paid minimax/minimax-m3.1-flash route."
+superseded_by = "minimax/minimax-m3.1-flash"
 context_window = 1000000
 capabilities = []
 pricing = { input_per_mtok = 0.0, output_per_mtok = 0.0 }
@@ -80,18 +81,6 @@ family = "unbiased-pareto"
 tier = "frontier"
 models_dev = {provider = "openrouter", model = "unbiased/pareto-26.10", fields = ["name", "context_window", "open_weight", "pricing"]}
 
-[models."vercel/minimax/minimax-m3.1-flash"]
-name = "MiniMax-M3.1-Flash (Vercel AI Gateway)"
-provider = "vercel_ai_gateway"
-wire_model = "minimax/minimax-m3.1-flash"
-availability = "unknown"
-context_window = 1000000
-capabilities = []
-pricing = { input_per_mtok = 0.0, output_per_mtok = 0.0 }
-family = "minimax"
-tier = "frontier"
-models_dev = {provider = "vercel", model = "minimax/minimax-m3.1-flash", fields = ["open_weight"]}
-
 [models."vercel/deepseek/deepseek-v4.1-flash-1017"]
 name = "DeepSeek V4.1 Flash 1017 (Vercel AI Gateway)"
 provider = "vercel_ai_gateway"
@@ -145,11 +134,39 @@ models_dev = {provider = "vercel", model = "elorian/glimpse", fields = ["context
 [models."MiniMax-M3.1-Flash"]
 name = "MiniMax M3.1 Flash"
 provider = "minimax"
-availability = "unknown"
-capabilities = []
+availability = "serverless"
+capabilities = ["tools", "streaming", "prompt_caching"]
 family = "minimax"
 tier = "frontier"
 models_dev = {provider = "minimax", model = "MiniMax-M3.1-Flash", fields = ["context_window", "open_weight", "released", "pricing"]}
+
+[models."MiniMax-M3.1-Flash".registration.request]
+# Native calls and tool-result replay passed live on November 27.
+native_tools = true
+preferred_tool_format = "native"
+prompt_caching = true
+vision = false
+vision_supported = false
+video_supported = false
+thinking_modes = []
+reasoning_effort_supported = false
+reasoning_none_supported = false
+reasoning_disable_supported = false
+temperature_supported = false
+top_p_supported = false
+requires_completion_tokens = false
+
+[models."MiniMax-M3.1-Flash".registration.routes."minimax/minimax-m3.1-flash"]
+provider = "openrouter"
+model = { name = "MiniMax M3.1 Flash (OpenRouter)", wire_model = "minimax/minimax-m3.1-flash", served_variant = "openrouter", context_window = 1048576, pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok = 0.015 } }
+
+[models."MiniMax-M3.1-Flash".registration.routes."vercel/minimax/minimax-m3.1-flash"]
+provider = "vercel_ai_gateway"
+model = { name = "MiniMax M3.1 Flash (Vercel AI Gateway)", wire_model = "minimax/minimax-m3.1-flash", served_variant = "vercel-ai-gateway", pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok = 0.015 } }
+
+[models."MiniMax-M3.1-Flash".registration.routes."accounts/fireworks/models/minimax-m3p1-flash"]
+provider = "fireworks"
+model = { name = "MiniMax M3.1 Flash (Fireworks)", wire_model = "accounts/fireworks/models/minimax-m3p1-flash", served_variant = "fireworks", context_window = 1048576, pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok = 0.015 } }
 
 [models."mercury-3"]
 provider = "inception"
@@ -224,12 +241,3 @@ logical_model = "deepseek-v4.1-flash-1017"
 equivalence_group = "deepseek-v4.1-flash-1017"
 models_dev = {provider = "fireworks-ai", model = "accounts/fireworks/models/deepseek-v4p1-flash-1017", fields = ["open_weight"]}
 
-[models."accounts/fireworks/models/minimax-m3p1-flash"]
-name = "MiniMax M3.1 Flash (Fireworks)"
-provider = "fireworks"
-availability = "unknown"
-context_window = 1048576
-capabilities = []
-family = "minimax"
-tier = "frontier"
-models_dev = {provider = "fireworks-ai", model = "accounts/fireworks/models/minimax-m3p1-flash", fields = ["open_weight"]}
