@@ -32113,7 +32113,7 @@
         "cache_write_per_mtok": 10.0,
         "input_token_bands": [
           {
-            "minimum_input_tokens": 272000,
+            "minimum_input_tokens": 272001,
             "input_multiplier": 2.0,
             "output_multiplier": 1.5
           }
@@ -32213,7 +32213,7 @@
         "cache_write_per_mtok": 10.0,
         "input_token_bands": [
           {
-            "minimum_input_tokens": 272000,
+            "minimum_input_tokens": 272001,
             "input_multiplier": 2.0,
             "output_multiplier": 1.5
           }
@@ -32313,7 +32313,7 @@
         "cache_write_per_mtok": 2.5,
         "input_token_bands": [
           {
-            "minimum_input_tokens": 272000,
+            "minimum_input_tokens": 272001,
             "input_multiplier": 2.0,
             "output_multiplier": 1.5
           }
@@ -32413,7 +32413,7 @@
         "cache_write_per_mtok": 2.5,
         "input_token_bands": [
           {
-            "minimum_input_tokens": 272000,
+            "minimum_input_tokens": 272001,
             "input_multiplier": 2.0,
             "output_multiplier": 1.5
           }

@@ -1,6 +1,8 @@
 # Released November 17: https://developers.openai.com/api/docs/guides/latest-model
 # November 27 probes returned native tool calls and consumed the result on
 # Responses, OpenRouter and Vercel. Direct Responses rejects effort "none".
+# OpenRouter (pinned OpenAI backend) billed exactly 272,000 input tokens at
+# the short rate and 272,001 at the long rate, despite the index's 272,000 hint.
 # The cache-write prices here cover 30-minute retention. The 12-hour option
 # is not represented by Harn's generic or one-hour cache-write fields.
 
@@ -48,7 +50,7 @@ value = { value = "sol", label = "Sol", plain_description = "Strong reasoning fo
 [models."gpt-6.2-sol".registration.routes."openai/gpt-6.2-sol"]
 provider = "openrouter"
 supersedes = ["openai/gpt-6.1-sol"]
-model = { name = "GPT-6.2 Sol (via OpenRouter)", served_variant = "openrouter", api_dialect = "openai_chat", pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] } }
+model = { name = "GPT-6.2 Sol (via OpenRouter)", served_variant = "openrouter", api_dialect = "openai_chat", pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] } }
 request = { responses_api = false, reasoning_tools_require_responses = false, reasoning_wire_format = "openrouter" }
 
 [models."gpt-6.2-sol".registration.routes."vercel/openai/gpt-6.2-sol"]
@@ -100,7 +102,7 @@ value = { value = "astra", label = "Astra", plain_description = "Most capable an
 [models."gpt-6.2-astra".registration.routes."openai/gpt-6.2-astra"]
 provider = "openrouter"
 supersedes = ["openai/gpt-6-astra"]
-model = { name = "GPT-6.2 Astra (via OpenRouter)", served_variant = "openrouter", api_dialect = "openai_chat", pricing = { input_per_mtok = 8.00, output_per_mtok = 40.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 10.00, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] } }
+model = { name = "GPT-6.2 Astra (via OpenRouter)", served_variant = "openrouter", api_dialect = "openai_chat", pricing = { input_per_mtok = 8.00, output_per_mtok = 40.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 10.00, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] } }
 request = { responses_api = false, reasoning_tools_require_responses = false, reasoning_wire_format = "openrouter" }
 
 [models."gpt-6.2-astra".registration.routes."vercel/openai/gpt-6.2-astra"]
@@ -110,7 +112,7 @@ request = { responses_api = false, reasoning_tools_require_responses = false, re
 
 [models."gpt-6.2-sol".registration.routes."openai/gpt-6.2-sol-pro"]
 provider = "openrouter"
-model = { name = "GPT-6.2 Sol Pro (via OpenRouter)", served_variant = "openrouter_pro", api_dialect = "openai_chat", pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] } }
+model = { name = "GPT-6.2 Sol Pro (via OpenRouter)", served_variant = "openrouter_pro", api_dialect = "openai_chat", pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 2.50, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] } }
 request = { responses_api = false, reasoning_tools_require_responses = false, reasoning_wire_format = "openrouter" }
 
 [models."gpt-6.2-sol".registration.routes."vercel/openai/gpt-6.2-sol-fast"]
@@ -120,7 +122,7 @@ request = { responses_api = false, reasoning_tools_require_responses = false, re
 
 [models."gpt-6.2-astra".registration.routes."openai/gpt-6.2-astra-pro"]
 provider = "openrouter"
-model = { name = "GPT-6.2 Astra Pro (via OpenRouter)", served_variant = "openrouter_pro", api_dialect = "openai_chat", pricing = { input_per_mtok = 8.00, output_per_mtok = 40.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 10.00, input_token_bands = [{ minimum_input_tokens = 272000, input_multiplier = 2.0, output_multiplier = 1.5 }] } }
+model = { name = "GPT-6.2 Astra Pro (via OpenRouter)", served_variant = "openrouter_pro", api_dialect = "openai_chat", pricing = { input_per_mtok = 8.00, output_per_mtok = 40.00, cache_read_per_mtok = 0.40, cache_write_per_mtok = 10.00, input_token_bands = [{ minimum_input_tokens = 272001, input_multiplier = 2.0, output_multiplier = 1.5 }] } }
 request = { responses_api = false, reasoning_tools_require_responses = false, reasoning_wire_format = "openrouter" }
 
 [models."gpt-6.2-astra".registration.routes."vercel/openai/gpt-6.2-astra-fast"]
