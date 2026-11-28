@@ -621,16 +621,17 @@ build-dir = "$configured_build"
 TOML
 (
   cd "$real_workspace"
-  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" check --quiet
-)
-if [[ ! -d "$configured_build/debug/.fingerprint" ]]; then
-  echo "wrapper did not preserve Cargo's configured shared build-dir" >&2
-  find "$configured_target" "$configured_build" -maxdepth 3 -print >&2 || true
-  exit 1
-fi
-if [[ -d "$configured_target/debug/.fingerprint" ]]; then
-  echo "metadata-discovered target unexpectedly received intermediate artifacts" >&2
-  find "$configured_target" "$configured_build" -maxdepth 3 -print >&2 || true
+  "$repo_root/scripts/cargo_with_worktree_build_dir.sh" check --quiet --message-format=json
+) > "$tmp_root/configured-build.jsonl"
+# Cargo's intermediate layout can change. Its check artifact identifies where
+# it actually wrote this crate's metadata.
+compiled_metadata="$(jq -ers '
+  map(select(.reason == "compiler-artifact" and .target.name == "shared_build_dir_proof")
+      | .filenames[] | select(endswith(".rmeta")))
+  | if length == 1 then .[0] else error("expected one fixture metadata artifact") end
+' "$tmp_root/configured-build.jsonl")"
+if [[ "$compiled_metadata" != "$configured_build/"* || ! -f "$compiled_metadata" ]]; then
+  echo "fixture metadata was not written under the configured Cargo build-dir: $compiled_metadata" >&2
   exit 1
 fi
 
