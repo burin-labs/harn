@@ -64,7 +64,43 @@ fn terra_registration_reaches_packaged_routes_controls_and_picker() {
         .unwrap();
     let sol = choices
         .iter()
-        .position(|v| v["model_id"] == "gpt-6.1-sol")
+        .position(|v| v["model_id"] == "gpt-6.2-sol")
         .unwrap();
     assert_eq!(terra + 1, sol);
+}
+
+#[test]
+fn november_models_expose_native_routes_and_distinct_effort_ladders() {
+    let catalog = serde_json::to_value(artifact()).unwrap();
+    let models = catalog["models"].as_array().unwrap();
+    let find = |id: &str| models.iter().find(|row| row["id"] == id);
+    for (direct, gateway, provider, xhigh) in [
+        ("gpt-6.2-sol", "openai", "openai", true),
+        ("gpt-6.2-astra", "openai", "openai", true),
+        ("gemini-4-carbon", "google", "gemini", false),
+        ("gemini-4-hydrogen", "google", "gemini", true),
+        ("gemini-4-neon", "google", "gemini", true),
+    ] {
+        for (id, provider) in [
+            (direct.to_owned(), provider),
+            (format!("{gateway}/{direct}"), "openrouter"),
+            (format!("vercel/{gateway}/{direct}"), "vercel_ai_gateway"),
+        ] {
+            let row = find(&id).unwrap_or_else(|| panic!("missing packaged route {id}"));
+            assert_eq!(row["provider"], provider, "{id}");
+            assert_eq!(row["tool_support"]["native"], true, "{id}");
+            assert_eq!(row["reasoning"]["none_supported"], false, "{id}");
+            assert_eq!(
+                row["reasoning"]["effort_levels"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|effort| effort == "xhigh"),
+                xhigh,
+                "{id}"
+            );
+        }
+    }
+    assert!(find("gpt-6.2-luna").is_none());
+    assert!(find("google/gemini-4-unserved").is_none());
 }
