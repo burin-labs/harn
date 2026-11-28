@@ -121,6 +121,7 @@ pub(crate) use scoped_fs::{
     append_locked_scoped_at_open, append_scoped_at_open, copy_scoped_at_open,
     create_dir_scoped_at_open, rename_scoped_at_open,
 };
+pub use scoped_fs::{scoped_mutation_target, ScopedMutationTarget};
 pub(crate) mod process_cwd;
 use process_cwd::enforce_process_cwd_for_policy;
 pub(crate) use process_cwd::policy_process_cwd;

@@ -8,7 +8,10 @@ use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
 use base64::Engine;
-use harn_vm::process_sandbox::FsAccess;
+use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
+use cap_std::ambient_authority;
+use cap_std::fs::{Dir, OpenOptions};
+use harn_vm::process_sandbox::{scoped_mutation_target, FsAccess};
 use harn_vm::VmValue;
 
 use crate::error::HostlibError;
@@ -169,18 +172,7 @@ pub(super) fn write_file(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     // so a `session/restore_tool_call` can roll the write back surgically.
     crate::fs_snapshot::auto_capture_for_write(WRITE_FILE_BUILTIN, &path);
 
-    if create_parents {
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                stdfs::create_dir_all(parent).map_err(|err| HostlibError::Backend {
-                    builtin: WRITE_FILE_BUILTIN,
-                    message: format!("mkdir `{}`: {err}", parent.display()),
-                })?;
-            }
-        }
-    }
-
-    write_no_follow(WRITE_FILE_BUILTIN, &path, &path_str, &bytes)?;
+    write_beneath_root(&path, &path_str, &bytes, create_parents)?;
     crate::fs_snapshot::record_completed_write(&path);
 
     Ok(build_dict([
@@ -228,53 +220,21 @@ pub(super) fn delete_file(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         }
     };
 
-    // Defend against a symlink-swap TOCTOU: `enforce_path_scope` above
-    // canonicalized the path through any symlinks and validated where it
-    // *resolved*, but the actual `remove_*` runs on the raw path. If the
-    // final component is a symlink whose target now escapes the workspace
-    // roots, removing through it (notably `remove_dir_all`, which descends
-    // into a symlinked directory's real target) could delete out-of-root
-    // files. Re-validate the link target under the policy and reject an
-    // escaping symlink rather than following it. Removing an in-scope
-    // symlink, or a real file/dir, stays allowed.
-    if metadata.file_type().is_symlink() {
-        reject_escaping_symlink(DELETE_FILE_BUILTIN, &path, &path_str, FsAccess::Delete)?;
-    }
-
     // Capture the pre-image into any open snapshots before mutating disk
     // so a `session/restore_tool_call` can roll the delete back.
     crate::fs_snapshot::auto_capture_for_write(DELETE_FILE_BUILTIN, &path);
 
-    let removed = if metadata.is_dir() {
-        if recursive {
-            stdfs::remove_dir_all(&path).map_err(|err| HostlibError::Backend {
-                builtin: DELETE_FILE_BUILTIN,
-                message: format!("remove_dir_all `{path_str}`: {err}"),
-            })?;
-            true
-        } else {
-            stdfs::remove_dir(&path).map_err(|err| HostlibError::Backend {
-                builtin: DELETE_FILE_BUILTIN,
-                message: format!(
-                    "remove_dir `{path_str}` (pass recursive=true to delete non-empty dirs): {err}"
-                ),
-            })?;
-            true
-        }
-    } else {
-        stdfs::remove_file(&path).map_err(|err| HostlibError::Backend {
-            builtin: DELETE_FILE_BUILTIN,
-            message: format!("remove_file `{path_str}`: {err}"),
-        })?;
-        true
+    let removal = match (metadata.is_dir(), recursive) {
+        (true, true) => Removal::DirAll,
+        (true, false) => Removal::Dir,
+        (false, _) => Removal::File,
     };
-    if removed {
-        crate::fs_snapshot::record_completed_write(&path);
-    }
+    remove_beneath_root(&path, &path_str, removal)?;
+    crate::fs_snapshot::record_completed_write(&path);
 
     Ok(build_dict([
         ("path", str_value(&path_str)),
-        ("removed", VmValue::Bool(removed)),
+        ("removed", VmValue::Bool(true)),
     ]))
 }
 
@@ -371,120 +331,162 @@ fn file_size(metadata: &stdfs::Metadata) -> u64 {
     metadata.len()
 }
 
-/// Write `bytes` to `path` without ever following a symlink at the final
-/// path component.
+/// The workspace root that holds a scoped mutation, opened as a capability,
+/// and the path beneath it. `None` when no path scope is active.
 ///
-/// `enforce_path_scope` validated where `path` *resolves* by canonicalizing
-/// a copy of it, but the subsequent disk write runs on the raw path and, by
-/// default, follows a symlink at write time. An attacker with in-workspace
-/// write access could swap the check-passed final component for a symlink
-/// pointing outside the allowed roots between the scope check and the write
-/// (a TOCTOU race), escaping the workspace.
-///
-/// On Unix we open with `O_NOFOLLOW`, which makes the kernel refuse to open
-/// the final component if it is a symlink — closing the race atomically, so
-/// the write targets the same inode the check observed (or fails). On other
-/// platforms we fall back to an `lstat` (no-follow) check on the final
-/// component before writing; this still rejects a symlink-final path,
-/// shrinking the race window to the gap between the `lstat` and the open
-/// (the OS sandbox layer remains the backstop there). Both paths keep
-/// behavior identical for the normal case: creating a new file and
-/// overwriting an existing real file inside the roots still succeed.
-fn write_no_follow(
+/// `enforce_path_scope` judges a path by resolving it once. The mutation then
+/// resolves it again, so a directory on the path swapped for a symlink in
+/// between would redirect it. Resolving from an opened root with cap-std
+/// keeps every component beneath that root at the moment of the mutation: a
+/// symlink that leads out is refused there, whenever it was planted.
+fn scoped_root(
     builtin: &'static str,
+    path: &Path,
+    access: FsAccess,
+) -> Result<Option<(Dir, PathBuf)>, HostlibError> {
+    let target = scoped_mutation_target(builtin, path, access).map_err(|err| {
+        HostlibError::SandboxViolation {
+            builtin,
+            path: path.display().to_string(),
+            message: err.to_string(),
+        }
+    })?;
+    let Some(target) = target else {
+        return Ok(None);
+    };
+    let root = Dir::open_ambient_dir(&target.root, ambient_authority()).map_err(|err| {
+        HostlibError::Backend {
+            builtin,
+            message: format!("open workspace root `{}`: {err}", target.root.display()),
+        }
+    })?;
+    Ok(Some((root, target.relative)))
+}
+
+/// Classify a failed rooted mutation. A symlink anywhere on the path is the
+/// reason cap-std refuses a component, so name it; anything else is the
+/// operation's own error.
+fn rooted_error(
+    builtin: &'static str,
+    root: &Dir,
+    relative: &Path,
+    path: &Path,
+    action: &str,
+    err: std::io::Error,
+) -> HostlibError {
+    let symlink = relative
+        .ancestors()
+        .filter(|prefix| !prefix.as_os_str().is_empty())
+        .find(|prefix| {
+            root.symlink_metadata(prefix)
+                .is_ok_and(|meta| meta.file_type().is_symlink())
+        });
+    match symlink {
+        Some(link) => HostlibError::SandboxViolation {
+            builtin,
+            path: path.display().to_string(),
+            message: format!(
+                "refusing to {action} `{}`: `{}` is a symlink, and a scoped {action} does not \
+                 follow a symlink out of the workspace root or at the final component",
+                path.display(),
+                link.display()
+            ),
+        },
+        None => HostlibError::Backend {
+            builtin,
+            message: format!("{action} `{}`: {err}", path.display()),
+        },
+    }
+}
+
+/// Write `bytes` to `path`, creating parents on request. Under a path scope,
+/// every component resolves beneath the workspace root and the final
+/// component is never followed as a symlink.
+fn write_beneath_root(
     path: &Path,
     path_str: &str,
     bytes: &[u8],
+    create_parents: bool,
 ) -> Result<(), HostlibError> {
-    let mut options = stdfs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        // libc::O_NOFOLLOW. Use the raw constant value so harn-hostlib does
-        // not need to take a direct `libc` dependency; the value is part of
-        // the stable Unix ABI across Linux and the BSDs/macOS.
-        #[cfg(target_os = "linux")]
-        const O_NOFOLLOW: i32 = 0x20000;
-        #[cfg(not(target_os = "linux"))]
-        const O_NOFOLLOW: i32 = 0x0100;
-        options.custom_flags(O_NOFOLLOW);
-    }
-
-    #[cfg(not(unix))]
-    {
-        // Cross-platform fallback: reject a symlink at the final component
-        // up front. lstat never follows the link, so this catches the swap
-        // without resolving it.
-        if let Ok(meta) = stdfs::symlink_metadata(path) {
-            if meta.file_type().is_symlink() {
-                return Err(HostlibError::SandboxViolation {
-                    builtin,
-                    path: path.display().to_string(),
-                    message: format!(
-                        "refusing to write `{path_str}`: final path component is a symlink \
-                         (potential workspace-escape via symlink swap)"
-                    ),
-                });
-            }
-        }
-    }
-
-    let mut file = options.open(path).map_err(|err| {
-        // On Unix an `O_NOFOLLOW` rejection of a symlink surfaces as ELOOP
-        // ("Too many levels of symbolic links"); report it as a sandbox
-        // violation rather than a generic backend error.
-        #[cfg(unix)]
-        if err.raw_os_error() == Some(40) {
-            return HostlibError::SandboxViolation {
+    let builtin = WRITE_FILE_BUILTIN;
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty());
+    let Some((root, relative)) = scoped_root(builtin, path, FsAccess::Write)? else {
+        if let (true, Some(parent)) = (create_parents, parent) {
+            stdfs::create_dir_all(parent).map_err(|err| HostlibError::Backend {
                 builtin,
-                path: path.display().to_string(),
-                message: format!(
-                    "refusing to write `{path_str}`: final path component is a symlink \
-                     (potential workspace-escape via symlink swap)"
-                ),
-            };
+                message: format!("mkdir `{}`: {err}", parent.display()),
+            })?;
         }
-        HostlibError::Backend {
+        return stdfs::write(path, bytes).map_err(|err| HostlibError::Backend {
             builtin,
             message: format!("write `{path_str}`: {err}"),
-        }
-    })?;
-
-    file.write_all(bytes).map_err(|err| HostlibError::Backend {
-        builtin,
-        message: format!("write `{path_str}`: {err}"),
-    })
+        });
+    };
+    rooted_write(&root, &relative, bytes, create_parents)
+        .map_err(|(action, err)| rooted_error(builtin, &root, &relative, path, action, err))
 }
 
-/// Reject deleting through a final-component symlink whose target escapes the
-/// active workspace roots.
-///
-/// `enforce_path_scope` canonicalized the path through the symlink and may
-/// have accepted it because the *target* was in-root at check time. Re-run
-/// the scope check on the link's resolved target so a swap to an
-/// out-of-root target is caught; if it now resolves outside the roots, the
-/// delete is refused. An in-scope symlink (or a real file/dir) is left for
-/// the caller to remove normally — `remove_file` unlinks a symlink itself
-/// without following it, so only the escaping case needs blocking.
-fn reject_escaping_symlink(
-    builtin: &'static str,
-    path: &Path,
-    path_str: &str,
-    access: FsAccess,
-) -> Result<(), HostlibError> {
-    // `enforce_path_scope` is a no-op when no restricted policy is active, so
-    // re-running it here re-derives the same verdict against the symlink's
-    // resolved target. If the target escapes the roots it now rejects.
-    enforce_path_scope(builtin, path, access).map_err(|_| HostlibError::SandboxViolation {
-        builtin,
-        path: path.display().to_string(),
-        message: format!(
-            "refusing to delete `{path_str}`: final path component is a symlink whose \
-             target escapes the workspace roots (potential symlink swap)"
-        ),
-    })
+/// Write beneath an opened root without following a symlink out of it or at
+/// the final component. Errors carry the action that failed.
+fn rooted_write(
+    root: &Dir,
+    relative: &Path,
+    bytes: &[u8],
+    create_parents: bool,
+) -> Result<(), (&'static str, std::io::Error)> {
+    if let (true, Some(parent)) = (
+        create_parents,
+        relative
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty()),
+    ) {
+        root.create_dir_all(parent)
+            .map_err(|err| ("create the parents of", err))?;
+    }
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    options.follow(FollowSymlinks::No);
+    root.open_with(relative, &options)
+        .and_then(|mut file| file.write_all(bytes))
+        .map_err(|err| ("write", err))
+}
+
+#[derive(Clone, Copy)]
+enum Removal {
+    File,
+    Dir,
+    DirAll,
+}
+
+/// Remove `path`. Under a path scope every component resolves beneath the
+/// workspace root, so a swapped parent cannot point the removal elsewhere,
+/// and a final symlink is unlinked, never followed.
+fn remove_beneath_root(path: &Path, path_str: &str, removal: Removal) -> Result<(), HostlibError> {
+    let builtin = DELETE_FILE_BUILTIN;
+    let action = match removal {
+        Removal::File => "remove_file",
+        Removal::Dir => "remove_dir (pass recursive=true to delete non-empty dirs)",
+        Removal::DirAll => "remove_dir_all",
+    };
+    let Some((root, relative)) = scoped_root(builtin, path, FsAccess::Delete)? else {
+        let result = match removal {
+            Removal::File => stdfs::remove_file(path),
+            Removal::Dir => stdfs::remove_dir(path),
+            Removal::DirAll => stdfs::remove_dir_all(path),
+        };
+        return result.map_err(|err| HostlibError::Backend {
+            builtin,
+            message: format!("{action} `{path_str}`: {err}"),
+        });
+    };
+    match removal {
+        Removal::File => root.remove_file(&relative),
+        Removal::Dir => root.remove_dir(&relative),
+        Removal::DirAll => root.remove_dir_all(&relative),
+    }
+    .map_err(|err| rooted_error(builtin, &root, &relative, path, action, err))
 }
 
 fn read_bytes(
@@ -566,5 +568,225 @@ fn planned_read_len(offset: u64, limit_bytes: u64, total_size: u64) -> u64 {
         total_size - offset
     } else {
         std::cmp::min(limit_bytes, total_size - offset)
+    }
+}
+
+/// The escape corpus: layouts a workspace writer can plant before a scoped
+/// mutation runs. The rooted operations must leave the outside directory
+/// untouched in every case; the same operations through plain `std::fs` must
+/// escape in every case, which proves the corpus can see an escape.
+#[cfg(all(test, unix))]
+mod escape_corpus {
+    use std::os::unix::fs::symlink;
+
+    use super::*;
+
+    enum Op {
+        Write {
+            relative: &'static str,
+            create_parents: bool,
+        },
+        Remove {
+            relative: &'static str,
+            removal: Removal,
+        },
+    }
+
+    struct Case {
+        name: &'static str,
+        plant: fn(&Path, &Path),
+        op: Op,
+        escaped: fn(&Path) -> bool,
+    }
+
+    fn outside_name(outside: &Path) -> String {
+        outside.file_name().unwrap().to_string_lossy().into_owned()
+    }
+
+    const CASES: &[Case] = &[
+        Case {
+            name: "parent symlink to outside (relative target)",
+            plant: |root, outside| {
+                symlink(format!("../{}", outside_name(outside)), root.join("sub")).unwrap();
+            },
+            op: Op::Write {
+                relative: "sub/f.txt",
+                create_parents: false,
+            },
+            escaped: |outside| outside.join("f.txt").exists(),
+        },
+        Case {
+            name: "parent symlink to outside (absolute target)",
+            plant: |root, outside| symlink(outside, root.join("abs")).unwrap(),
+            op: Op::Write {
+                relative: "abs/f.txt",
+                create_parents: false,
+            },
+            escaped: |outside| outside.join("f.txt").exists(),
+        },
+        Case {
+            name: "nested parent symlink with create_parents",
+            plant: |root, outside| {
+                fs_mkdir(&root.join("a"));
+                symlink(outside, root.join("a/b")).unwrap();
+            },
+            op: Op::Write {
+                relative: "a/b/new/f.txt",
+                create_parents: true,
+            },
+            escaped: |outside| outside.join("new").exists(),
+        },
+        Case {
+            name: "final symlink to an outside file",
+            plant: |root, outside| {
+                stdfs::write(outside.join("secret.txt"), "original").unwrap();
+                symlink(outside.join("secret.txt"), root.join("link")).unwrap();
+            },
+            op: Op::Write {
+                relative: "link",
+                create_parents: false,
+            },
+            escaped: |outside| {
+                stdfs::read_to_string(outside.join("secret.txt")).unwrap() != "original"
+            },
+        },
+        Case {
+            name: "dot-dot out of the root",
+            // Nothing to plant: `..` alone leads out of the root.
+            plant: |_, _| {},
+            op: Op::Write {
+                relative: "../OUTSIDE/f.txt",
+                create_parents: false,
+            },
+            escaped: |outside| outside.join("f.txt").exists(),
+        },
+        Case {
+            name: "remove a file through a parent symlink",
+            plant: |root, outside| {
+                stdfs::write(outside.join("keep.txt"), "keep").unwrap();
+                symlink(outside, root.join("rm")).unwrap();
+            },
+            op: Op::Remove {
+                relative: "rm/keep.txt",
+                removal: Removal::File,
+            },
+            escaped: |outside| !outside.join("keep.txt").exists(),
+        },
+        Case {
+            name: "remove a tree through a parent symlink",
+            plant: |root, outside| {
+                fs_mkdir(&outside.join("tree"));
+                stdfs::write(outside.join("tree/keep.txt"), "keep").unwrap();
+                symlink(outside, root.join("rmtree")).unwrap();
+            },
+            op: Op::Remove {
+                relative: "rmtree/tree",
+                removal: Removal::DirAll,
+            },
+            escaped: |outside| !outside.join("tree").exists(),
+        },
+    ];
+
+    fn fs_mkdir(path: &Path) {
+        stdfs::create_dir_all(path).unwrap();
+    }
+
+    fn relative_for(op_relative: &str, outside: &Path) -> PathBuf {
+        PathBuf::from(op_relative.replace("OUTSIDE", &outside_name(outside)))
+    }
+
+    /// Run every case through `run`, returning the names of the cases that
+    /// changed the outside directory.
+    fn escapes(run: impl Fn(&Path, &Op, &Path) -> std::io::Result<()>) -> Vec<&'static str> {
+        CASES
+            .iter()
+            .filter(|case| {
+                let parent = tempfile::tempdir().unwrap();
+                let root = parent.path().join("root");
+                let outside = parent.path().join("outside");
+                fs_mkdir(&root);
+                fs_mkdir(&outside);
+                (case.plant)(&root, &outside);
+                let _ = run(&root, &case.op, &outside);
+                (case.escaped)(&outside)
+            })
+            .map(|case| case.name)
+            .collect()
+    }
+
+    #[test]
+    fn rooted_mutations_never_leave_the_root() {
+        let escaped = escapes(|root, op, outside| {
+            let dir = Dir::open_ambient_dir(root, ambient_authority())?;
+            match op {
+                Op::Write {
+                    relative,
+                    create_parents,
+                } => rooted_write(
+                    &dir,
+                    &relative_for(relative, outside),
+                    b"x",
+                    *create_parents,
+                )
+                .map_err(|(_, err)| err),
+                Op::Remove { relative, removal } => {
+                    let relative = relative_for(relative, outside);
+                    match removal {
+                        Removal::File => dir.remove_file(&relative),
+                        Removal::Dir => dir.remove_dir(&relative),
+                        Removal::DirAll => dir.remove_dir_all(&relative),
+                    }
+                }
+            }
+        });
+        assert!(
+            escaped.is_empty(),
+            "rooted mutations escaped in: {escaped:?}"
+        );
+    }
+
+    /// The final component is never followed, even to a file inside the root.
+    #[test]
+    fn rooted_write_refuses_a_final_symlink_inside_the_root() {
+        let root = tempfile::tempdir().unwrap();
+        stdfs::write(root.path().join("victim.txt"), "original").unwrap();
+        symlink("victim.txt", root.path().join("alias")).unwrap();
+        let dir = Dir::open_ambient_dir(root.path(), ambient_authority()).unwrap();
+        assert!(rooted_write(&dir, Path::new("alias"), b"x", false).is_err());
+        assert_eq!(
+            stdfs::read_to_string(root.path().join("victim.txt")).unwrap(),
+            "original"
+        );
+    }
+
+    /// Negative control: the same corpus through plain `std::fs` escapes in
+    /// every case, so an empty result above is a refusal, not a blind corpus.
+    #[test]
+    fn plain_std_fs_escapes_in_every_case() {
+        let escaped = escapes(|root, op, outside| match op {
+            Op::Write {
+                relative,
+                create_parents,
+            } => {
+                let path = root.join(relative_for(relative, outside));
+                if *create_parents {
+                    stdfs::create_dir_all(path.parent().unwrap())?;
+                }
+                stdfs::write(path, b"x")
+            }
+            Op::Remove { relative, removal } => {
+                let path = root.join(relative_for(relative, outside));
+                match removal {
+                    Removal::File => stdfs::remove_file(path),
+                    Removal::Dir => stdfs::remove_dir(path),
+                    Removal::DirAll => stdfs::remove_dir_all(path),
+                }
+            }
+        });
+        let all: Vec<_> = CASES.iter().map(|case| case.name).collect();
+        assert_eq!(
+            escaped, all,
+            "the corpus must detect an escape in every case"
+        );
     }
 }
