@@ -110,6 +110,7 @@ pub(crate) fn permission_reader_paths(
                 let analysis = super::super::catastrophic::analyze_shell_dialect(
                     crate::shells::ShellDialect::Posix,
                     &command,
+                    None,
                 );
                 analysis.unresolved
                     || analysis
@@ -139,7 +140,7 @@ fn literal_reader_paths(
     directory: &Path,
 ) -> Option<Vec<String>> {
     let shape = super::super::catastrophic::shell_command_shape(dialect, command);
-    let analysis = super::super::catastrophic::analyze_shell_dialect(dialect, command);
+    let analysis = super::super::catastrophic::analyze_shell_dialect(dialect, command, None);
     if shape.exit_evidence.scope != "all_commands"
         || analysis.unresolved
         || analysis.io_unresolved
@@ -165,7 +166,10 @@ fn simple_reader_paths(argv: &[String], directory: &Path) -> Option<Vec<String>>
         || analysis.stages.iter().any(|stage| {
             stage.source_argv.as_slice() != argv
                 || stage.argv.as_slice() != argv
-                || stage.dynamic.iter().any(|dynamic| *dynamic)
+                || stage
+                    .expansions
+                    .iter()
+                    .any(|value| value.requires_expansion())
                 || stage.argv.first().is_some_and(|name| name == "cd")
         })
     {

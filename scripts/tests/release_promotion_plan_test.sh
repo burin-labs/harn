@@ -25,9 +25,11 @@ repo="$tmp/repo"
 mkdir -p "$repo/scripts/lib" "$repo/scripts/ci" "$tmp/bin"
 cp "$root/scripts/lib/release_version.sh" "$root/scripts/lib/release_candidate_run.sh" \
   "$root/scripts/lib/release_consumer_verdict.sh" "$root/scripts/lib/consumer_canary_policy.sh" \
+  "$root/scripts/lib/consumer_pairing_superset.sh" \
   "$root/scripts/lib/candidate_archive_contract.sh" "$root/scripts/lib/sha256.sh" \
   "$root/scripts/lib/green_checkpoint.sh" "$repo/scripts/lib/"
 cp "$root/scripts/lib/release-candidate-state.mjs" "$root/scripts/lib/consumer-observer.mjs" \
+  "$root/scripts/lib/consumer-pairing.mjs" "$root/scripts/lib/consumer-repair-pairing.mjs" \
   "$root/scripts/lib/consumer-observation-budget.mjs" "$repo/scripts/lib/"
 cp "$root/scripts/ci/consumer_observation_budget.json" "$repo/scripts/ci/"
 cp "$root/scripts/ci/consumer_canary_policy.json" "$repo/scripts/ci/"

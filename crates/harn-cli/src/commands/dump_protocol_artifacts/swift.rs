@@ -20,12 +20,10 @@ use super::values::*;
 mod activity_types;
 mod codegen_support;
 mod prompt_terminal;
-mod session_timeline;
 
 use activity_types::append_activity_types;
 pub(crate) use codegen_support::*;
 use prompt_terminal::append_prompt_terminal_types;
-use session_timeline::append_session_timeline_types;
 
 #[cfg(test)]
 pub(super) fn generate_swift_for_tests() -> String {
@@ -953,44 +951,6 @@ public struct HarnACPAgentCapabilities: Codable, Sendable, Equatable {
     }
 }
 
-public struct HarnToolArgSchema: Codable, Sendable, Equatable {
-    public var pathParams: [String]
-    public var dependencyKeyParams: [String]
-    public var dependencyRangeParams: [[String: String]]
-    public var argAliases: [String: String]
-    public var required: [String]
-
-    enum CodingKeys: String, CodingKey {
-        case pathParams = "path_params"
-        case dependencyKeyParams = "dependency_key_params"
-        case dependencyRangeParams = "dependency_range_params"
-        case argAliases = "arg_aliases"
-        case required
-    }
-}
-
-public struct HarnToolAnnotations: Codable, Sendable, Equatable {
-    public var kind: HarnACPToolKind
-    public var sideEffectLevel: HarnSideEffectLevel
-    public var completionEvidenceRole: HarnCompletionEvidenceRole?
-    public var argSchema: HarnToolArgSchema
-    public var capabilities: [String: [String]]
-    public var emitsArtifacts: Bool
-    public var resultReaders: [String]
-    public var inlineResult: Bool
-
-    enum CodingKeys: String, CodingKey {
-        case kind
-        case sideEffectLevel = "side_effect_level"
-        case completionEvidenceRole = "completion_evidence_role"
-        case argSchema = "arg_schema"
-        case capabilities
-        case emitsArtifacts = "emits_artifacts"
-        case resultReaders = "result_readers"
-        case inlineResult = "inline_result"
-    }
-}
-
 public struct HarnA2ATaskStatus: Codable, Sendable, Equatable {
     public var state: HarnA2ATaskState
     public var message: HarnACPValue?
@@ -1207,7 +1167,8 @@ public struct HarnMCPOAuthDynamicClientRegistrationRequest: Codable, Sendable, E
 }
 "#,
     );
-    append_session_timeline_types(&mut out);
+    super::tool_annotation_records::append(&mut out, super::records::Target::Swift);
+    super::timeline_records::append(&mut out, super::records::Target::Swift);
     session_updates.append(&mut out, super::records::Target::Swift);
     append_swift_prepared_session_types(&mut out);
     append_swift_session_recap_types(&mut out);

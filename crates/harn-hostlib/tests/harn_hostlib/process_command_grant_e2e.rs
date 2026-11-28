@@ -82,8 +82,9 @@ case "$1 $2" in
     printf '%s%s\n' "$pad" "$token"
     echo ready; sleep 2; exit 0 ;;
   "api prompt")
-    printf 'continue? %s' "$(printf '%s' "$token" | cut -c1)"; sleep 3
-    printf '%s\n' "$(printf '%s' "$token" | cut -c2-)"
+    first=$(printf '%s' "$token" | cut -c1); rest=$(printf '%s' "$token" | cut -c2-)
+    echo prompting; printf 'continue? %s' "$first"; sleep 3
+    printf '%s\n' "$rest"
     exit 0 ;;
 esac
 if [ -n "$1" ] && [ -f "$config" ]; then
@@ -591,6 +592,15 @@ fn a_prompt_ending_in_a_granted_values_first_byte_reaches_an_output_wait() {
     let completion = harn_hostlib::tools::long_running::register_completion_notifier(&handle_id)
         .expect("a live handle");
 
+    // Process start-up is not what is measured, and a loaded host can take
+    // seconds to reach the script's first line. Once `prompting` arrives, the
+    // prompt follows with no further process spawn, and the script then
+    // sleeps 3s, so a 2s wait matches only if the prompt was not withheld.
+    let started_prompting = wait_for_output(&handle_id, "prompting\n", false, 60_000);
+    assert!(
+        require_bool(&started_prompting, "matched"),
+        "the program never reached its prompt: {started_prompting:?}"
+    );
     let (first, rest) = PROBE.split_at(1);
     let prompt = format!("continue? {first}");
     let waited = wait_for_output(&handle_id, &prompt, false, 2_000);

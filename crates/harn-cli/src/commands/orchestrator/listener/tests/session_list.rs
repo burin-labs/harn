@@ -8,7 +8,7 @@ async fn acp_websocket_session_list_discovers_live_and_detached_sessions_by_cwd(
     let dir = tempdir().expect("tempdir");
     let cwd = dir.path().display().to_string();
     let canonical_cwd = dir.path().canonicalize().expect("canonical cwd");
-    let (listener, _log, _dir) = start_acp_test_listener_with_project_root(
+    let (listener, log, _dir) = start_acp_test_listener_with_project_root(
         ListenerRuntimeEnv::for_test().with_api_key("ws-test-key"),
         Some(dir.path()),
     )
@@ -70,7 +70,7 @@ async fn acp_websocket_session_list_discovers_live_and_detached_sessions_by_cwd(
 
     owner.close(None).await.expect("close owner");
     drop(owner);
-    wait_for_acp_session_detached(&listener, &session_id).await;
+    wait_for_acp_session_detached(&log, &session_id).await;
 
     let detached = acp_request(
         &mut observer,

@@ -7,6 +7,7 @@ ceiling=${FLAKE_ITERATIONS_CEILING:?}
 floor=${FLAKE_ITERATIONS_FLOOR:?}
 budget=${FLAKE_JOB_BUDGET_MINUTES:?}
 started=${FLAKE_JOB_START_EPOCH:?}
+cargo_profile=${FLAKE_CARGO_PROFILE:?}
 if ! [[ "$ceiling" =~ ^[1-9][0-9]*$ && "$floor" =~ ^[1-9][0-9]*$ &&
     "$budget" =~ ^[1-9][0-9]*$ && "$started" =~ ^(0|[1-9][0-9]*)$ ]] || ((floor > ceiling)); then
   echo '::error::Invalid repeatability budget: positive floor/ceiling/minutes and floor <= ceiling are required.'
@@ -19,13 +20,13 @@ inventory="${RUNNER_TEMP:?}/harn-flake-inventory.json"
 {
   echo '## Touched-test repeatability'
   echo "- Filter: \`${NEXTEST_FILTER:?}\`"
-  echo "- Scope: workspace default features, flake-detection profile"
+  echo "- Scope: workspace default features, Cargo profile $cargo_profile, nextest profile flake-detection"
   echo "- Budget: ${FLAKE_JOB_BUDGET_MINUTES} min wall-clock from job start"
   echo "- Iteration target: ${floor} (floor) / ${ceiling} (ceiling)"
 } >> "$summary"
 
 list_status=0
-cargo-nextest nextest list --locked --workspace --profile flake-detection \
+cargo-nextest nextest list --locked --workspace --cargo-profile "$cargo_profile" --profile flake-detection \
   -E "$NEXTEST_FILTER" --message-format json > "$inventory" || list_status=$?
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   echo "inventory=$inventory" >> "$GITHUB_OUTPUT"
@@ -72,7 +73,7 @@ while :; do
   iter=$(( completed + 1 ))
   printf -- '--- Iteration %d/%d (%ds budget left) ---\n' "$iter" "$ceiling" "$remaining"
   start=$(date +%s)
-  if cargo-nextest nextest run --locked --workspace --profile flake-detection \
+  if cargo-nextest nextest run --locked --workspace --cargo-profile "$cargo_profile" --profile flake-detection \
       --test-threads 8 --no-tests fail -E "$NEXTEST_FILTER"; then
     status=0
   else

@@ -1376,6 +1376,14 @@ pub enum AgentEvent {
         session_id: String,
         fact: Box<super::session_health::SessionHealthFact>,
     },
+    /// Current request context, projected once by the request accounting owner.
+    /// Counts are estimates of resident input, not cumulative token usage.
+    ContextUsage {
+        session_id: String,
+        call_id: String,
+        used_tokens: u64,
+        capacity_tokens: Option<u64>,
+    },
 }
 
 fn is_zero_usize(value: &usize) -> bool {

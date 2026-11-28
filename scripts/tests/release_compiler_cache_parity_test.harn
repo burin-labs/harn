@@ -30,7 +30,7 @@ pipeline test_release_attribution_uses_the_release_feature_identity(harness: Har
   const build_job = workflow.jobs.build
   assert_eq(build_job.env.HARN_RELEASE_FEATURES, "embedded-stdlib")
   for selection in [
-    {name: "Build", prefix: "cargo build"},
+    {name: "Build", prefix: "bash scripts/ci/run_with_host_telemetry.sh"},
     {name: "Generate cargo-bloat report", prefix: "cargo bloat"},
   ] {
     const step = step_by_name(build_job.steps, selection.name)

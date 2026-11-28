@@ -32,6 +32,9 @@ pub struct SkillManifest {
     /// One-line description surfaced to the model for auto-activation.
     #[serde(default)]
     pub description: String,
+    /// Agent Skills metadata: opaque string keys and string values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<BTreeMap<String, String>>,
     /// Longer auto-activation trigger. Some specs call this `when-to-use`.
     #[serde(default)]
     pub when_to_use: Option<String>,
@@ -225,6 +228,9 @@ pub fn parse_frontmatter(yaml: &str) -> Result<ParsedFrontmatter, String> {
         if let Some(card) = card {
             normalized.insert("short".to_string(), card);
         }
+    }
+    if !metadata.is_null() {
+        normalized.insert("metadata".to_string(), metadata);
     }
 
     // Hooks sometimes arrive as a list of `{event: "...", command: "..."}`
@@ -481,6 +487,52 @@ mod tests {
             assert_eq!(parsed.manifest.short, expected, "{fields}");
             assert_eq!(parsed.manifest.description, "Description card");
             assert!(parsed.unknown_fields.is_empty(), "{parsed:?}");
+        }
+    }
+
+    #[test]
+    fn preserves_string_metadata_and_short_card_precedence() {
+        for (explicit, expected) in [
+            ("", "Metadata card"),
+            ("short: Explicit card\n", "Explicit card"),
+        ] {
+            let parsed = parse_frontmatter(&format!(
+                "name: shared\ndescription: Description card\n{explicit}metadata:\n  short-description: Metadata card\n  card_priority: '5'\n  empty: ''\n"
+            ))
+            .expect("string metadata is supported");
+            assert_eq!(parsed.manifest.short, expected);
+            assert_eq!(
+                parsed.manifest.metadata,
+                Some(BTreeMap::from([
+                    ("short-description".to_string(), "Metadata card".to_string()),
+                    ("card_priority".to_string(), "5".to_string()),
+                    ("empty".to_string(), String::new()),
+                ]))
+            );
+            assert!(parsed.unknown_fields.is_empty());
+        }
+        for field in ["", "metadata: null\n"] {
+            let parsed = parse_frontmatter(&format!("name: plain\nshort: Plain card\n{field}"))
+                .expect("optional metadata stays absent");
+            assert!(parsed.manifest.metadata.is_none());
+        }
+        assert_eq!(
+            parse_frontmatter("name: empty\nshort: Empty metadata\nmetadata: {}\n")
+                .unwrap()
+                .manifest
+                .metadata,
+            Some(BTreeMap::new())
+        );
+    }
+
+    #[test]
+    fn rejects_non_string_metadata_values() {
+        for value in ["5", "true", "null", "[value]", "{nested: value}"] {
+            let error = parse_frontmatter(&format!(
+                "name: invalid\nshort: Valid card\nmetadata:\n  custom: {value}\n"
+            ))
+            .unwrap_err();
+            assert!(error.contains("expected field shapes"), "{value}: {error}");
         }
     }
 

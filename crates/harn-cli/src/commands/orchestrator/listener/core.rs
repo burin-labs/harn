@@ -307,11 +307,6 @@ impl ListenerRuntime {
     }
 
     #[cfg(test)]
-    pub(crate) fn acp_session_is_detached_for_test(&self, session_id: &str) -> bool {
-        self.acp_hub.session_is_detached_for_test(session_id)
-    }
-
-    #[cfg(test)]
     pub(crate) async fn sweep_expired_acp_workers_for_test(&self) {
         self.acp_hub.sweep_expired_once_for_test().await;
     }

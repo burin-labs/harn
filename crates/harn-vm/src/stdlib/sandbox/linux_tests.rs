@@ -836,13 +836,18 @@ fn developer_toolchains_admit_linux_vendor_installations() {
 #[test]
 fn standard_device_rules_allow_common_device_files_only() {
     let rules = standard_device_rules();
-    assert_eq!(rules.len(), 4);
-    assert!(rules.iter().any(
-        |(path, access)| path.as_path() == std::path::Path::new("/dev/null")
-            && access.contains(AccessFs::ReadFile)
-            && access.contains(AccessFs::WriteFile)
-            && !access.contains(AccessFs::IoctlDev)
-    ));
+    assert_eq!(rules.len(), 5);
+    for device in ["/dev/null", "/dev/full"] {
+        assert!(
+            rules.iter().any(
+                |(path, access)| path.as_path() == std::path::Path::new(device)
+                    && access.contains(AccessFs::ReadFile)
+                    && access.contains(AccessFs::WriteFile)
+                    && !access.contains(AccessFs::IoctlDev)
+            ),
+            "{device} should be readable and writable"
+        );
+    }
     for device in ["/dev/zero", "/dev/random", "/dev/urandom"] {
         let Some((_, access)) = rules
             .iter()

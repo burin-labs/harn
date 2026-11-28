@@ -12,6 +12,7 @@
 //! `harn doctor` can report where each skill came from.
 
 use crate::value::VmDictExt;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -430,6 +431,9 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
     let mut entry: crate::value::DictMap = crate::value::DictMap::new();
     entry.put_str("name", skill.manifest.name.as_str());
     entry.put_str("short", skill.manifest.short.as_str());
+    if let Some(metadata) = &skill.manifest.metadata {
+        entry.put("metadata", skill_metadata_to_vm(metadata));
+    }
     entry.put_str(
         "description",
         if skill.manifest.description.is_empty() {
@@ -514,6 +518,9 @@ pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmVal
     let mut entry: crate::value::DictMap = crate::value::DictMap::new();
     entry.put_str("name", skill.manifest.name.as_str());
     entry.put_str("short", skill.manifest.short.as_str());
+    if let Some(metadata) = &skill.manifest.metadata {
+        entry.put("metadata", skill_metadata_to_vm(metadata));
+    }
     entry.put_str(
         "description",
         if skill.manifest.description.is_empty() {
@@ -582,6 +589,14 @@ pub fn skill_manifest_ref_to_vm(skill: &SkillManifestRef) -> crate::value::VmVal
     VmValue::dict(entry)
 }
 
+fn skill_metadata_to_vm(metadata: &BTreeMap<String, String>) -> crate::value::VmValue {
+    crate::value::VmValue::dict(
+        metadata
+            .iter()
+            .map(|(key, value)| (key.as_str(), crate::value::VmValue::string(value.as_str()))),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -647,6 +662,39 @@ mod tests {
             .and_then(|d| d.get("name"))
             .map(crate::value::VmValue::display);
         assert_eq!(name.as_deref(), Some("weather-mcp"));
+    }
+
+    #[test]
+    fn metadata_survives_full_and_manifest_vm_entries() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "specific/SKILL.md",
+            "---\nname: specific\nshort: Explicit card\nallowed-tools: [look]\nmetadata:\n  card_priority: '5'\n  short-description: Metadata card\n  allowed_tools: '*'\n---\nSkill body\n",
+        );
+        let source = FsSkillSource::new(tmp.path(), Layer::Project);
+        let listed = source.list();
+        assert_eq!(listed.len(), 1);
+        let skill = source.fetch("specific").unwrap();
+        for entry in [
+            skill_entry_to_vm(&skill),
+            skill_manifest_ref_to_vm(&listed[0]),
+        ] {
+            let dict = entry.as_dict().expect("skill entry");
+            let metadata = dict
+                .get("metadata")
+                .and_then(crate::value::VmValue::as_dict)
+                .expect("both projections retain metadata");
+            assert_eq!(metadata.len(), 3);
+            assert_eq!(metadata.get("card_priority").unwrap().display(), "5");
+            assert_eq!(metadata.get("allowed_tools").unwrap().display(), "*");
+            assert_eq!(dict.get("short").unwrap().display(), "Explicit card");
+            let crate::value::VmValue::List(tools) = dict.get("allowed_tools").unwrap() else {
+                panic!("allowed_tools must remain a list");
+            };
+            assert_eq!(tools.len(), 1);
+            assert_eq!(tools[0].display(), "look");
+        }
     }
 
     #[test]

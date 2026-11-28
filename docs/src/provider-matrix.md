@@ -126,6 +126,9 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `fireworks` | `*qwen*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `flexai` | `*` | `any` | no | `none` | no | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `friendli` | `*` | `any` | no | `none` | no | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `gemini` | `gemini-4-carbon` | `any; extends` | `effort` | `none` | yes | yes | yes | no | yes | yes | `native` | `plain` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `gemini` | `gemini-4-hydrogen` | `any; extends` | `effort` | `none` | yes | yes | yes | no | yes | yes | `native` | `plain` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `gemini` | `gemini-4-neon` | `any; extends` | `effort` | `none` | yes | yes | yes | no | yes | yes | `native` | `plain` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `gemini` | `gemini-3.1-flash-lite` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `gemini` | `gemini-4-argon \| models/gemini-4-argon` | `any` | `effort` | `none` | yes | yes | yes | no | yes | yes | `native` | `plain` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `gemini` | `gemma-4* \| models/gemma-4*` | `any` | `enabled` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
@@ -215,6 +218,8 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `ollama` | `devstral-small-2*` | `any` | no | `none` | no | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `ollama` | `*` | `any` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `openai` | `gpt-6.1-terra` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `openai` | `gpt-6.2-astra` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `openai` | `gpt-6.2-sol` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openai` | `gpt-5.4-nano \| gpt-5.4-mini` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `openai` | `gpt-4o*` | `any` | no | `none` | yes | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | yes |
 | `openai` | `gpt-4.1*` | `any` | no | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | yes |
@@ -246,8 +251,15 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `openai` | `openai/o3*` | `any` | `effort` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openai` | `openai/o4*` | `any` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `anthropic/claude-fable-5.2` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | yes |
+| `openrouter` | `google/gemini-4-carbon` | `any; extends` | `effort` | `none` | yes | yes | yes | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `openrouter` | `google/gemini-4-hydrogen` | `any; extends` | `effort` | `none` | yes | yes | yes | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `openrouter` | `google/gemini-4-neon` | `any; extends` | `effort` | `none` | yes | yes | yes | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `openai/gpt-6.1-terra` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `openai/gpt-6.1-terra-pro` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `openrouter` | `openai/gpt-6.2-astra` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `openrouter` | `openai/gpt-6.2-astra-pro` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `openrouter` | `openai/gpt-6.2-sol` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `openrouter` | `openai/gpt-6.2-sol-pro` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `openrouter/perplexity/pplx-decider-v1.3:free \| perplexity/pplx-decider-v1.3:free` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `openrouter` | `openrouter/typesafe/jev*` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `openrouter` | `openai/gpt-5.4-nano \| openai/gpt-5.4-mini` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
@@ -402,8 +414,15 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `together` | `together/nvidia/nemotron-3*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `together` | `moonshotai/*` | `any` | no | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `typesafe` | `jev-* \| typesafe/jev-*` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
+| `vercel_ai_gateway` | `vercel/google/gemini-4-carbon \| google/gemini-4-carbon` | `any; extends` | `effort` | `none` | yes | yes | yes | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `vercel_ai_gateway` | `vercel/google/gemini-4-hydrogen \| google/gemini-4-hydrogen` | `any; extends` | `effort` | `none` | yes | yes | yes | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `vercel_ai_gateway` | `vercel/google/gemini-4-neon \| google/gemini-4-neon` | `any; extends` | `effort` | `none` | yes | yes | yes | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `vercel_ai_gateway` | `vercel/openai/gpt-6.1-terra \| openai/gpt-6.1-terra` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `vercel_ai_gateway` | `vercel/openai/gpt-6.1-terra-fast \| openai/gpt-6.1-terra-fast` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `vercel_ai_gateway` | `vercel/openai/gpt-6.2-astra \| openai/gpt-6.2-astra` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `vercel_ai_gateway` | `vercel/openai/gpt-6.2-astra-fast \| openai/gpt-6.2-astra-fast` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `vercel_ai_gateway` | `vercel/openai/gpt-6.2-sol \| openai/gpt-6.2-sol` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `vercel_ai_gateway` | `vercel/openai/gpt-6.2-sol-fast \| openai/gpt-6.2-sol-fast` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `vercel_ai_gateway` | `typesafe-ai/jev* \| vercel/typesafe-ai/jev*` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `vercel_ai_gateway` | `convaiinnovations/laya` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `vercel_ai_gateway` | `liquid/d1-ultra` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
@@ -538,6 +557,9 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `gemini` | `gemini-3.7-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `gemini` | `gemini-3.8-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `gemini` | `gemini-4-argon` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `gemini` | `gemini-4-carbon` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `gemini` | `gemini-4-hydrogen` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `gemini` | `gemini-4-neon` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `gemini` | `models/gemma-4-26b-a4b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `gemini` | `models/gemma-4-31b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `groq` | `groq/compound` | `none` | `unsupported` | - | - | - | - | - | `data not yet collected` |
@@ -628,6 +650,8 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openai` | `gpt-6-sol` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `gpt-6.1-sol` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `gpt-6.1-terra` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openai` | `gpt-6.2-astra` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openai` | `gpt-6.2-sol` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `o1` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `o3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openai` | `o3-mini` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -667,6 +691,9 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `google/gemini-3.7-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `google/gemini-3.8-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `google/gemini-4-argon` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `google/gemini-4-carbon` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `google/gemini-4-hydrogen` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `google/gemini-4-neon` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `google/gemma-4-26b-a4b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `google/gemma-4-31b-it` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `ibm-granite/granite-4.2-8b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -718,6 +745,10 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `openai/gpt-6.1-sol-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `openai/gpt-6.1-terra` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `openai/gpt-6.1-terra-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `openai/gpt-6.2-astra` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `openai/gpt-6.2-astra-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `openai/gpt-6.2-sol` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `openai/gpt-6.2-sol-pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `openai/gpt-oss-120b` | `text` | `text_only` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `openrouter/cloudflare/clef` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `openrouter/cloudflare/clef-flash` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -826,6 +857,9 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `vercel_ai_gateway` | `vercel/elorian/glimpse` | `json` | `unknown` | - | - | - | - | - | catalog note: Read-only catalog evidence, 2026-10-21; inference validation requires separate spend authorization. |
 | `vercel_ai_gateway` | `vercel/google/gemini-3.1-flash-lite` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `vercel_ai_gateway` | `vercel/google/gemini-4-argon` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `vercel_ai_gateway` | `vercel/google/gemini-4-carbon` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `vercel_ai_gateway` | `vercel/google/gemini-4-hydrogen` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `vercel_ai_gateway` | `vercel/google/gemini-4-neon` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `vercel_ai_gateway` | `vercel/inception/mercury-3` | `json` | `unknown` | - | - | - | - | - | catalog note: Read-only catalog evidence, 2026-10-21; inference validation requires separate spend authorization. |
 | `vercel_ai_gateway` | `vercel/liquid/d1-ultra` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `vercel_ai_gateway` | `vercel/meta/muse-glimmer-30b` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -836,6 +870,10 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `vercel_ai_gateway` | `vercel/openai/gpt-5.4-nano` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `vercel_ai_gateway` | `vercel/openai/gpt-6.1-terra` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `vercel_ai_gateway` | `vercel/openai/gpt-6.1-terra-fast` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `vercel_ai_gateway` | `vercel/openai/gpt-6.2-astra` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `vercel_ai_gateway` | `vercel/openai/gpt-6.2-astra-fast` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `vercel_ai_gateway` | `vercel/openai/gpt-6.2-sol` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `vercel_ai_gateway` | `vercel/openai/gpt-6.2-sol-fast` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `vercel_ai_gateway` | `vercel/perplexity/pplx-decider-v1.1-27b` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `vercel_ai_gateway` | `vercel/typesafe-ai/jev` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `vercel_ai_gateway` | `vercel/typesafe-ai/jev-1.13.0` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |

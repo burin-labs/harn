@@ -32,6 +32,9 @@ Accepted proposals become `SKILL.md` files under the project skill root. Future
 context assembly reads those skills through the same Harn module, so local IDE
 agents and cloud agents share the same read/write path.
 
+The [evidence record reference](../stdlib/agent-pattern-evidence.md) describes
+typed session projections and observation fields.
+
 ## Migration
 
 Burin previously wrote Swift-owned JSONL stores under

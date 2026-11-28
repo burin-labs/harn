@@ -10,6 +10,8 @@ fn the_registry_parses_and_holds_its_invariants() {
     assert!(toolchain_cache_home_paths().len() >= 10);
     assert!(toolchain_read_home_paths(false).count() >= 15);
     assert!(toolchain_read_home_paths(true).count() > toolchain_read_home_paths(false).count());
+    assert!(system_runtime_read_paths().len() >= 10);
+    assert!(system_runtime_devices().any(|(path, write)| path == "/dev/null" && write));
     for entry in credential_home_paths() {
         assert!(credential_reason(entry).is_some(), "{entry} has no reason");
     }

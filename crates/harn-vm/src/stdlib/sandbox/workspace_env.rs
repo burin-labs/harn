@@ -1106,7 +1106,7 @@ pub(crate) fn inject_workspace_process_env(
     #[cfg(target_os = "macos")]
     super::macos::private_temp::inject_env(env, policy);
     push_absent(env, workspace_toolchain_env(policy));
-    inject_jvm_loopback_env(env, policy);
+    inject_jvm_env(env, policy);
     #[cfg(target_os = "macos")]
     super::macos::swiftpm::inject_env(env, policy);
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -1134,14 +1134,15 @@ fn workspace_process_env_for_read(policy: &CapabilityPolicy) -> Vec<(String, Str
             toolchain_env_at(policy, &root, crate::user_dirs::package_cache_dir(), false),
         );
     }
-    inject_jvm_loopback_env(&mut env, policy);
+    inject_jvm_env(&mut env, policy);
     env
 }
 
 /// The JVM option that makes a loopback-only grant hold for Java children.
 const JVM_PREFER_IPV6_ADDRESSES: &str = "-Djava.net.preferIPv6Addresses=true";
 
-/// Make `allow_tcp_loopback` mean what it says for JVM children on macOS.
+/// Keep JVM scratch space with the child's temp directory and make a macOS
+/// loopback grant usable. Java does not use TMPDIR for java.io.tmpdir.
 ///
 /// The seatbelt matches loopback endpoints by the literal `localhost` filter,
 /// and that filter does not match an IPv4-mapped IPv6 address. A dual-stack
@@ -1167,8 +1168,8 @@ const JVM_PREFER_IPV6_ADDRESSES: &str = "-Djava.net.preferIPv6Addresses=true";
 /// stack is left alone. The JVM announces the variable on stderr
 /// (`Picked up JAVA_TOOL_OPTIONS: ...`); that line is the price of a loopback
 /// grant that actually works, and it is on stderr, not stdout.
-fn inject_jvm_loopback_env(env: &mut Vec<(String, String)>, policy: &CapabilityPolicy) {
-    if !cfg!(target_os = "macos") || !policy.process_sandbox.allow_tcp_loopback {
+fn inject_jvm_env(env: &mut Vec<(String, String)>, policy: &CapabilityPolicy) {
+    if !policy.sandbox_profile.enforces_path_scope() {
         return;
     }
     let existing = env
@@ -1184,15 +1185,34 @@ fn inject_jvm_loopback_env(env: &mut Vec<(String, String)>, policy: &CapabilityP
             },
         )
         .unwrap_or_default();
-    if existing.contains("java.net.preferIPv4Stack")
-        || existing.contains("java.net.preferIPv6Addresses")
+    let options = shell_words::split(&existing).unwrap_or_default();
+    let has_property = |name: &str| {
+        options.iter().any(|option| {
+            option
+                .strip_prefix("-D")
+                .is_some_and(|property| property.split('=').next() == Some(name))
+        })
+    };
+    let mut additions = Vec::new();
+    if !has_property("java.io.tmpdir") {
+        if let Some((_, tmpdir)) = env.iter().find(|(key, _)| key == "TMPDIR") {
+            additions.push(format!("-Djava.io.tmpdir=\"{tmpdir}\""));
+        }
+    }
+    if cfg!(target_os = "macos")
+        && policy.process_sandbox.allow_tcp_loopback
+        && !has_property("java.net.preferIPv4Stack")
+        && !has_property("java.net.preferIPv6Addresses")
     {
+        additions.push(JVM_PREFER_IPV6_ADDRESSES.to_string());
+    }
+    if additions.is_empty() {
         return;
     }
     let value = if existing.trim().is_empty() {
-        JVM_PREFER_IPV6_ADDRESSES.to_string()
+        additions.join(" ")
     } else {
-        format!("{} {JVM_PREFER_IPV6_ADDRESSES}", existing.trim_end())
+        format!("{} {}", existing.trim_end(), additions.join(" "))
     };
     env.retain(|(key, _)| key != "JAVA_TOOL_OPTIONS");
     env.push(("JAVA_TOOL_OPTIONS".to_string(), value));

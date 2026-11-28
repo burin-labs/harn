@@ -121,28 +121,7 @@ pub(super) fn generate_rust(
         "Closed completion-evidence roles owned by Harn's tool annotation registry.",
         &completion_evidence_role_values(),
     ));
-    out.push_str(
-        "#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]\n\
-         pub struct HarnToolArgSchema {\n\
-         \x20   pub path_params: Vec<String>,\n\
-         \x20   pub dependency_key_params: Vec<String>,\n\
-         \x20   pub dependency_range_params: Vec<std::collections::BTreeMap<String, String>>,\n\
-         \x20   pub arg_aliases: std::collections::BTreeMap<String, String>,\n\
-         \x20   pub required: Vec<String>,\n\
-         }\n\n\
-         #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]\n\
-         pub struct HarnToolAnnotations {\n\
-         \x20   pub kind: HarnACPToolKind,\n\
-         \x20   pub side_effect_level: HarnSideEffectLevel,\n\
-         \x20   #[serde(skip_serializing_if = \"Option::is_none\")]\n\
-         \x20   pub completion_evidence_role: Option<HarnCompletionEvidenceRole>,\n\
-         \x20   pub arg_schema: HarnToolArgSchema,\n\
-         \x20   pub capabilities: std::collections::BTreeMap<String, Vec<String>>,\n\
-         \x20   pub emits_artifacts: bool,\n\
-         \x20   pub result_readers: Vec<String>,\n\
-         \x20   pub inline_result: bool,\n\
-         }\n\n",
-    );
+    super::tool_annotation_records::append(&mut out, super::records::Target::Rust);
     for record in &activity.records {
         record.append(&mut out, super::records::Target::Rust);
     }
@@ -724,117 +703,9 @@ pub struct HarnAgentEventNotification {
     pub fields: Map<String, Value>,
 }
 
-/// Cursor over the Harn-owned event topics projected into a session timeline.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HarnSessionTimelineCursor {
-    #[serde(default)]
-    pub topics: std::collections::BTreeMap<String, u64>,
-}
-
-/// Filters and bounds Harn's canonical semantic session timeline.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
-pub struct HarnSessionTimelineQuery {
-    pub session_id: Option<String>,
-    pub run_id: Option<String>,
-    pub run_path: Option<String>,
-    pub project_id: Option<String>,
-    pub from_cursor: HarnSessionTimelineCursor,
-    pub limit: Option<usize>,
-}
-
-/// Stable source reference carried by one semantic timeline node.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HarnSessionTimelineReference {
-    pub kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub topic: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub event_id: Option<u64>,
-}
-
-/// Causal or identity link carried by one semantic timeline node.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HarnSessionTimelineLink {
-    pub kind: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trace_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub span_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub event_id: Option<String>,
-}
-
-/// Harn-owned semantic chronology row. `kind` remains open for forward compatibility.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HarnSessionTimelineNode {
-    pub id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_id: Option<String>,
-    #[serde(default)]
-    pub children: Vec<String>,
-    pub category: String,
-    pub kind: String,
-    pub name: String,
-    pub status: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub trace_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub span_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub occurred_at_ms: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub start_ms: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub duration_ms: Option<u64>,
-    #[serde(default)]
-    pub attributes: Value,
-    #[serde(default)]
-    pub references: Vec<HarnSessionTimelineReference>,
-    #[serde(default)]
-    pub links: Vec<HarnSessionTimelineLink>,
-    pub order: u64,
-}
-
-/// States whether a bounded session-timeline snapshot is complete.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
-pub struct HarnSessionTimelineCoverage {
-    pub returned: usize,
-    pub available: Option<usize>,
-    pub truncated: bool,
-}
-
-/// Point-in-time result of a canonical session-timeline query.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HarnSessionTimelineSnapshot {
-    pub schema_version: u32,
-    pub query: HarnSessionTimelineQuery,
-    pub cursor: HarnSessionTimelineCursor,
-    #[serde(default)]
-    pub coverage: HarnSessionTimelineCoverage,
-    pub nodes: Vec<HarnSessionTimelineNode>,
-}
-
-/// Incremental semantic timeline revision emitted to subscribers.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HarnSessionTimelineUpdate {
-    pub schema_version: u32,
-    pub cursor: HarnSessionTimelineCursor,
-    pub node: HarnSessionTimelineNode,
-}
-
 "#,
     );
+    super::timeline_records::append(&mut out, super::records::Target::Rust);
     out
 }
 

@@ -3400,7 +3400,9 @@
         }
       },
       "deprecation": {
-        "status": "active",
+        "status": "deprecated",
+        "note": "Anthropic deprecated Claude Opus 4.5 on 2026-11-23 and will retire it on 2027-01-22, including the undated alias. Use claude-opus-5-5.",
+        "sunset_date": "2027-01-22",
         "superseded_by": "claude-opus-5-5"
       },
       "availability": "serverless",
@@ -12018,7 +12020,8 @@
       },
       "deprecation": {
         "status": "deprecated",
-        "note": "generativelanguage.googleapis.com returns HTTP 404 model_unavailable for this id: \"no longer available to new users\", naming models/gemini-3.6-flash as the replacement. Observed 2026-09-03. The OpenRouter mirror google/gemini-2.5-flash still serves.",
+        "note": "Google reroutes direct calls to Gemini 3.5 Flash-Lite at that model's rates starting 2026-12-01. Select gemini-3.5-flash-lite explicitly to use its request settings.",
+        "sunset_date": "2026-12-01",
         "superseded_by": "gemini-3.5-flash-lite"
       },
       "availability": "serverless",
@@ -13317,7 +13320,9 @@
         }
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Google routes this direct API id to gemini-3.8-flash. Select the current model explicitly to use its request settings.",
+        "superseded_by": "gemini-3.8-flash"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -13697,6 +13702,365 @@
         "long_context"
       ],
       "released": "2026-10-13"
+    },
+    {
+      "id": "gemini-4-carbon",
+      "name": "Gemini 4 Carbon",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Gemini 4 Carbon",
+      "provider": "gemini",
+      "aliases": [],
+      "context_window": 1048576,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "gemini",
+        "input_mode": "jsonl_or_inline",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "supported",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_input_bytes": 2147483648,
+        "operational_notes": [
+          "Batch creation is not idempotent; persist Harn manifests and receipts before retrying provider create requests.",
+          "Context caching can apply to batch requests, but Gemini cache and batch discounts do not stack; cache-hit discounts take precedence where documented.",
+          "Use File API JSONL input for large gauntlets; inline requests have a smaller provider body-size cap."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 4.0,
+        "output_per_mtok": 20.0,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_per_mtok": null,
+        "promotions": [
+          {
+            "id": "carbon-introductory",
+            "starts_on": "2026-11-10",
+            "ends_on": "2026-11-30",
+            "source_url": "https://ai.google.dev/gemini-api/docs/pricing#gemini-4-carbon",
+            "input_per_mtok": 2.0,
+            "output_per_mtok": 10.0,
+            "cache_read_per_mtok": 0.1,
+            "cache_write_per_mtok": null
+          }
+        ],
+        "hosted_tool_fees": {
+          "google_search": {
+            "per_1k_calls": 14.0,
+            "free_per_month": 5000,
+            "source_url": "https://ai.google.dev/gemini-api/docs/pricing"
+          }
+        }
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "google-gemini",
+      "lineage": "google-gemini-4",
+      "tier": "reasoning",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "agentic",
+        "tool_use",
+        "long_context"
+      ],
+      "released": "2026-11-10"
+    },
+    {
+      "id": "gemini-4-hydrogen",
+      "name": "Gemini 4 Hydrogen",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Gemini 4 Hydrogen",
+      "provider": "gemini",
+      "aliases": [],
+      "context_window": 1048576,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "gemini",
+        "input_mode": "jsonl_or_inline",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "supported",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_input_bytes": 2147483648,
+        "operational_notes": [
+          "Batch creation is not idempotent; persist Harn manifests and receipts before retrying provider create requests.",
+          "Context caching can apply to batch requests, but Gemini cache and batch discounts do not stack; cache-hit discounts take precedence where documented.",
+          "Use File API JSONL input for large gauntlets; inline requests have a smaller provider body-size cap."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 1.5,
+        "output_per_mtok": 7.5,
+        "cache_read_per_mtok": 0.075,
+        "cache_write_per_mtok": null,
+        "hosted_tool_fees": {
+          "google_search": {
+            "per_1k_calls": 14.0,
+            "free_per_month": 5000,
+            "source_url": "https://ai.google.dev/gemini-api/docs/pricing"
+          }
+        }
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "google-gemini",
+      "lineage": "google-gemini-4",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "agentic",
+        "tool_use",
+        "long_context"
+      ],
+      "released": "2026-11-12"
+    },
+    {
+      "id": "gemini-4-neon",
+      "name": "Gemini 4 Neon",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Gemini 4 Neon",
+      "provider": "gemini",
+      "aliases": [],
+      "context_window": 1048576,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "gemini",
+        "input_mode": "jsonl_or_inline",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "supported",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_input_bytes": 2147483648,
+        "operational_notes": [
+          "Batch creation is not idempotent; persist Harn manifests and receipts before retrying provider create requests.",
+          "Context caching can apply to batch requests, but Gemini cache and batch discounts do not stack; cache-hit discounts take precedence where documented.",
+          "Use File API JSONL input for large gauntlets; inline requests have a smaller provider body-size cap."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 3.0,
+        "output_per_mtok": 15.0,
+        "cache_read_per_mtok": 0.15,
+        "cache_write_per_mtok": null,
+        "hosted_tool_fees": {
+          "google_search": {
+            "per_1k_calls": 14.0,
+            "free_per_month": 5000,
+            "source_url": "https://ai.google.dev/gemini-api/docs/pricing"
+          }
+        }
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "google-gemini",
+      "lineage": "google-gemini-4",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "agentic",
+        "tool_use",
+        "long_context"
+      ],
+      "released": "2026-11-18"
     },
     {
       "id": "models/gemma-4-26b-a4b-it",
@@ -22006,7 +22370,8 @@
         }
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "superseded_by": "gpt-6.2-astra"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -22647,7 +23012,8 @@
         }
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "superseded_by": "gpt-6.2-sol"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -23016,6 +23382,272 @@
         }
       ],
       "released": "2026-10-26"
+    },
+    {
+      "id": "gpt-6.2-astra",
+      "name": "GPT-6.2 Astra",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "GPT-6.2 Astra",
+      "blurb": "Flagship reasoning for complex projects.",
+      "provider": "openai",
+      "aliases": [],
+      "context_window": 1050000,
+      "logical_model": "gpt-6.2-astra",
+      "equivalence_group": "gpt-6.2-astra",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": [
+          "hosted",
+          "client"
+        ]
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "supported",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_requests": 50000,
+        "max_input_bytes": 209715200,
+        "result_retention_days": 30,
+        "security_notes": [
+          "Batch rate limits use a separate provider pool from synchronous model calls.",
+          "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 8.0,
+        "output_per_mtok": 40.0,
+        "cache_read_per_mtok": 0.4,
+        "cache_write_per_mtok": 10.0,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ],
+        "hosted_tool_fees": {
+          "file_search": {
+            "per_1k_calls": 2.5,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          },
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          }
+        }
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context",
+        "vision"
+      ],
+      "released": "2026-11-17"
+    },
+    {
+      "id": "gpt-6.2-sol",
+      "name": "GPT-6.2 Sol",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "GPT-6.2 Sol",
+      "blurb": "Everyday coding, analysis, and tool use.",
+      "provider": "openai",
+      "aliases": [],
+      "context_window": 1050000,
+      "logical_model": "gpt-6.2-sol",
+      "equivalence_group": "gpt-6.2-sol",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": [
+          "hosted",
+          "client"
+        ]
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "batch": {
+        "wire_format": "openai",
+        "input_mode": "jsonl_file",
+        "result_ordering": "custom_id_rejoin",
+        "partial_failure": "per_request",
+        "cancellation": "supported",
+        "discount_percent": 50,
+        "turnaround_hours": 24,
+        "max_requests": 50000,
+        "max_input_bytes": 209715200,
+        "result_retention_days": 30,
+        "security_notes": [
+          "Batch rate limits use a separate provider pool from synchronous model calls.",
+          "Output and error files can use a configurable expiration between 1 hour and 30 days."
+        ],
+        "operational_notes": [
+          "Input files must group requests for one model; Harn manifests group by provider, model, wire format, and tool format.",
+          "Use stable custom_id values to rejoin unordered output and error rows."
+        ]
+      },
+      "pricing": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 10.0,
+        "cache_read_per_mtok": 0.1,
+        "cache_write_per_mtok": 2.5,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ],
+        "hosted_tool_fees": {
+          "file_search": {
+            "per_1k_calls": 2.5,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          },
+          "web_search": {
+            "per_1k_calls": 10.0,
+            "source_url": "https://developers.openai.com/api/docs/pricing"
+          }
+        }
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output",
+        "batch"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context",
+        "vision"
+      ],
+      "released": "2026-11-17"
     },
     {
       "id": "o1",
@@ -26587,6 +27219,284 @@
         "tool_use",
         "long_context"
       ]
+    },
+    {
+      "id": "google/gemini-4-carbon",
+      "name": "Gemini 4 Carbon (OpenRouter)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Gemini 4 Carbon",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1048576,
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 10.0,
+        "cache_read_per_mtok": 0.1,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "pdf",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "google-gemini",
+      "lineage": "google-gemini-4",
+      "tier": "reasoning",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "agentic",
+        "tool_use",
+        "long_context"
+      ],
+      "released": "2026-11-10"
+    },
+    {
+      "id": "google/gemini-4-hydrogen",
+      "name": "Gemini 4 Hydrogen (OpenRouter)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Gemini 4 Hydrogen",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1048576,
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 1.5,
+        "output_per_mtok": 7.5,
+        "cache_read_per_mtok": 0.075,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "pdf",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "google-gemini",
+      "lineage": "google-gemini-4",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "agentic",
+        "tool_use",
+        "long_context"
+      ],
+      "released": "2026-11-12"
+    },
+    {
+      "id": "google/gemini-4-neon",
+      "name": "Gemini 4 Neon (OpenRouter)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Gemini 4 Neon",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1048576,
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 3.0,
+        "output_per_mtok": 15.0,
+        "cache_read_per_mtok": 0.15,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "pdf",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "google-gemini",
+      "lineage": "google-gemini-4",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "agentic",
+        "tool_use",
+        "long_context"
+      ],
+      "released": "2026-11-18"
     },
     {
       "id": "google/gemma-4-26b-a4b-it",
@@ -30201,7 +31111,8 @@
         ]
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "superseded_by": "openai/gpt-6.2-astra"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -30801,7 +31712,8 @@
         ]
       },
       "deprecation": {
-        "status": "active"
+        "status": "active",
+        "superseded_by": "openai/gpt-6.2-sol"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -31143,6 +32055,406 @@
         "long_context"
       ],
       "released": "2026-10-26"
+    },
+    {
+      "id": "openai/gpt-6.2-astra",
+      "name": "GPT-6.2 Astra (via OpenRouter)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "GPT-6.2 Astra",
+      "blurb": "Flagship reasoning for complex projects.",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1050000,
+      "logical_model": "gpt-6.2-astra",
+      "equivalence_group": "gpt-6.2-astra",
+      "served_variant": "openrouter",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 8.0,
+        "output_per_mtok": 40.0,
+        "cache_read_per_mtok": 0.4,
+        "cache_write_per_mtok": 10.0,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context",
+        "vision"
+      ],
+      "released": "2026-11-17"
+    },
+    {
+      "id": "openai/gpt-6.2-astra-pro",
+      "name": "GPT-6.2 Astra Pro (via OpenRouter)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "GPT-6.2 Astra Pro",
+      "blurb": "Flagship reasoning for complex projects.",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1050000,
+      "logical_model": "gpt-6.2-astra",
+      "equivalence_group": "gpt-6.2-astra",
+      "served_variant": "openrouter_pro",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 8.0,
+        "output_per_mtok": 40.0,
+        "cache_read_per_mtok": 0.4,
+        "cache_write_per_mtok": 10.0,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context",
+        "vision"
+      ],
+      "released": "2026-11-17"
+    },
+    {
+      "id": "openai/gpt-6.2-sol",
+      "name": "GPT-6.2 Sol (via OpenRouter)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "GPT-6.2 Sol",
+      "blurb": "Everyday coding, analysis, and tool use.",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1050000,
+      "logical_model": "gpt-6.2-sol",
+      "equivalence_group": "gpt-6.2-sol",
+      "served_variant": "openrouter",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 10.0,
+        "cache_read_per_mtok": 0.1,
+        "cache_write_per_mtok": 2.5,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context",
+        "vision"
+      ],
+      "released": "2026-11-17"
+    },
+    {
+      "id": "openai/gpt-6.2-sol-pro",
+      "name": "GPT-6.2 Sol Pro (via OpenRouter)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "GPT-6.2 Sol Pro",
+      "blurb": "Everyday coding, analysis, and tool use.",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1050000,
+      "logical_model": "gpt-6.2-sol",
+      "equivalence_group": "gpt-6.2-sol",
+      "served_variant": "openrouter_pro",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 10.0,
+        "cache_read_per_mtok": 0.1,
+        "cache_write_per_mtok": 2.5,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context",
+        "vision"
+      ],
+      "released": "2026-11-17"
     },
     {
       "id": "openai/gpt-oss-120b",
@@ -40056,6 +41368,287 @@
       ]
     },
     {
+      "id": "vercel/google/gemini-4-carbon",
+      "name": "Gemini 4 Carbon (Vercel AI Gateway)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Gemini 4 Carbon",
+      "provider": "vercel_ai_gateway",
+      "aliases": [],
+      "context_window": 1048576,
+      "wire_model": "google/gemini-4-carbon",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 10.0,
+        "cache_read_per_mtok": 0.1,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "pdf",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "google-gemini",
+      "lineage": "google-gemini-4",
+      "tier": "reasoning",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "agentic",
+        "tool_use",
+        "long_context"
+      ],
+      "released": "2026-11-10"
+    },
+    {
+      "id": "vercel/google/gemini-4-hydrogen",
+      "name": "Gemini 4 Hydrogen (Vercel AI Gateway)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Gemini 4 Hydrogen",
+      "provider": "vercel_ai_gateway",
+      "aliases": [],
+      "context_window": 1048576,
+      "wire_model": "google/gemini-4-hydrogen",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 1.5,
+        "output_per_mtok": 7.5,
+        "cache_read_per_mtok": 0.075,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "pdf",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "google-gemini",
+      "lineage": "google-gemini-4",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "agentic",
+        "tool_use",
+        "long_context"
+      ],
+      "released": "2026-11-12"
+    },
+    {
+      "id": "vercel/google/gemini-4-neon",
+      "name": "Gemini 4 Neon (Vercel AI Gateway)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "Gemini 4 Neon",
+      "provider": "vercel_ai_gateway",
+      "aliases": [],
+      "context_window": 1048576,
+      "wire_model": "google/gemini-4-neon",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 3.0,
+        "output_per_mtok": 15.0,
+        "cache_read_per_mtok": 0.15,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "pdf",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "google-gemini",
+      "lineage": "google-gemini-4",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "coding",
+        "reasoning",
+        "agentic",
+        "tool_use",
+        "long_context"
+      ],
+      "released": "2026-11-18"
+    },
+    {
       "id": "vercel/inception/mercury-3",
       "name": "Mercury 3 (Vercel AI Gateway)",
       "operations": [
@@ -40910,6 +42503,410 @@
         "long_context"
       ],
       "released": "2026-10-26"
+    },
+    {
+      "id": "vercel/openai/gpt-6.2-astra",
+      "name": "GPT-6.2 Astra (Vercel AI Gateway)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "GPT-6.2 Astra",
+      "blurb": "Flagship reasoning for complex projects.",
+      "provider": "vercel_ai_gateway",
+      "aliases": [],
+      "context_window": 1050000,
+      "logical_model": "gpt-6.2-astra",
+      "equivalence_group": "gpt-6.2-astra",
+      "served_variant": "vercel-ai-gateway",
+      "wire_model": "openai/gpt-6.2-astra",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 8.0,
+        "output_per_mtok": 40.0,
+        "cache_read_per_mtok": 0.4,
+        "cache_write_per_mtok": 10.0,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context",
+        "vision"
+      ],
+      "released": "2026-11-17"
+    },
+    {
+      "id": "vercel/openai/gpt-6.2-astra-fast",
+      "name": "GPT-6.2 Astra Fast (Vercel AI Gateway)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "GPT-6.2 Astra Fast",
+      "blurb": "Flagship reasoning for complex projects.",
+      "provider": "vercel_ai_gateway",
+      "aliases": [],
+      "context_window": 1050000,
+      "logical_model": "gpt-6.2-astra",
+      "equivalence_group": "gpt-6.2-astra",
+      "served_variant": "vercel-ai-gateway-fast",
+      "wire_model": "openai/gpt-6.2-astra-fast",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 16.0,
+        "output_per_mtok": 80.0,
+        "cache_read_per_mtok": 0.8,
+        "cache_write_per_mtok": 20.0,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "tier": "frontier",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context",
+        "vision"
+      ],
+      "released": "2026-11-17"
+    },
+    {
+      "id": "vercel/openai/gpt-6.2-sol",
+      "name": "GPT-6.2 Sol (Vercel AI Gateway)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "GPT-6.2 Sol",
+      "blurb": "Everyday coding, analysis, and tool use.",
+      "provider": "vercel_ai_gateway",
+      "aliases": [],
+      "context_window": 1050000,
+      "logical_model": "gpt-6.2-sol",
+      "equivalence_group": "gpt-6.2-sol",
+      "served_variant": "vercel-ai-gateway",
+      "wire_model": "openai/gpt-6.2-sol",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 10.0,
+        "cache_read_per_mtok": 0.1,
+        "cache_write_per_mtok": 2.5,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context",
+        "vision"
+      ],
+      "released": "2026-11-17"
+    },
+    {
+      "id": "vercel/openai/gpt-6.2-sol-fast",
+      "name": "GPT-6.2 Sol Fast (Vercel AI Gateway)",
+      "operations": [
+        "text_generation",
+        "decision"
+      ],
+      "display_name": "GPT-6.2 Sol Fast",
+      "blurb": "Everyday coding, analysis, and tool use.",
+      "provider": "vercel_ai_gateway",
+      "aliases": [],
+      "context_window": 1050000,
+      "logical_model": "gpt-6.2-sol",
+      "equivalence_group": "gpt-6.2-sol",
+      "served_variant": "vercel-ai-gateway-fast",
+      "wire_model": "openai/gpt-6.2-sol-fast",
+      "api_dialect": "openai_chat",
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text",
+          "decision"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
+        "parity_source": "derived",
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "effort_levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 4.0,
+        "output_per_mtok": 20.0,
+        "cache_read_per_mtok": 0.2,
+        "cache_write_per_mtok": 5.0,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 272001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ],
+      "family": "openai-gpt",
+      "lineage": "openai-legacy",
+      "tier": "mid",
+      "open_weight": false,
+      "strengths": [
+        "reasoning",
+        "coding",
+        "tool_use",
+        "long_context",
+        "vision"
+      ],
+      "released": "2026-11-17"
     },
     {
       "id": "vercel/perplexity/pplx-decider-v1.1-27b",
@@ -44092,7 +46089,7 @@
       "id": "vision-capable",
       "label": "Vision capable",
       "description": "Largest-context route that accepts image input.",
-      "model_id": "vercel/openai/gpt-6.1-terra-fast",
+      "model_id": "vercel/openai/gpt-6.2-sol-fast",
       "provider": "vercel_ai_gateway",
       "source": "selector:largest_vision_context"
     },
@@ -44100,7 +46097,7 @@
       "id": "long-context",
       "label": "Long context",
       "description": "Largest context-window route in this catalog.",
-      "model_id": "vercel/openai/gpt-6.1-terra-fast",
+      "model_id": "vercel/openai/gpt-6.2-sol-fast",
       "provider": "vercel_ai_gateway",
       "source": "selector:largest_context"
     }
@@ -44140,7 +46137,7 @@
               "plain_description": "Strong reasoning for everyday coding and analysis.",
               "relative_cost_hint": 3,
               "relative_speed_hint": 3,
-              "model_id": "gpt-6.1-sol"
+              "model_id": "gpt-6.2-sol"
             },
             {
               "value": "astra",
@@ -44148,7 +46145,7 @@
               "plain_description": "Most capable and most expensive for the hardest work.",
               "relative_cost_hint": 5,
               "relative_speed_hint": 1,
-              "model_id": "gpt-6-astra"
+              "model_id": "gpt-6.2-astra"
             }
           ]
         },
@@ -44344,31 +46341,6 @@
         "prefers_xml_scaffolding",
         "prompt_caching",
         "reasoning_effort",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tool_search",
-        "tools",
-        "vision"
-      ]
-    },
-    {
-      "provider": "anthropic",
-      "model": "claude-opus-4-5-20251101",
-      "base_url": "https://api.anthropic.com/v1",
-      "secret_env": "ANTHROPIC_API_KEY",
-      "label": "Claude Opus 4.5",
-      "family": "anthropic-claude",
-      "capabilities": [
-        "audio",
-        "batch",
-        "files",
-        "native_tools",
-        "pdf",
-        "prefers_xml_scaffolding",
-        "prompt_caching",
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
@@ -45886,33 +47858,6 @@
     },
     {
       "provider": "gemini",
-      "model": "gemini-3.7-flash",
-      "base_url": "https://generativelanguage.googleapis.com",
-      "secret_env": "GEMINI_API_KEY",
-      "label": "Gemini 3.7 Flash",
-      "family": "google-gemini",
-      "capabilities": [
-        "audio",
-        "batch",
-        "extended_thinking",
-        "files",
-        "native_tools",
-        "pdf",
-        "prefers_markdown_scaffolding",
-        "prefers_xml_scaffolding",
-        "prompt_caching",
-        "reasoning_effort",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "thinking",
-        "tools",
-        "vision"
-      ]
-    },
-    {
-      "provider": "gemini",
       "model": "gemini-3.8-flash",
       "base_url": "https://generativelanguage.googleapis.com",
       "secret_env": "GEMINI_API_KEY",
@@ -45952,6 +47897,87 @@
         "files",
         "native_tools",
         "pdf",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "gemini",
+      "model": "gemini-4-carbon",
+      "base_url": "https://generativelanguage.googleapis.com",
+      "secret_env": "GEMINI_API_KEY",
+      "label": "Gemini 4 Carbon",
+      "family": "google-gemini",
+      "capabilities": [
+        "audio",
+        "batch",
+        "extended_thinking",
+        "files",
+        "native_tools",
+        "pdf",
+        "prefers_markdown_scaffolding",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "gemini",
+      "model": "gemini-4-hydrogen",
+      "base_url": "https://generativelanguage.googleapis.com",
+      "secret_env": "GEMINI_API_KEY",
+      "label": "Gemini 4 Hydrogen",
+      "family": "google-gemini",
+      "capabilities": [
+        "audio",
+        "batch",
+        "extended_thinking",
+        "files",
+        "native_tools",
+        "pdf",
+        "prefers_markdown_scaffolding",
+        "prefers_xml_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "gemini",
+      "model": "gemini-4-neon",
+      "base_url": "https://generativelanguage.googleapis.com",
+      "secret_env": "GEMINI_API_KEY",
+      "label": "Gemini 4 Neon",
+      "family": "google-gemini",
+      "capabilities": [
+        "audio",
+        "batch",
+        "extended_thinking",
+        "files",
+        "native_tools",
+        "pdf",
+        "prefers_markdown_scaffolding",
+        "prefers_xml_scaffolding",
         "prompt_caching",
         "reasoning_effort",
         "streaming",
@@ -47557,6 +49583,54 @@
     },
     {
       "provider": "openai",
+      "model": "gpt-6.2-astra",
+      "base_url": "https://api.openai.com/v1",
+      "secret_env": "OPENAI_API_KEY",
+      "label": "GPT-6.2 Astra",
+      "family": "openai-gpt",
+      "capabilities": [
+        "batch",
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-6.2-sol",
+      "base_url": "https://api.openai.com/v1",
+      "secret_env": "OPENAI_API_KEY",
+      "label": "GPT-6.2 Sol",
+      "family": "openai-gpt",
+      "capabilities": [
+        "batch",
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tool_search",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openai",
       "model": "text-embedding-3-small",
       "base_url": "https://api.openai.com/v1",
       "secret_env": "OPENAI_API_KEY",
@@ -48203,6 +50277,75 @@
       "base_url": "https://openrouter.ai/api/v1",
       "secret_env": "OPENROUTER_API_KEY",
       "label": "Gemini 4 Argon (OpenRouter)",
+      "family": "google-gemini",
+      "capabilities": [
+        "audio",
+        "extended_thinking",
+        "native_tools",
+        "pdf",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "google/gemini-4-carbon",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Gemini 4 Carbon (OpenRouter)",
+      "family": "google-gemini",
+      "capabilities": [
+        "audio",
+        "extended_thinking",
+        "native_tools",
+        "pdf",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "google/gemini-4-hydrogen",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Gemini 4 Hydrogen (OpenRouter)",
+      "family": "google-gemini",
+      "capabilities": [
+        "audio",
+        "extended_thinking",
+        "native_tools",
+        "pdf",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "google/gemini-4-neon",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "Gemini 4 Neon (OpenRouter)",
       "family": "google-gemini",
       "capabilities": [
         "audio",
@@ -49154,6 +51297,94 @@
       "base_url": "https://openrouter.ai/api/v1",
       "secret_env": "OPENROUTER_API_KEY",
       "label": "GPT-6.1 Terra Pro (via OpenRouter)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "openai/gpt-6.2-astra",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GPT-6.2 Astra (via OpenRouter)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "openai/gpt-6.2-astra-pro",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GPT-6.2 Astra Pro (via OpenRouter)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "openai/gpt-6.2-sol",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GPT-6.2 Sol (via OpenRouter)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "openrouter",
+      "model": "openai/gpt-6.2-sol-pro",
+      "base_url": "https://openrouter.ai/api/v1",
+      "secret_env": "OPENROUTER_API_KEY",
+      "label": "GPT-6.2 Sol Pro (via OpenRouter)",
       "family": "openai-gpt",
       "capabilities": [
         "extended_thinking",
@@ -50858,6 +53089,75 @@
     },
     {
       "provider": "vercel_ai_gateway",
+      "model": "google/gemini-4-carbon",
+      "base_url": "https://ai-gateway.vercel.sh/v1",
+      "secret_env": "AI_GATEWAY_API_KEY",
+      "label": "Gemini 4 Carbon (Vercel AI Gateway)",
+      "family": "google-gemini",
+      "capabilities": [
+        "audio",
+        "extended_thinking",
+        "native_tools",
+        "pdf",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "vercel_ai_gateway",
+      "model": "google/gemini-4-hydrogen",
+      "base_url": "https://ai-gateway.vercel.sh/v1",
+      "secret_env": "AI_GATEWAY_API_KEY",
+      "label": "Gemini 4 Hydrogen (Vercel AI Gateway)",
+      "family": "google-gemini",
+      "capabilities": [
+        "audio",
+        "extended_thinking",
+        "native_tools",
+        "pdf",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "vercel_ai_gateway",
+      "model": "google/gemini-4-neon",
+      "base_url": "https://ai-gateway.vercel.sh/v1",
+      "secret_env": "AI_GATEWAY_API_KEY",
+      "label": "Gemini 4 Neon (Vercel AI Gateway)",
+      "family": "google-gemini",
+      "capabilities": [
+        "audio",
+        "extended_thinking",
+        "native_tools",
+        "pdf",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "vercel_ai_gateway",
       "model": "inception/mercury-3",
       "base_url": "https://ai-gateway.vercel.sh/v1",
       "secret_env": "AI_GATEWAY_API_KEY",
@@ -51001,6 +53301,94 @@
       "base_url": "https://ai-gateway.vercel.sh/v1",
       "secret_env": "AI_GATEWAY_API_KEY",
       "label": "GPT-6.1 Terra Fast (Vercel AI Gateway)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "vercel_ai_gateway",
+      "model": "openai/gpt-6.2-astra",
+      "base_url": "https://ai-gateway.vercel.sh/v1",
+      "secret_env": "AI_GATEWAY_API_KEY",
+      "label": "GPT-6.2 Astra (Vercel AI Gateway)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "vercel_ai_gateway",
+      "model": "openai/gpt-6.2-astra-fast",
+      "base_url": "https://ai-gateway.vercel.sh/v1",
+      "secret_env": "AI_GATEWAY_API_KEY",
+      "label": "GPT-6.2 Astra Fast (Vercel AI Gateway)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "vercel_ai_gateway",
+      "model": "openai/gpt-6.2-sol",
+      "base_url": "https://ai-gateway.vercel.sh/v1",
+      "secret_env": "AI_GATEWAY_API_KEY",
+      "label": "GPT-6.2 Sol (Vercel AI Gateway)",
+      "family": "openai-gpt",
+      "capabilities": [
+        "extended_thinking",
+        "native_tools",
+        "prefers_markdown_scaffolding",
+        "prompt_caching",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "vercel_ai_gateway",
+      "model": "openai/gpt-6.2-sol-fast",
+      "base_url": "https://ai-gateway.vercel.sh/v1",
+      "secret_env": "AI_GATEWAY_API_KEY",
+      "label": "GPT-6.2 Sol Fast (Vercel AI Gateway)",
       "family": "openai-gpt",
       "capabilities": [
         "extended_thinking",

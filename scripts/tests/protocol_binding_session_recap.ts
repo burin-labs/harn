@@ -1,5 +1,22 @@
 import { decodeHarnSessionRecapAvailability } from "../../spec/protocol-artifacts/harn-protocol";
 import type { ACPSessionUpdateEnvelope, ACPHarnExtensionUpdate, HarnPlanStep, HarnPlanApproval, HarnPlanCommentAnchor } from "../../spec/protocol-artifacts/harn-protocol";
+import type { HarnSessionTimelineNode, HarnSessionTimelineQuery, HarnSessionTimelineReference, HarnToolAnnotations } from "../../spec/protocol-artifacts/harn-protocol";
+
+const timelineQuery: HarnSessionTimelineQuery = { fromCursor: { topics: {} } };
+const timelineNode: HarnSessionTimelineNode = {
+  id: "node", category: "tool", kind: "future_kind", name: "Verify", status: "complete",
+  children: [], attributes: null, references: [], links: [], order: 1,
+};
+// @ts-expect-error Timeline source event identities are numeric.
+const invalidTimelineReference: HarnSessionTimelineReference = { kind: "source", eventId: "unmeasured" };
+const toolAnnotations: HarnToolAnnotations = {
+  kind: "execute", side_effect_level: "process_exec", arg_schema: {
+    path_params: [], dependency_key_params: [], dependency_range_params: [], arg_aliases: {}, required: [],
+  }, capabilities: {}, emits_artifacts: false, result_readers: [], inline_result: false,
+  readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true,
+};
+// @ts-expect-error Tool safety hints retain boolean values.
+toolAnnotations.readOnlyHint = "false";
 
 const worker: ACPSessionUpdateEnvelope = {
   sessionUpdate: "worker_update",

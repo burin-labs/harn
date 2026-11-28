@@ -1990,10 +1990,15 @@ The never-approvable command floor runs before consent. It blocks fork bombs;
 `git reset --hard`, `git clean -fd`, and force-pushes, including `--mirror` and
 `+ref` refspecs; recursive deletion of the
 project or paths outside it; `dd of=…`; filesystem formatting;
-`chmod -R 000`; and shell redirection or `truncate -s 0` against literal paths
-tracked by the enclosing Git worktree. New files, untracked files, and dynamic
-shell paths remain outside this never-approvable floor. They still receive the
-normal write-intent classification, so policy can deny them or require consent.
+`chmod -R 000`; and shell redirection or zero-size truncation of literal targets
+when no execution root is known. With a known execution root, file writes follow
+ordinary command-write permissions even when Git tracks the file. Dynamic shell
+targets remain outside this static floor; quoted metacharacters are literal
+filenames, not expansions. Writes still receive the normal write-intent
+classification, so policy can deny them or require consent.
+Pathname patterns expand in shell command arguments. For redirects, the selected
+noninteractive `sh` treats patterns as literal names; Bash and Zsh may expand them.
+The scanner retains that shell identity through explicit shell wrappers.
 Blocked commands return `status: "blocked"` without starting a child process.
 
 Consent and audit context include `invocation.argv` and `invocation.cwd` from

@@ -975,9 +975,14 @@ fn dump_llm_request_emits_context_breakdown_typed_checkpoint_for_agent_dispatch(
         captured
             .lock()
             .expect("captured sink mutex poisoned")
-            .is_empty(),
+            .iter()
+            .all(|event| !matches!(event, AgentEvent::TypedCheckpoint { .. })),
         "raw/session-scoped llm_call users should not receive agent-loop context checkpoints"
     );
+    assert!(captured.lock().unwrap().iter().any(|event| matches!(event,
+        AgentEvent::ContextUsage { session_id: id, call_id, used_tokens, capacity_tokens: Some(size) }
+        if id == session_id && call_id == "call-context-1" && *used_tokens > 0 && *size > 0
+    )));
 
     opts.dispatch_provenance = Some(crate::llm::resolved_dispatch::DispatchProvenance {
         provider: Some(crate::llm::resolved_dispatch::DispatchProvenance::OPERATOR_PIN.to_string()),

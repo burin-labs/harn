@@ -32,6 +32,9 @@ pub struct LlmTraceUsageSummary {
     /// Completed logical calls. Physical attempts, including retries and
     /// explicit zero-dispatch reuse, come from each ledger's cost certainty.
     pub call_count: i64,
+    /// Measured physical calls only; legacy ledgers do not acquire the cost
+    /// compatibility fold's assumed one-call denominator.
+    pub provider_call_count: Option<i64>,
     pub cost: UsageCostCertainty,
     pub cache: ReportedCacheTotals,
 }
@@ -74,6 +77,14 @@ impl LlmTraceRuntime {
     fn record(&self, entry: LlmTraceEntry) {
         let mut state = self.state.write();
         let summary = &mut state.summary;
+        summary.provider_call_count = if summary.call_count == 0 {
+            entry.usage.provider_call_count
+        } else {
+            summary
+                .provider_call_count
+                .zip(entry.usage.provider_call_count)
+                .and_then(|(total, more)| total.checked_add(more))
+        };
         summary.call_count = summary.call_count.saturating_add(1);
         summary.input_tokens = summary
             .input_tokens
@@ -418,6 +429,7 @@ mod accounting_tests {
         let retry = peek_trace_usage_summary();
         assert_eq!(retry.call_count, 1, "one logical completion");
         assert_eq!(retry.cost.provider_call_count, 2, "two physical attempts");
+        assert_eq!(retry.provider_call_count, Some(2));
         assert_eq!((retry.input_tokens, retry.output_tokens), (100, 20));
         assert_eq!(retry.cost.known_cost_usd, 0.003);
         assert_eq!(retry.cost.unpriced_calls, 1);
@@ -440,5 +452,38 @@ mod accounting_tests {
         );
         reset_trace_state();
         assert_eq!(peek_trace_usage_summary(), LlmTraceUsageSummary::default());
+    }
+
+    #[test]
+    fn physical_projection_does_not_borrow_legacy_cost_assumptions() {
+        for legacy_first in [false, true] {
+            let runtime = LlmTraceRuntime::default();
+            let mut legacy = LlmUsage::known_zero_attempt();
+            legacy.provider_call_count = None;
+            let measured = LlmUsage::unknown_attempts(2);
+            let calls = if legacy_first {
+                [legacy, measured]
+            } else {
+                [measured, legacy]
+            };
+            for usage in calls {
+                runtime.record(LlmTraceEntry {
+                    model: "fixture".into(),
+                    provider: "fixture".into(),
+                    usage,
+                    duration_ms: 0,
+                });
+            }
+            let summary = runtime.summary();
+            assert_eq!(summary.call_count, 2);
+            assert_eq!(
+                summary.cost.provider_call_count, 3,
+                "existing budget compatibility remains"
+            );
+            assert_eq!(
+                summary.provider_call_count, None,
+                "physical coverage is unmeasured"
+            );
+        }
     }
 }

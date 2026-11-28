@@ -1,0 +1,10 @@
+import { VerificationGateInput } from "std/verification"
+
+fn wrong_gate(value: VerificationGateInput) -> string {
+  const blocks: string = value.blocks_completion
+  return blocks
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(type_of(wrong_gate))
+}

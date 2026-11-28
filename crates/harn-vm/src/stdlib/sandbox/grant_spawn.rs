@@ -371,22 +371,8 @@ fn sweep_stale_spawn_dirs(base: &Path) {
     }
 }
 
-#[cfg(unix)]
 fn process_is_alive(pid: u32) -> bool {
-    let Ok(pid) = libc::pid_t::try_from(pid) else {
-        return false;
-    };
-    // SAFETY: signal 0 only checks that the process exists.
-    if unsafe { libc::kill(pid, 0) } == 0 {
-        return true;
-    }
-    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-}
-
-/// Without a cheap liveness check, only the age bound applies.
-#[cfg(not(unix))]
-fn process_is_alive(_pid: u32) -> bool {
-    true
+    crate::process_liveness::process_liveness(pid) != crate::process_liveness::ProcessLiveness::Dead
 }
 
 fn private_dir_builder(recursive: bool) -> std::fs::DirBuilder {

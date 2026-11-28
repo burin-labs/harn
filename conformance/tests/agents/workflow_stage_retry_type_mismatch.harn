@@ -1,0 +1,10 @@
+import { workflow_stage_retry_task } from "std/workflow/stage"
+
+fn invalid_retry_task() -> int {
+  const wrong_task: int = workflow_stage_retry_task()
+  return wrong_task
+}
+
+fn main(harness: Harness) {
+  harness.stdio.println(type_of(invalid_retry_task))
+}
