@@ -167,6 +167,8 @@ model = { name = "MiniMax M3.1 Flash (Vercel AI Gateway)", wire_model = "minimax
 [models."MiniMax-M3.1-Flash".registration.routes."accounts/fireworks/models/minimax-m3p1-flash"]
 provider = "fireworks"
 model = { name = "MiniMax M3.1 Flash (Fireworks)", wire_model = "accounts/fireworks/models/minimax-m3p1-flash", served_variant = "fireworks", context_window = 1048576, pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok = 0.015 } }
+# The tool-call probe did not exercise the separate batch API.
+request = { batch_api = false }
 
 [models."mercury-3"]
 provider = "inception"

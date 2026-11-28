@@ -214,11 +214,6 @@ fn readonly_october_routes_do_not_inherit_verified_family_capabilities() {
             "accounts/fireworks/models/deepseek-v4p1-flash-1017",
         ),
         (
-            "accounts/fireworks/models/minimax-m3p1-flash",
-            "fireworks",
-            "accounts/fireworks/models/minimax-m3p1-flash",
-        ),
-        (
             "minimax/minimax-m3.1-flash:free",
             "openrouter",
             "minimax/minimax-m3.1-flash:free",
@@ -246,11 +241,6 @@ fn readonly_october_routes_do_not_inherit_verified_family_capabilities() {
             "unbiased/pareto-26.10",
         ),
         (
-            "vercel/minimax/minimax-m3.1-flash",
-            "vercel_ai_gateway",
-            "minimax/minimax-m3.1-flash",
-        ),
-        (
             "vercel/deepseek/deepseek-v4.1-flash-1017",
             "vercel_ai_gateway",
             "deepseek/deepseek-v4.1-flash-1017",
@@ -270,7 +260,6 @@ fn readonly_october_routes_do_not_inherit_verified_family_capabilities() {
             "vercel_ai_gateway",
             "elorian/glimpse",
         ),
-        ("MiniMax-M3.1-Flash", "minimax", "MiniMax-M3.1-Flash"),
         ("mercury-3", "inception", "mercury-3"),
         (
             "together/deepseek-ai/DeepSeek-V4.1-Flash-1017",
@@ -317,7 +306,7 @@ fn readonly_october_routes_do_not_inherit_verified_family_capabilities() {
     // Shape-based provider inference is not proof of catalog membership.
     for id in [
         "MiniMax-M3.2-Flash",
-        "minimax/minimax-m3.1-flash",
+        "minimax/minimax-m3.2-flash",
         "deepseek-v4.1-flash-1017",
         "deepseek/deepseek-v4.1-flash-1018",
         "inception/mercury-4",
@@ -338,17 +327,53 @@ fn readonly_october_routes_do_not_inherit_verified_family_capabilities() {
     assert_eq!(config.aliases["minimax"].id, "MiniMax-M3");
     assert_eq!(config.aliases["minimax31"].id, "MiniMax-M3.1-Flash");
     assert_eq!(config.aliases["mercury3"].id, "mercury-3");
+}
+
+#[test]
+fn minimax_m31_flash_promotes_the_probed_routes_to_native_tools() {
+    let config = llm_config::packaged_config();
+    let view = CatalogView::new(config, crate::capabilities::builtin_file(), None);
+    for (id, provider, wire) in [
+        ("MiniMax-M3.1-Flash", "minimax", "MiniMax-M3.1-Flash"),
+        (
+            "minimax/minimax-m3.1-flash",
+            "openrouter",
+            "minimax/minimax-m3.1-flash",
+        ),
+        (
+            "vercel/minimax/minimax-m3.1-flash",
+            "vercel_ai_gateway",
+            "minimax/minimax-m3.1-flash",
+        ),
+        (
+            "accounts/fireworks/models/minimax-m3p1-flash",
+            "fireworks",
+            "accounts/fireworks/models/minimax-m3p1-flash",
+        ),
+    ] {
+        let row = config.models.get(id).expect(id);
+        assert_eq!(row.provider, provider, "{id}");
+        assert_eq!(row.wire_model.as_deref().unwrap_or(id), wire, "{id}");
+        assert_eq!(
+            row.availability,
+            crate::config::ModelAvailability::Serverless,
+            "{id}"
+        );
+        let resolution = view.capabilities(provider, id);
+        assert!(resolution.matched(), "{id}");
+        assert!(resolution.capabilities().native_tools, "{id}");
+    }
     assert!(!config.models["MiniMax-M3.1-Flash"].open_weight.unwrap());
     let minimax = view
         .capabilities("minimax", "MiniMax-M3.1-Flash")
         .capabilities();
     assert!(!minimax.temperature_supported);
     assert!(!minimax.top_p_supported);
-    assert!(minimax.requires_completion_tokens);
+    assert!(!minimax.requires_completion_tokens);
 }
 
 #[test]
-fn readonly_fireworks_routes_do_not_inherit_provider_batch_support() {
+fn fireworks_routes_preserve_model_batch_opt_outs() {
     let catalog = artifact();
     for id in [
         "accounts/fireworks/models/deepseek-v4p1-flash-1017",

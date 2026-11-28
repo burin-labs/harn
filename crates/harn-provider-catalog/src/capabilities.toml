@@ -93,6 +93,7 @@ video_supported = true
 vision_supported = true
 
 [[provider.fireworks]]
+batch_api = false
 extends = true
 model_match = "accounts/fireworks/models/minimax-m3p1-flash"
 native_tools = true
