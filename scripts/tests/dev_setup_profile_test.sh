@@ -58,7 +58,8 @@ make_fixture_repo() {
   local name="$1"
   local repo="$tmp_root/$name"
 
-  mkdir -p "$repo/scripts/lib" "$repo/bin"
+  mkdir -p "$repo/scripts/lib" "$repo/bin" "$repo/.github/workflows"
+  printf '          ACTIONLINT_VERSION: "99.1.2"\n' > "$repo/.github/workflows/ci.yml"
   cp "$repo_root/scripts/dev_setup.sh" "$repo/scripts/dev_setup.sh"
   cp "$repo_root/scripts/sccache_rustc_wrapper.rs" "$repo/scripts/sccache_rustc_wrapper.rs"
   cp "$repo_root/scripts/cargo_target_seed.sh" "$repo/scripts/cargo_target_seed.sh"
@@ -145,9 +146,12 @@ fi
 echo "unexpected fixture rustc invocation: $*" >&2
 exit 64
 SH
-  for tool in git go; do
-    printf '#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n' > "$repo/bin/$tool"
-  done
+  printf '#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n' > "$repo/bin/git"
+  cat > "$repo/bin/go" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "${DEV_SETUP_TEST_GO_RECORD:-/dev/null}"
+SH
   chmod +x "$repo/bin/cargo" "$repo/bin/rustc" "$repo/bin/git" "$repo/bin/go"
   printf '%s\n' "$repo"
 }
@@ -593,7 +597,12 @@ PATH="$bootstrap_repo/bin:$fixture_system_path" \
   HARN_DEV_SETUP_FORCE=1 \
   HARN_DEV_SETUP_STATE_DIR="$tmp_root/state-bootstrap-full" \
   DEV_SETUP_TEST_CARGO_RECORD="$bootstrap_full_cargo" \
+  DEV_SETUP_TEST_GO_RECORD="$tmp_root/bootstrap-full-go.txt" \
   "$bootstrap_repo/scripts/dev_setup.sh" > "$tmp_root/bootstrap-full-output.txt" 2>&1
+if ! grep -Fxq 'install actionlint.kjanat.dev/cmd/actionlint@v99.1.2' "$tmp_root/bootstrap-full-go.txt"; then
+  echo "full setup did not install the version pinned by the fixture workflow" >&2
+  exit 1
+fi
 if ! grep -Fxq \
   "target-dir = \"$bootstrap_target_dir\" # harn-dev-setup-managed" \
   "$bootstrap_repo/.cargo/config.toml"; then
