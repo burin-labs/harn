@@ -9,7 +9,7 @@ homepage.workspace = true
 description = "Cross-process SQLite initialization primitives for Harn runtimes"
 
 [dependencies]
-harn-flock = { path = "../harn-flock", version = "=0.10.202" }
+harn-flock = { path = "../harn-flock", version = "=0.10.203" }
 rusqlite.workspace = true
 
 [dev-dependencies]

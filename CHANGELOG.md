@@ -9,6 +9,343 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.202
+
+### Breaking
+
+- Approval-review schema builders, decision records, screen results, and reviewer
+  callbacks now retain their generated field types. Partial policy and usage
+  references are decoded at their existing owners while preserving nominal
+  containers, extra fields, scalar fallbacks, and malformed-value refusals.
+  Runtime grants, denials, memoization, and cost accounting remain unchanged.
+  Refs #9347.
+
+  Migration:
+
+  Decision fields such as `approved` now reject incompatible assignments. Treat
+  `cost_usd`, `risk`, and `authorization` as nullable rather than assuming a
+  reviewer answered or a provider reported its cost:
+
+  ```harn,ignore
+  const cost = decision.cost_usd
+  if cost != nil {
+  harness.stdio.println(cost * 100.0)
+  }
+  ```
+
+  Use `ApprovalReviewDecision`, `ApprovalReviewer`,
+  `ApprovalReviewScreenVerdict`, and `ApprovalReviewVerdictSchema` for generated
+  results. Decode opaque application metadata before accessing its fields.
+- Monitor sources and waits retain their state type through `MonitorSource<T>`,
+  `MonitorWaitOptions<T>`, and `MonitorWaitResult<T>`. GitHub, Linear, and Slack
+  monitor factories expose named state records. Raw provider values remain
+  `unknown`, including extra fields and nominal record containers. Slack and
+  Linear pollers now handle the initial absent push event instead of rejecting it.
+  Refs #9347.
+
+  Migration:
+
+  Give custom pollers a state contract when static field checking is needed:
+
+  ```harn,ignore
+  import { MonitorSource, wait_for } from "std/monitors"
+
+  type ReadyState = {ready: bool}
+  const source: MonitorSource<ReadyState> = {poll: { _ -> {ready: true} }}
+  const result = wait_for(harness.runtime, {
+  timeout: 1s,
+  source: source,
+  condition: { state -> state.ready },
+  })
+  if result.state != nil {
+  harness.stdio.println(result.state.ready)
+  }
+  ```
+
+  Check `result.state` before field access because an interrupted wait may have
+  no polled state. Decode opaque provider data with `schema_expect` or
+  `schema_parse` instead of reading fields through an erased dictionary:
+
+  ```harn,ignore
+  type MessageFields = {channel?: string, text?: string, ...dict<string, unknown>}
+  const message = schema_expect(state.message, schema_of(MessageFields))
+  ```
+
+  See the [monitor reference](../docs/src/stdlib/monitors.md) for the exported
+  types and event-envelope decoder.
+- Pattern-learning session readers and observation constructors now retain typed
+  tool sequences, run groups, command ledgers and normalized observations.
+  Partial references preserve existing values, nominal containers, extension
+  fields and conditional malformed-value refusals. Refs #9347.
+
+  Migration:
+
+  Use `PatternCommandLedgerEntry<TExitCode>`, `SessionRun`, and
+  `PatternLearningObservation` for generated results. Decode a raw session command's
+  `exit_code` or the raw `pl_run_goal_outcome` payload before reading typed fields;
+  those values remain `unknown` because their producer owns their shape. A
+  sanitized command's `exit_code` is `int?`, so check for `nil` before arithmetic.
+  Event extensions also require decoding:
+
+  ```harn,ignore
+  type EventExtension = {source: string, ...dict<string, unknown>}
+  const extension = schema_expect(event.extension, schema_of(EventExtension))
+  harness.stdio.println(extension.source)
+  ```
+- UI resource registration metadata and JSON-RPC message parameters now retain
+  their generated field types. Host capability normalization decodes the MCP,
+  legacy app, and OpenAI app dialects once while preserving their precedence,
+  scalar coercions, nominal records, and malformed-field refusals. Runtime
+  payload values and extension fields remain unchanged. Refs #9347.
+
+  Migration:
+
+  Treat application-specific tool arguments, context values, and browser
+  permissions as opaque until decoded. Replace direct field access such as
+  `call.params.arguments.window` with a schema check:
+
+  ```harn,ignore
+  type RefreshArguments = {window: string}
+  const arguments = schema_expect(
+  call.params.arguments,
+  schema_of(RefreshArguments),
+  )
+  harness.stdio.println(arguments.window)
+  ```
+
+  Use the same pattern for a value from
+  `update.params.structuredContent.selection` or
+  `registration.meta.ui.permissions`. Generated fields such as
+  `call.params.name` and `registration.meta.ui.csp.connectDomains` now reject
+  incompatible reads and writes during source checking.
+- **Verification results retain their declared field types (#9347).**
+  `std/verification` re-exports its owning types instead of erasing command
+  receipts. Diagnostic deltas, ladder entries, HUD models, and freshness
+  results now have explicit field contracts. Record decoders preserve nominal
+  containers, legacy scalar coercions, and extension fields.
+
+  Migration: read `VerificationStartedCheck.started.status` as a string,
+  replacing assignments that relied on its erased type. Guard a HUD model's
+  optional `last_check`, `next_check`, and `full_check` before accessing their
+  fields. Use optional access or a nil guard for indexed ladder entries, and
+  decode their `command` and other opaque metadata with `schema_parse` or
+  `schema_expect` before reading nested fields.
+- **Workflow stage helpers now check their result fields (#9347).** Condition, verification, outcome, artifact proposal,
+  retry, and execution results have explicit types. Runtime values and extra options are preserved, but source that treats
+  optional lists as present or reads custom fields from opaque payloads must change.
+
+  Migration: replace direct iteration over `verdict.findings` or `verdict.checks` with an empty-list fallback. Decode custom
+  payloads before reading their fields, and validate handled static results before requiring their payload.
+
+  ```harn
+  import { WorkflowPreparedStage } from "std/workflow/options"
+  import {
+    workflow_evaluate_verification,
+    workflow_prepare_static_stage,
+    workflow_stage_attempt_outcome,
+  } from "std/workflow/stage"
+
+  type CustomVerification = {label: string}
+
+  fn main(harness: Harness) {
+    const verdict = workflow_evaluate_verification()
+    const findings = verdict.findings ?? []
+    const checks = verdict.checks ?? []
+    require findings == [], "no findings are expected"
+    require checks == [], "no checks are expected"
+    const attempt = workflow_stage_attempt_outcome(
+      {node: {kind: "stage"}, verification: {label: "custom"}},
+    )
+    const metadata = schema_expect(attempt.verification, schema_of(CustomVerification))
+    require metadata.label == "custom", "custom metadata must survive"
+    const raw = workflow_prepare_static_stage(
+      harness.agent,
+      harness.interaction,
+      harness.tools,
+      {node: {kind: "fork"}},
+    )
+    const prepared = schema_expect(raw, schema_of(WorkflowPreparedStage))
+    require prepared.result.text == "forked", "the fork payload must be present"
+    harness.stdio.println("stage result migration assertions reached")
+  }
+  ```
+- **Run and session usage retain measured cache coverage (#11397).** Public usage views
+  include the canonical cache-category report counts and an optional physical
+  provider-call count, so clients can distinguish complete totals, partial
+  subtotals, measured zero, and legacy unknown coverage. The JSON fields remain
+  optional for older records.
+
+  Migration: Rust consumers constructing `LlmUsageRecord`, `RunViewUsage`, or
+  `LlmTraceUsageSummary` with exhaustive literals must supply the new optional
+  fields or use `..Default::default()`. Exhaustive patterns must include the new
+  fields or `..`. Treat absent coverage as unknown rather than zero, and compare
+  category report counts with physical `provider_call_count`, not logical
+  `call_count`.
+- Generate Swift and TypeScript provider-catalog field shapes from the existing JSON Schema.
+  Swift public properties, unsigned fee allowances and decoding defaults remain unchanged.
+  TypeScript now includes the supported Bedrock batch format, permits omitted completion-review scrutiny,
+  and restricts recurring pricing days to the seven weekday literals already accepted by the runtime.
+
+  Migration: Read optional review scrutiny with `review.scrutiny ?? "standard"`.
+  Annotate weekday arrays as `HarnRecurringPricingWindow["days"]` instead of `string[]`;
+  the accepted values remain `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, and `sun`.
+- Preserve open maps and ordinary JSON Schema constraints in non-strict Anthropic
+  tool definitions. Strict tools and structured outputs retain strict projection.
+
+  Migration: Rust consumers matching `SchemaCompatProfile` must handle
+  `AnthropicLenient`. Schemas with arbitrary keys no longer become empty closed
+  objects unless the tool explicitly requests `strict: true`.
+- **Skill frontmatter metadata survives startup discovery (#11423).**
+  `SkillManifest` now exposes `metadata: Option<BTreeMap<String, String>>`,
+  and both full skill entries and metadata-only discovery entries preserve it.
+  Metadata is an optional opaque string map; non-string values are rejected at
+  the frontmatter boundary. Metadata does not grant tool permissions.
+
+  Migration: add `metadata: None` to exhaustive `SkillManifest` struct literals,
+  or use `..SkillManifest::default()` when its remaining defaults are appropriate.
+  Skill authors must use string values in metadata, quoting numeric or boolean
+  values when they are intended as strings. Absent or null metadata stays absent.
+- Cache stable native tool definitions separately from session context while
+  retaining automatic conversation caching on supported routes.
+
+  Migration: Rust consumers matching `BreakpointPlacement` must handle
+  `ToolsAndTopLevel { tool_index }`. Receipt consumers must accept
+  `style: {"tools_and_top_level":{"tool_index":N}}` alongside the existing
+  string styles; the zero-based index identifies the final non-deferred native tool.
+
+### Added
+
+- **Agent tools and terminal callbacks can read the loop's current budget (#7619).**
+  `harness.agent.session_loop_budget(session_id)` returns the existing loop-owned
+  iteration and grant projection, with an unavailable measurement distinct from
+  zero. Reads don't change budget or terminal retry policy.
+
+### Changed
+
+- Record a fresh learned-workflow execution study on Harn v0.10.201, including
+  explicit unknown ancillary costs, ordinary qualified dispatch, user controls,
+  and refusal of an older qualification report.
+- Triage reference readers retain typed container fields and preserve legacy
+  summary fallbacks and scalar text normalization. Start My Day feeds return
+  typed events and emission receipts with caller metadata.
+- Transcript, canon and forge reference readers preserve nominal struct
+  containers alongside dictionaries.
+- Agent prompts consolidate completion, native tool use and directive instructions while preserving authorization,
+  evidence and directive lifetime rules. Prompt overrides accept their declared string and callback forms.
+
+### Fixed
+
+- **Project session updates for standard ACP clients.** Context usage now uses the
+  canonical request estimate and effective capacity; cumulative session cost
+  remains explicitly unmeasured. Notices and completed compaction
+  receipts respect the client's standard capability grants.
+  Refs [#10763](https://github.com/burin-labs/harn/issues/10763).
+- Tool registries reuse prepared shared schema resources within each catalog
+  validation, avoiding repeated whole-corpus initialization for generated
+  adapters while preserving schema and reference checks.
+- A confined child on Linux can read the host facts runtimes size themselves
+  from: CPU topology (`/sys/devices/system/cpu`, `/sys/devices/system/node`),
+  cgroup limits (`/sys/fs/cgroup`) and the huge page mode, all read-only, so
+  DuckDB, the JVM, Go and BLAS-backed numerics start inside the sandbox. The
+  system read roots and standard devices now come from one `system_runtime`
+  section of the known-paths registry, which also adds `/sbin`, the NixOS
+  system profile and `/dev/full`. Procfs file reads are granted wherever
+  Landlock is enforced, since Landlock is what keeps a confined task out of
+  its neighbours' entries, instead of only when Yama's ptrace scope is 1 or
+  higher.
+- **Finished commands no longer scan every host process (#11398).** On Linux,
+  a guardian with confirmed subreaper custody retires the descendants a
+  finished command left behind from its own child list, so a command's cost no
+  longer grows with the number of processes on the host. The cleanup record
+  names each retired child and states custody rather than a host census. A
+  guardian whose subreaper request is refused falls back to the census and
+  says so. Other platforms read one lighter process table per cleanup pass.
+- Resolve recorded workspace paths into the current replay workspace before
+  checking tool permissions. Live branches retain workspace boundaries and
+  sensitive-path checks without access to the original working copy.
+- Keep reader paths in their known working directory when a shell redirection's
+  file path is dynamic. Unresolved commands and directory changes retain their
+  refusals. Dynamic destinations still require approval, and descriptor routing
+  retains unresolved execution semantics.
+- Source release smoke now shares the release builder's target-specific compiler
+  profile and Linux swap preparation, so it tests the settings used for distributed
+  binaries instead of using a different LTO profile on ARM and macOS.
+  Both build paths stream host resource readings through the existing telemetry
+  runner to preserve diagnostics when a runner shuts down during compilation.
+- Touched-test repeatability builds and reruns the optimized, assertion-enabled
+  CI interpreter profile. Discovery and execution use the same build profile;
+  the existing test deadlines, iteration floor and wall budget remain enforced.
+- Release requests now accept an explicit consumer pull request and carry it through
+  candidate dispatch to consumer rehearsal, with matching dry-run planning and the existing pairing validator.
+  The candidate's source and containment rules and publication binding still apply.
+- Touched-test repeatability now stages a freshness-certified Harn inventory
+  reader before workspace builds can replace the Cargo executable. Inventory
+  validation and repeatability coverage requirements remain enforced.
+  Manual runs on main use the nightly's recent-change window and can report a
+  measured recovery to scheduled suite health.
+- Touched-test selection uses a released bootstrap CLI before Rust cache setup,
+  avoiding a source build just to select tests. The inventory reader and tests
+  continue to use the checked-out source.
+- Scheduled suite health now counts manual source-build release smoke runs, which
+  exercise the same platform capability checks as scheduled runs. Candidate
+  archive smoke remains separately qualified by the release workflow.
+- Keep unchanged workspace facts as standing context instead of repeating them on
+  every agent turn. Root and mount changes still deliver an update; clearing a
+  previously delivered anchor withdraws its active facts.
+- The local workflow lint now requires the pinned actionlint build that CI uses
+  and names the version it found otherwise, so an older actionlint no longer
+  reports false syntax errors on workflows that use background steps. Developer
+  setup replaces a mismatched actionlint instead of keeping it.
+- A release whose commits pair with two consumer pull requests can now be promoted
+  through one explicit consumer pull request, but only when the revision it
+  rehearses contains every paired pull's head. A pull that is not contained
+  refuses by name, and the rehearsal binding records the superseded pulls.
+- The native CI overlap check identifies the actual fixture wait step, so a
+  duplicate display name cannot hide a wait moved after the tests.
+- Consumer checks retry temporary download refusals for an archive whose source
+  identity and digest have already been measured. Missing, denied, or changed
+  archives still refuse qualification (#10566).
+- **Release rehearsals.** Renewed consumer recording authority can read pull
+  requests during the source-bound freshness recheck from #11406. Successful
+  paired consumer runs no longer fail final binding solely because that
+  credential omitted read access to the selected and superseded pull requests.
+- **Release publication rechecks consumer components (#11421).** A combined
+  rehearsal refuses publication if a component's current head is no longer
+  contained in the rehearsed revision or its ancestry can't be measured.
+- Avoid repeatedly validating unrelated syntax subtrees while checking CLI localization calls.
+  Keep canonical compiler parsing and strict validation of every registered message call.
+- Generate timeline records and tool annotations from their owning Rust contracts across host bindings.
+  Preserve the four tool safety hints during serialization instead of dropping them.
+  Schema field order now determines optional Python positional arguments and Swift memberwise initializer
+  argument order; existing field names and Python defaults are unchanged.
+- **Confined JVM commands retain launcher options (#11449).** Isolated and granted sessions preserve `JAVA_TOOL_OPTIONS`,
+  including a caller's private Java temporary directory, while keeping ungranted credentials out of child processes.
+  Confined JVM commands without an explicit Java temporary directory use the same private temp directory as other tools.
+- Pull request consumer checks read the current pairing declaration at the source
+  head under test. Rerunning the pin job refreshes an edited declaration while
+  retaining the original authenticated CLI artifact. Both candidate attempts use
+  the newly captured consumer revision and pairing.
+- Release certification follows the native workflow's returned run ID while GitHub
+  has not yet reported its purpose. Queued qualification no longer expires as a
+  missing dispatch; exact source and terminal receipt checks still decide admission.
+- Workspace file writes through shell redirection and truncation now follow
+  ordinary command-write approval and confinement even when Git tracks the file.
+  The command scanner no longer launches Git probes or treats these writes as
+  never approvable. Unresolved execution roots, unrelated destructive commands,
+  sensitive-path policy and process confinement retain their existing guards.
+  Literal targets use the shell parser's expansion facts, including quoted
+  metacharacters. Equivalent GNU zero-size spellings retain the unresolved-root
+  floor; known-root command writes remain eligible for ordinary permissions.
+- **ACP prompt results retain the goal assessment from terminal checkpoints (#10639).**
+  Hosts receive `goal_outcome` beside the terminal without treating successful
+  delivery as task achievement. Rust embedders can use the atomic prompt
+  receipt API; the older terminal-only methods remain as deprecated adapters.
+- **Release recovery.** Completed consumer repairs now recheck the original
+  source's required adaptations against the tested consumer commit. The
+  publication freshness checks from #11421 also cover this reuse path, including
+  changed component heads, incomplete source history and local Git replacement
+  or graft views.
+
 ## v0.10.201
 
 ### Breaking
