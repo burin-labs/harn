@@ -81,14 +81,14 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `cloudflare_ai_gateway` | `*` | `any` | no | `none` | no | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `cohere` | `north-mini-code-1-0 \| north-small-translate-1-0` | `any` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `cohere` | `command-*` | `any` | `adaptive` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
-| `dashscope` | `dashscope/qwen4-max \| qwen4-max` | `any; extends` | `enabled,effort` | `none` | yes | no | no | yes | yes | no | no | `plain` | `none` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `dashscope` | `dashscope/qwen4-max \| qwen4-max` | `any; extends` | `enabled,effort` | `none` | yes | no | no | yes | yes | no | no | `plain` | `none` | no | `system` | `json` | `reasoning_summary` | `json` | no | no | `unsupported` | no | yes |
 | `dashscope` | `qwen3.6-plus` | `any; extends` | `enabled` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `dashscope` | `dashscope/qwen3.8-max*` | `any; extends` | no | `none` | yes | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | yes |
 | `dashscope` | `dashscope/qwen3.6*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `dashscope` | `dashscope/qwen*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `dashscope` | `qwen3.6*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
 | `dashscope` | `qwen*` | `any` | `enabled` | `none` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
-| `deepinfra` | `deepinfra/Qwen/Qwen4-Max \| Qwen/Qwen4-Max` | `any; extends` | no | `none` | yes | no | no | yes | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | yes |
+| `deepinfra` | `deepinfra/Qwen/Qwen4-Max \| Qwen/Qwen4-Max` | `any; extends` | no | `none` | yes | no | no | yes | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `native` | yes | no | `native_only` | yes | yes |
 | `deepinfra` | `deepinfra/deepseek-ai/DeepSeek-V4.1-Flash-1017 \| deepseek-ai/DeepSeek-V4.1-Flash-1017` | `any` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | no | `unknown` | no | no |
 | `deepinfra` | `thinkingmachines/Inkling-Small \| deepinfra/thinkingmachines/Inkling-Small` | `any` | `enabled,effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
 | `deepinfra` | `nvidia/NVIDIA-Nemotron-3.5-Lightning \| deepinfra/nvidia/NVIDIA-Nemotron-3.5-Lightning` | `any` | `enabled` | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
@@ -258,7 +258,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `openai` | `openai/o4*` | `any` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `minimax/minimax-m3.1-flash` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `anthropic/claude-fable-5.2` | `any; extends` | `effort` | `none` | yes | no | no | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | yes |
-| `openrouter` | `qwen/qwen4-max` | `any; extends` | `enabled,effort` | `none` | yes | no | no | yes | yes | no | no | `plain` | `none` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `openrouter` | `qwen/qwen4-max` | `any; extends` | `enabled,effort` | `none` | yes | no | no | yes | yes | no | no | `plain` | `none` | no | `system` | `json` | `reasoning_summary` | `native` | yes | no | `native_only` | yes | yes |
 | `openrouter` | `google/gemini-4-carbon` | `any; extends` | `effort` | `none` | yes | yes | yes | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `google/gemini-4-hydrogen` | `any; extends` | `effort` | `none` | yes | yes | yes | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `openrouter` | `google/gemini-4-neon` | `any; extends` | `effort` | `none` | yes | yes | yes | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
@@ -424,7 +424,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `together` | `moonshotai/*` | `any` | no | `none` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
 | `typesafe` | `jev-* \| typesafe/jev-*` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `json` | no | yes | `text_only` | yes | no |
 | `vercel_ai_gateway` | `vercel/minimax/minimax-m3.1-flash \| minimax/minimax-m3.1-flash` | `any; extends` | no | `none` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | yes |
-| `vercel_ai_gateway` | `vercel/alibaba/qwen4-max \| alibaba/qwen4-max` | `any; extends` | `enabled,effort` | `none` | yes | no | no | yes | yes | no | no | `plain` | `none` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `vercel_ai_gateway` | `vercel/alibaba/qwen4-max \| alibaba/qwen4-max` | `any; extends` | `enabled,effort` | `none` | yes | no | no | yes | yes | no | no | `plain` | `none` | no | `system` | `json` | `reasoning_summary` | `native` | yes | no | `native_only` | yes | yes |
 | `vercel_ai_gateway` | `vercel/google/gemini-4-carbon \| google/gemini-4-carbon` | `any; extends` | `effort` | `none` | yes | yes | yes | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `vercel_ai_gateway` | `vercel/google/gemini-4-hydrogen \| google/gemini-4-hydrogen` | `any; extends` | `effort` | `none` | yes | yes | yes | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
 | `vercel_ai_gateway` | `vercel/google/gemini-4-neon \| google/gemini-4-neon` | `any; extends` | `effort` | `none` | yes | yes | yes | no | yes | no | `native` | `plain` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
@@ -512,7 +512,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `dashscope` | `dashscope/qwen3.7-max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `dashscope` | `dashscope/qwen3.8-max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `dashscope` | `dashscope/qwen3.8-max-0902` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `dashscope` | `dashscope/qwen4-max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `dashscope` | `dashscope/qwen4-max` | `json` | `unsupported` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/MiniMaxAI/MiniMax-M2.7-Turbo` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/MiniMaxAI/MiniMax-M3` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/Qwen/Qwen3-235B-A22B-Instruct-2507` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -522,7 +522,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `deepinfra` | `deepinfra/Qwen/Qwen3.6-35B-A3B` | `text` | `native_unreliable` | - | - | - | - | - | catalog note: 2026-06-24 forced-format sweep (N=5): DeepInfra Qwen3.6-35B-A3B native bills empty completions (1/5) and fenced-JSON is flaky (2/5); heredoc text carried a backslash-heavy Zig body byte-clean 5/5. |
 | `deepinfra` | `deepinfra/Qwen/Qwen3.7-Max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/Qwen/Qwen3.8-Max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `deepinfra` | `deepinfra/Qwen/Qwen4-Max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `deepinfra` | `deepinfra/Qwen/Qwen4-Max` | `native` | `native_only` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/deepseek-ai/DeepSeek-V3.2` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/deepseek-ai/DeepSeek-V4-Flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `deepinfra` | `deepinfra/deepseek-ai/DeepSeek-V4-Pro` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -810,7 +810,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `openrouter` | `qwen/qwen3.8-max-0902` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `qwen/qwen3.8-max-prime` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `qwen/qwen3.8-omni-flash` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `openrouter` | `qwen/qwen4-max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `openrouter` | `qwen/qwen4-max` | `native` | `native_only` | - | - | - | - | - | `data not yet collected` |
 | `openrouter` | `reflection/beam-1.0-501b-a23b` | `json` | `unknown` | - | - | - | - | - | catalog note: Read-only catalog evidence, 2026-10-21; inference validation requires separate spend authorization. |
 | `openrouter` | `stepfun/step-3.7-flash` | `native` | `interchangeable` | - | - | - | - | - | catalog note: Live OpenRouter probe on 2026-06-12 returned a valid provider-native tool call for Step 3.7 Flash with reasoning enabled. |
 | `openrouter` | `stepfun/step-5-preview` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
@@ -871,7 +871,7 @@ This section starts from the checked-in provider catalog. Recommended format fol
 | `typesafe` | `typesafe/jev-1.14.0` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `typesafe` | `typesafe/jev-latest` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `typesafe` | `typesafe/jev-preview` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
-| `vercel_ai_gateway` | `vercel/alibaba/qwen4-max` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
+| `vercel_ai_gateway` | `vercel/alibaba/qwen4-max` | `native` | `native_only` | - | - | - | - | - | `data not yet collected` |
 | `vercel_ai_gateway` | `vercel/anthropic/claude-haiku-4.5` | `native` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `vercel_ai_gateway` | `vercel/convaiinnovations/laya` | `not supported` | `unknown` | - | - | - | - | - | `data not yet collected` |
 | `vercel_ai_gateway` | `vercel/deepseek/deepseek-v4.1-flash-1017` | `native` | `unknown` | - | - | - | - | - | catalog note: One live native tool call succeeded on 2026-10-25; the text tool grammar was not probed, so text tools stay undeclared. |

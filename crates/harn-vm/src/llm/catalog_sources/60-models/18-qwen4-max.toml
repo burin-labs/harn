@@ -1,7 +1,8 @@
 # https://www.alibabacloud.com/help/en/model-studio/qwen4-max
 # Direct availability is documented but not measured with a DashScope key.
-# Both gateways completed tool round trips on November 27. Vercel rejected a
-# 512-token cap because its minimum thinking budget was 1024; 2048 worked.
+# OpenRouter, Vercel and DeepInfra completed tool round trips on November 27.
+# Vercel rejected a 512-token cap because its thinking budget was 1024;
+# 2048 worked.
 [models."dashscope/qwen4-max"]
 name = "Qwen4 Max (DashScope)"
 provider = "dashscope"
@@ -15,14 +16,15 @@ context_window = 1000000
 released = "2026-11-16"
 open_weight = false
 operations = ["text_generation"]
-capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
+capabilities = ["vision", "video", "streaming", "thinking", "prompt_caching"]
 pricing = { input_per_mtok = 1.50, output_per_mtok = 4.50, cache_read_per_mtok = 0.075, cache_write_per_mtok = 1.875, cache_write_1h_per_mtok = 3.00 }
 tier = "frontier"
 strengths = ["coding", "reasoning", "tool_use", "long_context", "vision"]
 
 [models."dashscope/qwen4-max".registration.request]
-native_tools = true
-preferred_tool_format = "native"
+native_tools = false
+text_tool_wire_format_supported = false
+preferred_tool_format = "json"
 vision_supported = true
 video_supported = true
 prompt_caching = true
@@ -35,16 +37,16 @@ top_p_supported = false
 
 [models."dashscope/qwen4-max".registration.routes."qwen/qwen4-max"]
 provider = "openrouter"
-model = { name = "Qwen4 Max (OpenRouter)", wire_model = "qwen/qwen4-max", served_variant = "openrouter", availability = "serverless", pricing = { input_per_mtok = 1.50, output_per_mtok = 4.50, cache_read_per_mtok = 0.075, cache_write_per_mtok = 1.875 } }
-request = { reasoning_wire_format = "openrouter", reasoning_none_supported = true }
+model = { name = "Qwen4 Max (OpenRouter)", wire_model = "qwen/qwen4-max", served_variant = "openrouter", availability = "serverless", capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"], pricing = { input_per_mtok = 1.50, output_per_mtok = 4.50, cache_read_per_mtok = 0.075, cache_write_per_mtok = 1.875 } }
+request = { native_tools = true, preferred_tool_format = "native", reasoning_wire_format = "openrouter", reasoning_none_supported = true }
 
 [models."dashscope/qwen4-max".registration.routes."vercel/alibaba/qwen4-max"]
 provider = "vercel_ai_gateway"
-model = { name = "Qwen4 Max (Vercel AI Gateway)", wire_model = "alibaba/qwen4-max", served_variant = "vercel-ai-gateway", availability = "serverless", pricing = { input_per_mtok = 1.50, output_per_mtok = 4.50, cache_read_per_mtok = 0.075, cache_write_per_mtok = 1.875 } }
-request = { reasoning_wire_format = "openai", reasoning_disable_supported = false }
+model = { name = "Qwen4 Max (Vercel AI Gateway)", wire_model = "alibaba/qwen4-max", served_variant = "vercel-ai-gateway", availability = "serverless", capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"], pricing = { input_per_mtok = 1.50, output_per_mtok = 4.50, cache_read_per_mtok = 0.075, cache_write_per_mtok = 1.875 } }
+request = { native_tools = true, preferred_tool_format = "native", reasoning_wire_format = "openai", reasoning_disable_supported = false }
 
 # https://deepinfra.com/Qwen/Qwen4-Max
 [models."dashscope/qwen4-max".registration.routes."deepinfra/Qwen/Qwen4-Max"]
 provider = "deepinfra"
-model = { name = "Qwen4 Max (DeepInfra)", wire_model = "Qwen/Qwen4-Max", served_variant = "deepinfra", availability = "serverless", pricing = { input_per_mtok = 1.413, output_per_mtok = 4.24, cache_read_per_mtok = 0.071 } }
-request = { thinking_modes = [], reasoning_effort_supported = false, reasoning_effort_levels = [], reasoning_disable_supported = false }
+model = { name = "Qwen4 Max (DeepInfra)", wire_model = "Qwen/Qwen4-Max", served_variant = "deepinfra", availability = "serverless", capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"], pricing = { input_per_mtok = 1.413, output_per_mtok = 4.24, cache_read_per_mtok = 0.071 } }
+request = { native_tools = true, preferred_tool_format = "native", thinking_modes = [], reasoning_effort_supported = false, reasoning_effort_levels = [], reasoning_disable_supported = false }

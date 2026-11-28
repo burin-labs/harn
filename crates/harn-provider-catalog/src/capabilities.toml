@@ -55,8 +55,8 @@ model_match = [
     "dashscope/qwen4-max",
     "qwen4-max",
 ]
-native_tools = true
-preferred_tool_format = "native"
+native_tools = false
+preferred_tool_format = "json"
 prompt_caching = true
 reasoning_disable_supported = true
 reasoning_effort_levels = [
@@ -66,6 +66,7 @@ reasoning_effort_levels = [
 ]
 reasoning_effort_supported = true
 temperature_supported = false
+text_tool_wire_format_supported = false
 thinking_modes = [
     "enabled",
     "effort",
@@ -87,6 +88,7 @@ reasoning_disable_supported = false
 reasoning_effort_levels = []
 reasoning_effort_supported = false
 temperature_supported = false
+text_tool_wire_format_supported = false
 thinking_modes = []
 top_p_supported = false
 video_supported = true
@@ -111,6 +113,7 @@ vision = false
 vision_supported = false
 
 [[provider.fireworks]]
+batch_api = false
 extends = true
 model_match = "accounts/fireworks/models/kimi-k3p1-pro"
 native_tools = true
@@ -448,6 +451,7 @@ reasoning_effort_supported = true
 reasoning_none_supported = true
 reasoning_wire_format = "openrouter"
 temperature_supported = false
+text_tool_wire_format_supported = false
 thinking_modes = [
     "enabled",
     "effort",
@@ -791,6 +795,7 @@ reasoning_effort_levels = [
 reasoning_effort_supported = true
 reasoning_wire_format = "openai"
 temperature_supported = false
+text_tool_wire_format_supported = false
 thinking_modes = [
     "enabled",
     "effort",

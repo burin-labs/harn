@@ -4435,7 +4435,6 @@ output_per_mtok = 6.0
 api_dialect = "openai_chat"
 availability = "unknown"
 capabilities = [
-    "tools",
     "vision",
     "video",
     "streaming",

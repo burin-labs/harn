@@ -68,4 +68,4 @@ request = { reasoning_wire_format = "openai" }
 [models."moonshot/kimi-k3.1-pro".registration.routes."accounts/fireworks/models/kimi-k3p1-pro"]
 provider = "fireworks"
 model = { name = "Kimi K3.1 Pro (Fireworks)", wire_model = "accounts/fireworks/models/kimi-k3p1-pro", served_variant = "fireworks", capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"], pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20 } }
-request = { video_supported = false, requires_completion_tokens = false, thinking_modes = [], reasoning_effort_supported = false, reasoning_effort_levels = [] }
+request = { batch_api = false, video_supported = false, requires_completion_tokens = false, thinking_modes = [], reasoning_effort_supported = false, reasoning_effort_levels = [] }

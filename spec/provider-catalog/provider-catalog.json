@@ -7410,10 +7410,10 @@
         ]
       },
       "tool_support": {
-        "native": true,
-        "text": true,
-        "preferred_format": "native",
-        "parity": "unknown",
+        "native": false,
+        "text": false,
+        "preferred_format": "json",
+        "parity": "unsupported",
         "parity_source": "derived",
         "tool_search": []
       },
@@ -7457,7 +7457,6 @@
       "quality_tags": [],
       "capability_tags": [
         "streaming",
-        "tools",
         "vision",
         "video",
         "prompt_caching",
@@ -8300,9 +8299,9 @@
       },
       "tool_support": {
         "native": true,
-        "text": true,
+        "text": false,
         "preferred_format": "native",
-        "parity": "unknown",
+        "parity": "native_only",
         "parity_source": "derived",
         "tool_search": []
       },
@@ -11700,21 +11699,6 @@
         "preserve_thinking": false
       },
       "prompt_cache": true,
-      "batch": {
-        "wire_format": "fireworks",
-        "input_mode": "jsonl_file",
-        "result_ordering": "custom_id_rejoin",
-        "partial_failure": "unknown",
-        "cancellation": "unknown",
-        "discount_percent": 50,
-        "turnaround_hours": 24,
-        "max_input_bytes": 1073741824,
-        "operational_notes": [
-          "Batch support is model-specific; Harn only marks catalog rows that advertise provider batch capability.",
-          "Prompt caching can combine with eligible batch jobs for additional savings.",
-          "Provider docs currently mention selectable 12/24/48/72 hour expiration windows and also say expired jobs expire after 24h; Harn treats the exact expiration as provider-ambiguous."
-        ]
-      },
       "pricing": {
         "input_per_mtok": 2.0,
         "output_per_mtok": 10.0,
@@ -11731,8 +11715,7 @@
         "tools",
         "vision",
         "prompt_caching",
-        "structured_output",
-        "batch"
+        "structured_output"
       ],
       "family": "kimi",
       "lineage": "kimi",
@@ -36141,9 +36124,9 @@
       },
       "tool_support": {
         "native": true,
-        "text": true,
+        "text": false,
         "preferred_format": "native",
-        "parity": "unknown",
+        "parity": "native_only",
         "parity_source": "derived",
         "tool_search": []
       },
@@ -41538,9 +41521,9 @@
       },
       "tool_support": {
         "native": true,
-        "text": true,
+        "text": false,
         "preferred_format": "native",
-        "parity": "unknown",
+        "parity": "native_only",
         "parity_source": "derived",
         "tool_search": []
       },
@@ -48093,16 +48076,13 @@
       "family": "qwen",
       "capabilities": [
         "extended_thinking",
-        "native_tools",
         "prefers_markdown_scaffolding",
         "prompt_caching",
         "reasoning_effort",
         "streaming",
         "structured_output",
         "structured_output_mode:delimited",
-        "text_tools",
         "thinking",
-        "tools",
         "video",
         "vision"
       ]
@@ -48271,7 +48251,6 @@
         "streaming",
         "structured_output",
         "structured_output_mode:native_json",
-        "text_tools",
         "tools",
         "video",
         "vision"
@@ -48741,7 +48720,6 @@
       "label": "Kimi K3.1 Pro (Fireworks)",
       "family": "kimi",
       "capabilities": [
-        "batch",
         "native_tools",
         "prefers_markdown_scaffolding",
         "prompt_caching",
@@ -53211,7 +53189,6 @@
         "streaming",
         "structured_output",
         "structured_output_mode:delimited",
-        "text_tools",
         "thinking",
         "tools",
         "video",
@@ -54233,7 +54210,6 @@
         "reasoning_effort",
         "streaming",
         "structured_output_mode:none",
-        "text_tools",
         "thinking",
         "tools",
         "video",
