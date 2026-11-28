@@ -1,0 +1,99 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
+import {
+  agent_session_finalize,
+  agent_session_init,
+  agent_session_pop_last_assistant,
+  agent_session_record_assistant,
+} from "std/agent/state"
+
+type TerminalCheckpoint = {
+  type: "typed_checkpoint",
+  checkpoint: {
+    schema: "harn.agent_terminal.v1",
+    terminal: {kind: string, reason: string, ...dict},
+    ...dict,
+  },
+  ...dict,
+}
+
+fn terminal_checkpoint(events: list<unknown>) -> TerminalCheckpoint {
+  const matches = events.filter(
+    { event -> is_ok(schema_parse(event, schema_of(TerminalCheckpoint))) },
+  )
+  assert_eq(len(matches), 1, "the actual finalizer must publish one terminal checkpoint")
+  return schema_expect(matches[0], schema_of(TerminalCheckpoint))
+}
+
+pipeline test_a_withdrawn_draft_preserves_the_actual_loop_deadline(harness: Harness) {
+  harness.testing.clock_set(1000)
+  try {
+    const session = "withdrawn-deadline-${harness.random.uuid()}"
+    const rejected = harness.runtime.atomic(0)
+    const options: AgentSpec = {
+      provider: "mock",
+      session_id: session,
+      max_iterations: 4,
+      deadline_ms: 1000,
+      final_wrapup: false,
+      verify_completion_judge: false,
+      turn_end_condition: false,
+      verify_completion: { _ ->
+        harness.runtime.atomic_add(rejected, 1)
+        return "The report is incomplete."
+      },
+      llm_caller: { _ ->
+        const _ = harness.testing.clock_advance(600)
+        return {ok: true, value: {text: "Finished.", provider: "mock", model: "fixture"}}
+      },
+    }
+    const captured = agent_capture_events(
+      harness.agent,
+      session,
+      fn() { return agent_loop(harness, "Finish the review.", nil, options) },
+    )
+    assert(harness.runtime.atomic_get(rejected) > 0, "the completion gate must reject a real draft")
+    assert_eq(captured.result.llm.iterations, 2, "the deadline must stop before the four-call cap")
+    assert_eq(captured.result.status, "budget_exhausted")
+    assert_eq(captured.result.terminal.kind, "policy_budget")
+    assert_eq(captured.result.stop_reason, "deadline")
+    assert_eq(captured.result.terminal.reason, "deadline")
+    const checkpoint = terminal_checkpoint(captured.events)
+    assert_eq(checkpoint.checkpoint.terminal.kind, "policy_budget")
+    assert_eq(checkpoint.checkpoint.terminal.reason, "deadline")
+  } finally {
+    harness.testing.clock_reset()
+  }
+}
+
+pipeline test_withdrawn_drafts_preserve_each_finalized_budget_cause(harness: Harness) {
+  for reason in ["deadline", "max_iterations", "total_cost", "input_tokens", "output_tokens"] {
+    const session = "withdrawn-budget-${reason}-${harness.random.uuid()}"
+    agent_session_init(harness.agent, "Finish.", nil, {session_id: session})
+    agent_session_record_assistant(harness.agent, session, {text: "Rejected draft."})
+    assert(
+      agent_session_pop_last_assistant(
+        harness.agent,
+        session,
+        "The closing report was withdrawn.",
+        "The report did not satisfy the completion gate.",
+      ),
+      "the real session must withdraw its assistant draft",
+    )
+    const captured = agent_capture_events(
+      harness.agent,
+      session,
+      fn() { return agent_session_finalize(
+        harness.agent,
+        session,
+        {final_status: "budget_exhausted", stop_reason: reason, iterations: 1},
+      ) },
+    )
+    assert_eq(captured.result.terminal.kind, "policy_budget")
+    assert_eq(captured.result.terminal.reason, reason)
+    assert_eq(captured.result.stop_reason, reason)
+    const checkpoint = terminal_checkpoint(captured.events)
+    assert_eq(checkpoint.checkpoint.terminal.reason, reason)
+  }
+}

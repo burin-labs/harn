@@ -373,6 +373,26 @@ impl AgentTerminalOutcome {
     }
 }
 
+/// Resolve a withdrawn answer without replacing the budget that stopped its session.
+pub(crate) fn terminal_outcome_for_session_finalize(
+    canonical_status: &str,
+    stop_reason: &str,
+    error: Option<&serde_json::Value>,
+    answer_withdrawn: bool,
+) -> AgentTerminalOutcome {
+    let budget_ended =
+        classify_agent_terminal_with_class(canonical_status, stop_reason, error.is_some(), None)
+            == AgentTerminalKind::PolicyBudget;
+    let reason = if answer_withdrawn && !budget_ended {
+        "turn_withdrawn"
+    } else {
+        stop_reason
+    };
+    let terminal_class =
+        harn_llm::agent_terminal_class::agent_terminal_class(canonical_status, reason, error);
+    terminal_outcome_for_finalize(canonical_status, reason, terminal_class, error.is_some())
+}
+
 /// Build the terminal outcome a finalized turn reports, from the values the
 /// finalize boundary has in hand.
 ///
@@ -505,6 +525,51 @@ fn classify_error(terminal_class: Option<AgentTerminalClass>) -> AgentTerminalKi
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn session_finalization_preserves_budget_and_withdrawal_evidence() {
+        use super::{terminal_outcome_for_session_finalize, AgentTerminalKind};
+
+        for (status, reason) in [
+            ("budget_exhausted", "deadline"),
+            ("budget_exhausted", "total_cost"),
+            ("verify_exhausted", "max_verify_attempts"),
+        ] {
+            let outcome = terminal_outcome_for_session_finalize(status, reason, None, true);
+            assert_eq!(outcome.kind, AgentTerminalKind::PolicyBudget);
+            assert_eq!(outcome.reason, reason);
+        }
+        let withdrawn =
+            terminal_outcome_for_session_finalize("completion_unverified", "sentinel", None, true);
+        assert_eq!(withdrawn.kind, AgentTerminalKind::CompletionUnverified);
+        assert_eq!(withdrawn.reason, "turn_withdrawn");
+
+        let contradictory =
+            terminal_outcome_for_session_finalize("budget_exhausted", "sentinel", None, true);
+        assert!(contradictory.has_conflicting_evidence());
+        let unproven = serde_json::json!({"category": "timeout", "reason": "timeout"});
+        let unknown = terminal_outcome_for_session_finalize(
+            "provider_error",
+            "timeout",
+            Some(&unproven),
+            true,
+        );
+        assert_eq!(
+            unknown.terminal_class,
+            Some(super::AgentTerminalClass::GenericThrow)
+        );
+        let error = serde_json::json!({
+            "category": "timeout", "reason": "timeout", "provider": "mock", "model": "fixture",
+        });
+        let failed =
+            terminal_outcome_for_session_finalize("provider_error", "timeout", Some(&error), true);
+        assert_eq!(failed.kind, AgentTerminalKind::ProviderError);
+        assert_eq!(failed.reason, "turn_withdrawn");
+        assert_eq!(
+            failed.terminal_class,
+            Some(super::AgentTerminalClass::Timeout)
+        );
+    }
+
     #[test]
     fn managed_allowance_checkpoint_keeps_service_remedy_separate_from_transport_detail() {
         let facts = serde_json::json!({
