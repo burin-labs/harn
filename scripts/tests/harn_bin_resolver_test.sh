@@ -693,6 +693,8 @@ cargo_target="$cargo_fixture/build output with spaces"
 # Keep those intermediates here even when CI exports a separate build dir.
 export CARGO_BUILD_BUILD_DIR="$cargo_target"
 mkdir -p "$cargo_fixture/src"
+# The temporary workspace is outside this repository's Rust toolchain scope.
+cp "$repo_root/rust-toolchain.toml" "$cargo_fixture/rust-toolchain.toml"
 cat > "$cargo_fixture/Cargo.toml" <<'TOML'
 [package]
 name = "harn"
@@ -837,7 +839,7 @@ git -C "$cargo_fixture" config commit.gpgsign false
 git -C "$cargo_fixture" config extensions.worktreeConfig true
 git -C "$cargo_fixture" config diff.hostile.command "$hostile_diff"
 git -C "$cargo_fixture" config diff.hostile.textconv "$hostile_diff"
-git -C "$cargo_fixture" add Cargo.toml src/main.rs 'embedded tracked.harn' \
+git -C "$cargo_fixture" add Cargo.toml rust-toolchain.toml src/main.rs 'embedded tracked.harn' \
   .gitignore .gitattributes docs
 git -C "$cargo_fixture" commit -qm 'fixture'
 git -C "$cargo_fixture" pack-refs --all
