@@ -79,6 +79,17 @@ pub struct InboxEntry {
     pub delivery: Option<InjectionDelivery>,
 }
 
+pub const COMMAND_PROGRESS_SOURCE: &str = "hostlib.long_running.progress";
+pub const COMMAND_TERMINAL_SOURCE: &str = "hostlib.long_running.exit";
+
+/// Command scheduling consumes only the native process producer's entries.
+pub fn is_command_update(entry: &InboxEntry) -> bool {
+    matches!(
+        (entry.kind.as_str(), entry.source.as_str()),
+        ("tool_progress", COMMAND_PROGRESS_SOURCE) | ("tool_result", COMMAND_TERMINAL_SOURCE)
+    )
+}
+
 #[derive(Default)]
 struct InboxState {
     entries: VecDeque<InboxEntry>,

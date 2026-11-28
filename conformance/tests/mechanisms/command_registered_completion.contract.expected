@@ -1,0 +1,4 @@
+effect_registered_completion_before_next_model=true
+effect_normal_dispatch_and_terminal=true
+negative_service_does_not_hold=true
+negative_empty_roster_does_not_hold=true

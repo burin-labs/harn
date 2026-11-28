@@ -1012,6 +1012,16 @@ pub type AgentStageResult = {
   kind: AgentStage,
 }
 
+/**
+ * Whether this checkpoint delivered new input requiring another model turn.
+ *
+ * @effects: []
+ * @errors: []
+ */
+pub fn agent_stage_has_delivery(result: AgentStageResult) -> bool {
+  return result.delivered > 0 || result.typed_delivered > 0 || result.inbox_delivered > 0
+}
+
 pub fn __agent_stage_modes(kind: AgentStage) {
   if kind == "pre_tool_dispatch" || kind == "daemon_idle_pre" || kind == "daemon_idle_post" {
     return {

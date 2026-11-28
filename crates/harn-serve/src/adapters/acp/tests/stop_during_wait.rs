@@ -133,7 +133,7 @@ fn is_running(pid: u32) -> bool {
 }
 
 /// Installs the runtime's own tools in each session VM, as the CLI does.
-struct InstallHostlib;
+pub(super) struct InstallHostlib;
 
 #[async_trait::async_trait(?Send)]
 impl AcpRuntimeConfigurator for InstallHostlib {
@@ -149,7 +149,7 @@ impl AcpRuntimeConfigurator for InstallHostlib {
 
 /// Answer a `host/call` the way a host that owns no `tools.*` operation does,
 /// so the call stays with the runtime's own tools.
-fn reply_unavailable(
+pub(super) fn reply_unavailable(
     request_tx: &mpsc::UnboundedSender<serde_json::Value>,
     message: &serde_json::Value,
 ) {
