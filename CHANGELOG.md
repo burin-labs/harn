@@ -9,6 +9,16 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.204
+
+### Fixed
+
+- Keep GPT-4o, GPT-4o mini, GPT-4.1, and GPT-4.1 mini selectable ahead of OpenAI’s January 14, 2027 shutdown.
+  Keep Claude Opus 4.5 selectable ahead of Anthropic’s January 22, 2027 shutdown.
+- **Preserve the terminal budget cause (#11456)** when an agent's closing draft was
+  withdrawn. Deadline, iteration and spend stops retain their cause in the
+  result and terminal checkpoint; the withdrawal explanation remains available.
+
 ## v0.10.203
 
 ### Added
