@@ -181,7 +181,7 @@ strsim = "0.11"
 # thread stack and aborting the process. See `value::recursion`.
 blake3 = "1.8.7"
 md-5 = "0.11"
-url = "2"
+url = { workspace = true }
 globset = "0.4"
 grep-matcher = "0.1"
 grep-regex = "0.1"
@@ -221,8 +221,8 @@ zeroize = "1"
 zstd = "0.14.0"
 tar = { version = "0.4.46", default-features = false }
 x509-parser = "0.18.1"
-wasmtime = { version = "50.0.1", optional = true, default-features = false, features = ["cranelift", "runtime"] }
-wasmtime-wasi = { version = "50.0.1", optional = true, default-features = false, features = ["p1"] }
+wasmtime = { version = "50.0.3", optional = true, default-features = false, features = ["cranelift", "runtime"] }
+wasmtime-wasi = { version = "50.0.3", optional = true, default-features = false, features = ["p1"] }
 wat = { version = "1", optional = true }
 tempfile = { version = "3", optional = true }
 wait-timeout = "0.2"
