@@ -497,9 +497,8 @@ benchmarks = { swe_bench_verified = 49.3 }
 provider = "gemini"
 capabilities = ["tools", "vision", "streaming", "thinking"]
 pricing = { input_per_mtok = 0.30, output_per_mtok = 2.50, cache_read_per_mtok = 0.03 }
-deprecated = true
 deprecation_note = "Google reroutes direct calls to Gemini 3.5 Flash-Lite at that model's rates starting 2026-12-01. Select gemini-3.5-flash-lite explicitly to use its request settings."
-sunset_date = "2026-12-01"
+retires_on = "2026-12-01"
 superseded_by = "gemini-3.5-flash-lite"
 tier = "mid"
 strengths = ["speed", "long_context", "vision", "cheap", "tool_use", "agentic"]

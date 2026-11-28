@@ -3514,18 +3514,17 @@ capabilities = [
     "thinking",
 ]
 context_window = 200000
-deprecated = true
 deprecation_note = "Anthropic deprecated Claude Opus 4.5 on 2026-11-23 and will retire it on 2027-01-22, including the undated alias. Use claude-opus-5-5."
 name = "Claude Opus 4.5"
 open_weight = false
 provider = "anthropic"
+retires_on = "2027-01-22"
 strengths = [
     "reasoning",
     "coding",
     "long_context",
     "agentic",
 ]
-sunset_date = "2027-01-22"
 superseded_by = "claude-opus-5-5"
 tier = "frontier"
 
@@ -6090,11 +6089,11 @@ complementary_with = [
     "kimi",
 ]
 context_window = 1048576
-deprecated = true
 deprecation_note = "Google reroutes direct calls to Gemini 3.5 Flash-Lite at that model's rates starting 2026-12-01. Select gemini-3.5-flash-lite explicitly to use its request settings."
 name = "Gemini 2.5 Flash"
 open_weight = false
 provider = "gemini"
+retires_on = "2026-12-01"
 strengths = [
     "speed",
     "long_context",
@@ -6103,7 +6102,6 @@ strengths = [
     "tool_use",
     "agentic",
 ]
-sunset_date = "2026-12-01"
 superseded_by = "gemini-3.5-flash-lite"
 tier = "mid"
 

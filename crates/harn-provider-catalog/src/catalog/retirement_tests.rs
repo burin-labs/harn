@@ -128,20 +128,37 @@ fn the_embedded_catalog_declares_valid_retirement_fields() {
 }
 
 #[test]
-fn openai_january_retirements_keep_their_dates_and_replacements() {
+fn announced_provider_retirements_keep_routes_selectable() {
     let catalog = artifact_embedded(None, None);
-    for id in ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini"] {
+    for (provider, id, date, replacement) in [
+        ("openai", "gpt-4o", "2027-01-14", "gpt-6-luna"),
+        ("openai", "gpt-4o-mini", "2027-01-14", "gpt-6-luna"),
+        ("openai", "gpt-4.1", "2027-01-14", "gpt-6-luna"),
+        ("openai", "gpt-4.1-mini", "2027-01-14", "gpt-6-luna"),
+        (
+            "anthropic",
+            "claude-opus-4-5-20251101",
+            "2027-01-22",
+            "claude-opus-5-5",
+        ),
+        (
+            "gemini",
+            "gemini-2.5-flash",
+            "2026-12-01",
+            "gemini-3.5-flash-lite",
+        ),
+    ] {
         let model = catalog
             .models
             .iter()
-            .find(|model| model.provider == "openai" && model.id == id)
-            .unwrap_or_else(|| panic!("missing OpenAI catalog row {id}"));
+            .find(|model| model.provider == provider && model.id == id)
+            .unwrap_or_else(|| panic!("missing catalog row {provider}:{id}"));
         assert_eq!(model.deprecation.status, DeprecationStatus::Active, "{id}");
-        assert_eq!(model.deprecation.retires_on.as_deref(), Some("2027-01-14"));
+        assert_eq!(model.deprecation.retires_on.as_deref(), Some(date));
         assert_eq!(model.deprecation.sunset_date, None);
         assert_eq!(
             model.deprecation.superseded_by.as_deref(),
-            Some("gpt-6-luna")
+            Some(replacement)
         );
     }
 }
