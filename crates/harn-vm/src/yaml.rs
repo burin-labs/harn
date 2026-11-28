@@ -189,9 +189,13 @@ mod tests {
 
     #[test]
     fn nesting_past_the_depth_cap_is_an_error() {
-        let nested = |depth: usize| format!("{}1{}", "[".repeat(depth), "]".repeat(depth));
-        assert!(from_str::<Value>(&nested(MAX_YAML_DEPTH - 1)).is_ok());
-        assert!(from_str::<Value>(&nested(MAX_YAML_DEPTH + 1)).is_err());
+        // On the VM's stack, where the runtime decodes: the cap is sized for
+        // it, not for a test harness thread's 2 MiB.
+        crate::runtime_stack::on_vm_stack(|| {
+            let nested = |depth: usize| format!("{}1{}", "[".repeat(depth), "]".repeat(depth));
+            assert!(from_str::<Value>(&nested(MAX_YAML_DEPTH - 1)).is_ok());
+            assert!(from_str::<Value>(&nested(MAX_YAML_DEPTH + 1)).is_err());
+        });
     }
 
     #[test]
