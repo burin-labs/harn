@@ -3514,18 +3514,17 @@ capabilities = [
     "thinking",
 ]
 context_window = 200000
-deprecated = true
 deprecation_note = "Anthropic deprecated Claude Opus 4.5 on 2026-11-23 and will retire it on 2027-01-22, including the undated alias. Use claude-opus-5-5."
 name = "Claude Opus 4.5"
 open_weight = false
 provider = "anthropic"
+retires_on = "2027-01-22"
 strengths = [
     "reasoning",
     "coding",
     "long_context",
     "agentic",
 ]
-sunset_date = "2027-01-22"
 superseded_by = "claude-opus-5-5"
 tier = "frontier"
 
@@ -7948,18 +7947,17 @@ capabilities = [
     "prompt_caching",
 ]
 context_window = 1047576
-deprecated = true
 deprecation_note = "OpenAI will shut down this route on 2027-01-14 and recommends gpt-6-luna."
 name = "GPT-4.1"
 open_weight = false
 provider = "openai"
+retires_on = "2027-01-14"
 strengths = [
     "coding",
     "tool_use",
     "long_context",
     "vision",
 ]
-sunset_date = "2027-01-14"
 superseded_by = "gpt-6-luna"
 tier = "frontier"
 
@@ -7976,11 +7974,11 @@ capabilities = [
     "prompt_caching",
 ]
 context_window = 1047576
-deprecated = true
 deprecation_note = "OpenAI will shut down this route on 2027-01-14 and recommends gpt-6-luna."
 name = "GPT-4.1 Mini"
 open_weight = false
 provider = "openai"
+retires_on = "2027-01-14"
 strengths = [
     "speed",
     "cheap",
@@ -7989,7 +7987,6 @@ strengths = [
     "long_context",
     "vision",
 ]
-sunset_date = "2027-01-14"
 superseded_by = "gpt-6-luna"
 tier = "mid"
 
@@ -8033,17 +8030,16 @@ capabilities = [
     "streaming",
 ]
 context_window = 128000
-deprecated = true
 deprecation_note = "OpenAI will shut down this route on 2027-01-14 and recommends gpt-6-luna."
 name = "GPT-4o"
 open_weight = false
 provider = "openai"
+retires_on = "2027-01-14"
 strengths = [
     "coding",
     "vision",
     "tool_use",
 ]
-sunset_date = "2027-01-14"
 superseded_by = "gpt-6-luna"
 tier = "frontier"
 
@@ -8065,18 +8061,17 @@ complementary_with = [
     "kimi",
 ]
 context_window = 128000
-deprecated = true
 deprecation_note = "OpenAI will shut down this route on 2027-01-14 and recommends gpt-6-luna."
 name = "GPT-4o Mini"
 open_weight = false
 provider = "openai"
+retires_on = "2027-01-14"
 strengths = [
     "speed",
     "cheap",
     "summarization",
     "tool_use",
 ]
-sunset_date = "2027-01-14"
 superseded_by = "gpt-6-luna"
 tier = "mid"
 

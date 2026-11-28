@@ -128,6 +128,46 @@ fn the_embedded_catalog_declares_valid_retirement_fields() {
 }
 
 #[test]
+fn announced_provider_retirements_keep_routes_selectable() {
+    let catalog = artifact_embedded(None, None);
+    for (provider, id, date, replacement) in [
+        ("openai", "gpt-4o", "2027-01-14", "gpt-6-luna"),
+        ("openai", "gpt-4o-mini", "2027-01-14", "gpt-6-luna"),
+        ("openai", "gpt-4.1", "2027-01-14", "gpt-6-luna"),
+        ("openai", "gpt-4.1-mini", "2027-01-14", "gpt-6-luna"),
+        (
+            "anthropic",
+            "claude-opus-4-5-20251101",
+            "2027-01-22",
+            "claude-opus-5-5",
+        ),
+    ] {
+        let model = catalog
+            .models
+            .iter()
+            .find(|model| model.provider == provider && model.id == id)
+            .unwrap_or_else(|| panic!("missing catalog row {provider}:{id}"));
+        assert_eq!(model.deprecation.status, DeprecationStatus::Active, "{id}");
+        assert_eq!(model.deprecation.retires_on.as_deref(), Some(date));
+        assert_eq!(model.deprecation.sunset_date, None);
+        assert_eq!(
+            model.deprecation.superseded_by.as_deref(),
+            Some(replacement)
+        );
+    }
+    let unavailable = catalog
+        .models
+        .iter()
+        .find(|model| model.provider == "gemini" && model.id == "gemini-2.5-flash")
+        .expect("missing Gemini 2.5 Flash catalog row");
+    assert_eq!(
+        unavailable.deprecation.status,
+        DeprecationStatus::Deprecated
+    );
+    assert!(unavailable.deprecation.retires_on.is_none());
+}
+
+#[test]
 fn completed_retirements_are_structured_and_recorded() {
     let catalog = artifact_embedded(None, None);
     let inkling = catalog
