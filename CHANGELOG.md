@@ -9,6 +9,43 @@ Condensed pre-v0.6 highlights live in
 Harn had no external users before 0.6.0, so that archive intentionally
 keeps condensed series summaries instead of full per-patch history.
 
+## v0.10.203
+
+### Added
+
+- Add Kimi K3.1 Pro and Qwen4 Max routes with their provider-specific pricing and tool settings.
+  Enable native tools on MiniMax M3.1 Flash and correct the paid gateway rates.
+
+### Changed
+
+- The local workflow lint and developer setup now read the actionlint version
+  from the CI workflow's `ACTIONLINT_VERSION`, so bumping that one value moves
+  CI, `make lint-actions-source`, and `scripts/dev_setup.sh` together.
+- Add GPT-6.2 Sol and Astra and Gemini 4 Carbon, Hydrogen, and Neon on their direct APIs,
+  OpenRouter, and Vercel AI Gateway. Record Anthropic and Gemini API lifecycle changes.
+- Record the January 14 shutdown of GPT-4o, GPT-4o mini, GPT-4.1, and GPT-4.1 mini.
+  Keep historical prices for retired OpenAI models.
+
+### Fixed
+
+- **Expose measured Git output completeness to typed callers (#11455).**
+  `GitCommandResult` now includes optional `stdout_truncated` and
+  `stderr_truncated` fields. Existing process adapters that omit this evidence
+  continue to return `nil`; missing evidence does not become a measured `false`.
+- Run one already proposed workspace command after successful edits when the edit producer explicitly reports no repair is
+  needed and the session's controls and context remain current. Ordinary commands retain their existing completion evidence
+  role.
+- **macOS command cleanup kills a descendant caught mid-exec.** A command's
+  escaped descendant whose environment was unreadable because it was between
+  exec images (as a framework Python is right after it starts) was skipped by
+  the cleanup kill, found alive afterwards, and turned a successful command
+  into a failed one. It is now re-read and killed. An exited orphan that
+  launchd has not yet reaped is also no longer counted as a survivor.
+
+### Security
+
+- Update Wasmtime and WASI to 50.0.3, URL parsing to url 2.5.9, and cookie handling to cookie 0.18.3 for security fixes.
+
 ## v0.10.202
 
 ### Breaking
