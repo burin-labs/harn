@@ -22,7 +22,7 @@ use crate::process::{
     spawn_process, EnvMode, OutputCapture, OwnerDeathPolicy, ProcessKiller, SpawnSpec,
 };
 
-use super::servers::{Launch, Readiness, ServerSpec};
+use super::servers::{Launch, Readiness, ServerSpec, ServerWorkspace};
 
 const STDERR_TAIL_BYTES: usize = 2048;
 /// JSON-RPC codes a server uses when a request raced a document or project
@@ -107,6 +107,8 @@ pub(crate) struct Connection {
     /// The thread that waits on the child, so a test can join it.
     #[cfg(all(test, target_os = "linux"))]
     reader: Option<std::thread::JoinHandle<()>>,
+    #[cfg(all(test, target_os = "linux"))]
+    private_workspace_path: Option<std::path::PathBuf>,
 }
 
 /// What a server needs beyond the inherited environment. Discovery can find a
@@ -145,6 +147,30 @@ fn child_path(program: &Path) -> std::ffi::OsString {
     }
 }
 
+fn private_server_workspace(spec: &ServerSpec) -> Result<Option<tempfile::TempDir>, String> {
+    if spec.workspace == ServerWorkspace::Stateless {
+        return Ok(None);
+    }
+    let mut builder = tempfile::Builder::new();
+    builder.prefix("harn-jdtls-");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(std::fs::Permissions::from_mode(0o700));
+    }
+    let directory = match harn_vm::orchestration::current_execution_policy() {
+        Some(policy) if policy.sandbox_profile.enforces_path_scope() => {
+            let base = harn_vm::process_sandbox::workspace_local_tmpdir(&policy)
+                .ok_or("the active sandbox cannot prepare a private language-server workspace")?;
+            builder.tempdir_in(base)
+        }
+        _ => builder.tempdir(),
+    };
+    directory
+        .map(Some)
+        .map_err(|error| format!("prepare private language-server workspace: {error}"))
+}
+
 impl Connection {
     pub(crate) fn spawn(
         spec: &ServerSpec,
@@ -152,17 +178,31 @@ impl Connection {
         program: &str,
         root: &Path,
     ) -> Result<Self, String> {
+        let private_workspace = private_server_workspace(spec)?;
+        let mut args: Vec<String> = launch.args.iter().map(|arg| arg.to_string()).collect();
+        if let Some(directory) = &private_workspace {
+            args.extend([
+                "-data".into(),
+                directory.path().join("data").to_string_lossy().into_owned(),
+                "-configuration".into(),
+                directory
+                    .path()
+                    .join("configuration")
+                    .to_string_lossy()
+                    .into_owned(),
+            ]);
+        }
         let mut handle = spawn_process(SpawnSpec {
             builtin: "hostlib_code_index_rename_symbol",
             program: program.to_string(),
-            args: launch.args.iter().map(|arg| arg.to_string()).collect(),
+            args,
             cwd: Some(root.to_path_buf()),
             env: server_env(program),
             env_remove: Vec::new(),
             env_mode: EnvMode::InheritClean,
             use_stdin: true,
             configure_process_group: true,
-            owner_death: OwnerDeathPolicy::None,
+            owner_death: OwnerDeathPolicy::KillContainment,
             output_capture: OutputCapture::Pipe,
         })
         .map_err(|err| format!("could not start `{program}`: {err}"))?;
@@ -197,6 +237,10 @@ impl Connection {
             pid,
             #[cfg(all(test, target_os = "linux"))]
             reader: None,
+            #[cfg(all(test, target_os = "linux"))]
+            private_workspace_path: private_workspace
+                .as_ref()
+                .map(|directory| directory.path().to_path_buf()),
         };
         let stderr_shared = shared.clone();
         harn_parser::runtime_stack::builder()
@@ -211,6 +255,7 @@ impl Connection {
                 // The server closed its output, so it has exited or is being
                 // killed; wait for it so no zombie outlives the session.
                 let _ = handle.wait();
+                drop(private_workspace);
             })
             .map_err(|err| format!("spawn reader: {err}"))?;
         #[cfg(all(test, target_os = "linux"))]
@@ -569,6 +614,70 @@ fn answer_server_request(
 mod tests {
     use super::*;
     use crate::code_index::lsp::servers;
+
+    #[test]
+    fn cached_language_servers_use_the_embedding_process_guardian() {
+        use crate::process::{install_spawner, MockProcessConfig, MockSpawner};
+
+        let mock = Arc::new(MockSpawner::new());
+        mock.enqueue(MockProcessConfig::default());
+        let _spawner = install_spawner(mock.clone());
+        let spec = servers::for_language(crate::ast::Language::Java).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let mut connection =
+            Connection::spawn(spec, &spec.launches[0], "fixture-jdtls", root.path()).unwrap();
+        let captured = mock.captured();
+        assert_eq!(captured.len(), 1, "real spawn boundary was not reached");
+        assert_eq!(captured[0].owner_death, OwnerDeathPolicy::KillContainment);
+        assert!(captured[0].configure_process_group && captured[0].use_stdin);
+        assert!(matches!(captured[0].output_capture, OutputCapture::Pipe));
+        let reader = connection.reader.take().unwrap();
+        drop(connection);
+        reader.join().unwrap();
+    }
+
+    #[test]
+    fn java_server_workspace_is_private_and_removed_after_reaping() {
+        use std::os::unix::fs::PermissionsExt;
+        let _env = crate::process::test_support::declare_inherited();
+        let spec = servers::for_language(crate::ast::Language::Java).expect("Java spec");
+        assert_eq!(
+            spec.workspace_edit_capabilities(),
+            json!({
+                "documentChanges": true, "resourceOperations": ["create", "rename", "delete"],
+            })
+        );
+        let root = tempfile::tempdir().unwrap();
+        let program = root.path().join("mock-jdtls");
+        std::fs::write(&program, "#!/bin/sh\nexec cat\n").unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut connection = Connection::spawn(
+            spec,
+            &spec.launches[0],
+            program.to_str().unwrap(),
+            root.path(),
+        )
+        .expect("spawn");
+        let path = connection
+            .private_workspace_path
+            .clone()
+            .expect("private data/config root");
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        let separate = private_server_workspace(spec)
+            .unwrap()
+            .expect("another connection root");
+        assert_ne!(path, separate.path());
+        let pid = connection.pid.expect("pid");
+        let reader = connection.reader.take().expect("reader thread");
+        drop(connection);
+        reader.join().expect("reader reaps child");
+        assert!(!Path::new(&format!("/proc/{pid}")).exists());
+        assert!(!path.exists());
+        assert!(separate.path().is_dir());
+    }
 
     /// A server that ends with its session must be reaped then, not when the
     /// host exits: an unreaped child stays a zombie with a `/proc` entry.

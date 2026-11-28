@@ -8,7 +8,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self as stdfs};
-use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
@@ -34,9 +33,18 @@ const SAFE_TEXT_PATCH_BUILTIN: &str = "hostlib_fs_safe_text_patch";
 const READ_TEXT_BUILTIN: &str = "hostlib_fs_read_text";
 const EMIT_SAFE_TEXT_PATCH_RESULT_BUILTIN: &str = "hostlib_fs_emit_safe_text_patch_result";
 
-const MANIFEST_VERSION: u32 = 1;
+const MANIFEST_VERSION: u32 = 2;
 const STATE_REL: &[&str] = &[".harn", harn_vm::runtime_paths::HOSTLIB_STATE_DIR, "staged"];
 
+#[cfg(unix)]
+pub(crate) mod anchored_file;
+mod batch;
+pub(crate) use batch::{apply_changes as apply_file_changes, FileChange};
+pub(crate) mod physical_file;
+mod session_cache;
+mod storage;
+use session_cache::{locked_state, SessionCache};
+use storage::{load_state, persist_state, read_body, write_body};
 pub(crate) mod paths;
 #[cfg(test)]
 mod tests;
@@ -126,15 +134,18 @@ impl FsMode {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Manifest {
     version: u32,
     session_id: String,
     mode: FsMode,
     root: String,
     entries: BTreeMap<String, StagedEntry>,
+    #[serde(default)]
+    atomic_groups: Option<BTreeMap<String, batch::Group>>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum StagedEntry {
     Write {
@@ -183,6 +194,7 @@ struct SessionState {
     mode: FsMode,
     root: PathBuf,
     entries: BTreeMap<PathBuf, StagedEntry>,
+    atomic_groups: BTreeMap<String, batch::Group>,
 }
 
 #[derive(Clone, Debug)]
@@ -263,16 +275,16 @@ pub struct DiscardResult {
     pub discarded_paths: Vec<String>,
 }
 
-static SESSIONS: OnceLock<Mutex<BTreeMap<String, SessionState>>> = OnceLock::new();
+static SESSIONS: OnceLock<Mutex<SessionCache>> = OnceLock::new();
 
-fn sessions() -> &'static Mutex<BTreeMap<String, SessionState>> {
-    SESSIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
+fn sessions() -> &'static Mutex<SessionCache> {
+    SESSIONS.get_or_init(|| Mutex::new(SessionCache::default()))
 }
 
 /// Lock the session map, panicking with one canonical message if a prior
 /// holder poisoned the mutex. Every accessor goes through here so the poison
 /// policy and message live in exactly one place.
-fn lock_sessions() -> std::sync::MutexGuard<'static, BTreeMap<String, SessionState>> {
+fn lock_sessions() -> std::sync::MutexGuard<'static, SessionCache> {
     sessions()
         .lock()
         .expect("hostlib fs session mutex poisoned")
@@ -287,22 +299,8 @@ pub fn configure_session_root(session_id: &str, root: &Path) {
         return;
     }
     let root = normalize_logical(root);
-    let mut guard = lock_sessions();
-    match guard.get_mut(session_id) {
-        Some(state) if state.entries.is_empty() => {
-            state.root = root;
-        }
-        Some(_) => {}
-        None => {
-            let state = load_state(session_id, Some(root.clone())).unwrap_or(SessionState {
-                session_id: session_id.to_string(),
-                mode: FsMode::Immediate,
-                root,
-                entries: BTreeMap::new(),
-            });
-            guard.insert(session_id.to_string(), state);
-        }
-    }
+    // The cache retains a failed load so subsequent operations refuse it.
+    let _ = locked_state(session_id, Some(root), SET_MODE_BUILTIN);
 }
 
 /// Return the root currently associated with a hostlib session.
@@ -311,7 +309,7 @@ pub fn configured_session_root(session_id: &str) -> Option<PathBuf> {
         return None;
     }
     let guard = lock_sessions();
-    guard.get(session_id).map(|state| state.root.clone())
+    guard.root(session_id).map(Path::to_path_buf)
 }
 
 /// Set a session's filesystem mode.
@@ -321,8 +319,9 @@ pub fn set_mode(
     root: Option<&Path>,
 ) -> Result<SetModeResult, HostlibError> {
     validate_session_id(SET_MODE_BUILTIN, session_id)?;
-    let mut guard = lock_sessions();
-    let mut state = state_for_locked(&mut guard, session_id, root.map(normalize_logical))?;
+    let (mut guard, mut state, _manifest_locks) =
+        locked_state(session_id, root.map(normalize_logical), SET_MODE_BUILTIN)?;
+    require_group_ready(&state, SET_MODE_BUILTIN, None)?;
     let previous_mode = state.mode;
     state.mode = mode;
     persist_state(&state, "set_mode", None).map_err(|err| HostlibError::Backend {
@@ -336,8 +335,7 @@ pub fn set_mode(
 /// Return the staged status for a session.
 pub fn staged_status(session_id: &str) -> Result<StagedStatus, HostlibError> {
     validate_session_id(STATUS_BUILTIN, session_id)?;
-    let mut guard = lock_sessions();
-    let state = state_for_locked(&mut guard, session_id, None)?;
+    let (mut guard, state, _manifest_locks) = locked_state(session_id, None, STATUS_BUILTIN)?;
     let status = status_from_state(&state);
     guard.insert(session_id.to_string(), state);
     Ok(status)
@@ -351,8 +349,7 @@ pub fn staged_status(session_id: &str) -> Result<StagedStatus, HostlibError> {
 #[cfg(any(feature = "ast", test))]
 pub(crate) fn staged_pending_paths(session_id: &str) -> Result<BTreeSet<PathBuf>, HostlibError> {
     validate_session_id(STATUS_BUILTIN, session_id)?;
-    let mut guard = lock_sessions();
-    let state = state_for_locked(&mut guard, session_id, None)?;
+    let (mut guard, state, _manifest_locks) = locked_state(session_id, None, STATUS_BUILTIN)?;
     let paths = state.entries.keys().cloned().collect();
     guard.insert(session_id.to_string(), state);
     Ok(paths)
@@ -361,8 +358,20 @@ pub(crate) fn staged_pending_paths(session_id: &str) -> Result<BTreeSet<PathBuf>
 /// Commit staged changes for all paths or for a filtered path list.
 pub fn commit_staged(session_id: &str, paths: &[String]) -> Result<CommitResult, HostlibError> {
     validate_session_id(COMMIT_BUILTIN, session_id)?;
-    let mut guard = lock_sessions();
-    let mut state = state_for_locked(&mut guard, session_id, None)?;
+    #[cfg(unix)]
+    {
+        batch::staged::commit(session_id, paths)
+    }
+    #[cfg(not(unix))]
+    {
+        commit_staged_legacy(session_id, paths)
+    }
+}
+
+#[cfg(not(unix))]
+fn commit_staged_legacy(session_id: &str, paths: &[String]) -> Result<CommitResult, HostlibError> {
+    validate_session_id(COMMIT_BUILTIN, session_id)?;
+    let (mut guard, mut state, _manifest_locks) = locked_state(session_id, None, COMMIT_BUILTIN)?;
     let selected = selected_paths(&state, paths);
     let mut committed_paths = Vec::new();
     let mut failed_paths_with_reasons = Vec::new();
@@ -409,8 +418,23 @@ pub fn commit_staged(session_id: &str, paths: &[String]) -> Result<CommitResult,
 /// Discard staged changes for all paths or for a filtered path list.
 pub fn discard_staged(session_id: &str, paths: &[String]) -> Result<DiscardResult, HostlibError> {
     validate_session_id(DISCARD_BUILTIN, session_id)?;
-    let mut guard = lock_sessions();
-    let mut state = state_for_locked(&mut guard, session_id, None)?;
+    #[cfg(unix)]
+    {
+        batch::staged::discard(session_id, paths)
+    }
+    #[cfg(not(unix))]
+    {
+        discard_staged_legacy(session_id, paths)
+    }
+}
+
+#[cfg(not(unix))]
+fn discard_staged_legacy(
+    session_id: &str,
+    paths: &[String],
+) -> Result<DiscardResult, HostlibError> {
+    validate_session_id(DISCARD_BUILTIN, session_id)?;
+    let (mut guard, mut state, _manifest_locks) = locked_state(session_id, None, DISCARD_BUILTIN)?;
     let selected = selected_paths(&state, paths);
     let mut discarded_paths = Vec::new();
     for path in selected {
@@ -435,41 +459,83 @@ pub fn discard_staged(session_id: &str, paths: &[String]) -> Result<DiscardResul
 /// their preview is rendered.
 pub fn remove_session_state(session_id: &str, root: Option<&Path>) -> Result<(), HostlibError> {
     validate_session_id(DISCARD_BUILTIN, session_id)?;
-    let mut guard = lock_sessions();
-    let state = match guard.remove(session_id) {
-        Some(state) => state,
-        None => load_state(session_id, root.map(normalize_logical)).map_err(|err| {
-            HostlibError::Backend {
-                builtin: DISCARD_BUILTIN,
-                message: err,
-            }
-        })?,
-    };
+    let (mut guard, state, _manifest_locks) =
+        locked_state(session_id, root.map(normalize_logical), DISCARD_BUILTIN)?;
+    if state
+        .atomic_groups
+        .values()
+        .any(batch::Group::needs_recovery)
+    {
+        return Err(HostlibError::Backend {
+            builtin: DISCARD_BUILTIN,
+            message: "recover the incomplete atomic file group before removing its state".into(),
+        });
+    }
     let dir = session_dir(&state.root, &state.session_id);
-    match stdfs::remove_dir_all(&dir) {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+    match storage::remove_state(&state) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
         Err(err) => Err(HostlibError::Backend {
             builtin: DISCARD_BUILTIN,
             message: format!("remove staged session {}: {err}", dir.display()),
-        }),
+        })?,
     }
+    guard
+        .remove(session_id)
+        .map_err(|message| HostlibError::Backend {
+            builtin: DISCARD_BUILTIN,
+            message,
+        })?;
+    Ok(())
 }
 
 pub(crate) fn read(
     path: &Path,
     explicit_session_id: Option<&str>,
 ) -> Option<std::io::Result<Vec<u8>>> {
+    read_with(path, explicit_session_id, |overlay| {
+        overlay.unwrap_or_else(|| {
+            use std::io::Read;
+            let mut file = physical_file::open_regular_file(path)?;
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes)?;
+            Ok(bytes)
+        })
+    })
+}
+
+/// Keep the session view locked while its caller applies the physical reader's
+/// own bounds and file-kind admission when no staged body overrides the path.
+pub(crate) fn read_with<T>(
+    path: &Path,
+    explicit_session_id: Option<&str>,
+    consume: impl FnOnce(Option<std::io::Result<Vec<u8>>>) -> T,
+) -> Option<T> {
     let session_id = active_session_id(explicit_session_id)?;
-    let mut guard = lock_sessions();
-    let state = state_for_locked(&mut guard, &session_id, None).ok()?;
+    let (mut guard, state, _manifest_locks) =
+        match locked_state(&session_id, None, READ_TEXT_BUILTIN) {
+            Ok(locked) => locked,
+            Err(error) => {
+                return Some(consume(Some(Err(std::io::Error::other(error.to_string())))))
+            }
+        };
+    if state
+        .atomic_groups
+        .values()
+        .any(batch::Group::needs_recovery)
+    {
+        return Some(consume(Some(Err(std::io::Error::other(
+            "staged filesystem has an incomplete file transaction",
+        )))));
+    }
     let result = if state.mode == FsMode::Staged {
         overlay_read(&state, path)
     } else {
         None
     };
+    let result = consume(result);
     guard.insert(session_id, state);
-    result
+    Some(result)
 }
 
 pub(crate) fn read_to_string(
@@ -490,15 +556,23 @@ pub(crate) fn read_dir(
     explicit_session_id: Option<&str>,
 ) -> Option<std::io::Result<Vec<OverlayDirEntry>>> {
     let session_id = active_session_id(explicit_session_id)?;
-    let mut guard = lock_sessions();
-    let state = state_for_locked(&mut guard, &session_id, None).ok()?;
-    let result = if state.mode == FsMode::Staged {
-        Some(overlay_read_dir(&state, path))
-    } else {
-        None
+    let (mut guard, state, _manifest_locks) = match locked_state(&session_id, None, STATUS_BUILTIN)
+    {
+        Ok(locked) => locked,
+        Err(error) => return Some(Err(std::io::Error::other(error.to_string()))),
     };
+    if state
+        .atomic_groups
+        .values()
+        .any(batch::Group::needs_recovery)
+    {
+        return Some(Err(std::io::Error::other(
+            "staged filesystem has an incomplete file transaction",
+        )));
+    }
+    let result = read_dir_view(&state, path);
     guard.insert(session_id, state);
-    result
+    Some(result)
 }
 
 pub(crate) fn stage_write_or_none(
@@ -512,14 +586,14 @@ pub(crate) fn stage_write_or_none(
     let Some(session_id) = active_session_id(explicit_session_id) else {
         return Ok(None);
     };
-    let mut guard = lock_sessions();
-    let mut state = state_for_locked(&mut guard, &session_id, None)?;
+    let (mut guard, mut state, _manifest_locks) = locked_state(&session_id, None, builtin)?;
+    let key = normalize_logical(path);
+    require_group_ready(&state, builtin, Some(&key))?;
     if state.mode != FsMode::Staged {
         guard.insert(session_id, state);
         return Ok(None);
     }
 
-    let key = normalize_logical(path);
     let existed = overlay_exists(&state, &key);
     if existed && !overwrite {
         guard.insert(session_id, state);
@@ -570,14 +644,14 @@ pub(crate) fn stage_delete_or_none(
     let Some(session_id) = active_session_id(explicit_session_id) else {
         return Ok(None);
     };
-    let mut guard = lock_sessions();
-    let mut state = state_for_locked(&mut guard, &session_id, None)?;
+    let (mut guard, mut state, _manifest_locks) = locked_state(&session_id, None, builtin)?;
+    let key = normalize_logical(path);
+    require_group_ready(&state, builtin, Some(&key))?;
     if state.mode != FsMode::Staged {
         guard.insert(session_id, state);
         return Ok(None);
     }
 
-    let key = normalize_logical(path);
     let staged_targets = staged_paths_under(&state, &key);
     let disk_exists = key.exists();
     if !disk_exists && staged_targets.is_empty() {
@@ -724,14 +798,15 @@ fn safe_text_patch_staged(
     let Some(session) = active_session_id(session_id) else {
         return Ok(None);
     };
-    let mut guard = lock_sessions();
-    let mut state = state_for_locked(&mut guard, &session, None)?;
+    let (mut guard, mut state, _manifest_locks) =
+        locked_state(&session, None, SAFE_TEXT_PATCH_BUILTIN)?;
+    let key = normalize_logical(path);
+    require_group_ready(&state, SAFE_TEXT_PATCH_BUILTIN, Some(&key))?;
     if state.mode != FsMode::Staged {
         guard.insert(session, state);
         return Ok(None);
     }
 
-    let key = normalize_logical(path);
     let (existing_bytes, existed) = match overlay_read(&state, path) {
         Some(Ok(bytes)) => (bytes, true),
         Some(Err(err)) if err.kind() == std::io::ErrorKind::NotFound => (Vec::new(), false),
@@ -1034,6 +1109,9 @@ fn set_mode_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let root = optional_string(SET_MODE_BUILTIN, &dict, "root")?
         .map(|path| resolve_host_path(SET_MODE_BUILTIN, &path))
         .transpose()?;
+    if let Some(root) = &root {
+        enforce_path_scope(SET_MODE_BUILTIN, root, FsAccess::Write)?;
+    }
     let result = set_mode(&session_id, mode, root.as_deref())?;
     Ok(build_dict([(
         "previous_mode",
@@ -1066,146 +1144,36 @@ fn discard_staged_builtin(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     )?))
 }
 
-fn state_for_locked(
-    guard: &mut BTreeMap<String, SessionState>,
-    session_id: &str,
-    root: Option<PathBuf>,
-) -> Result<SessionState, HostlibError> {
-    if let Some(existing) = guard.get(session_id) {
-        let mut state = existing.clone();
-        if let Some(root) = root {
-            if state.entries.is_empty() {
-                state.root = root;
-            }
-        }
-        return Ok(state);
-    }
-    let state = load_state(session_id, root).map_err(|err| HostlibError::Backend {
-        builtin: SET_MODE_BUILTIN,
-        message: err,
-    })?;
-    Ok(state)
-}
-
-fn load_state(session_id: &str, root: Option<PathBuf>) -> Result<SessionState, String> {
-    let root = root.unwrap_or_else(default_root);
-    let manifest_path = manifest_path(&root, session_id);
-    if manifest_path.exists() {
-        let text = stdfs::read_to_string(&manifest_path)
-            .map_err(|err| format!("read {}: {err}", manifest_path.display()))?;
-        let manifest: Manifest = serde_json::from_str(&text)
-            .map_err(|err| format!("parse {}: {err}", manifest_path.display()))?;
-        if manifest.version != MANIFEST_VERSION {
-            return Err(format!(
-                "unsupported staged fs manifest version {} in {}",
-                manifest.version,
-                manifest_path.display()
-            ));
-        }
-        if manifest.session_id != session_id {
-            return Err(format!(
-                "staged fs manifest session id mismatch in {}",
-                manifest_path.display()
-            ));
-        }
-        return Ok(SessionState {
-            session_id: manifest.session_id,
-            mode: manifest.mode,
-            root: normalize_logical(Path::new(&manifest.root)),
-            entries: manifest
-                .entries
-                .into_iter()
-                .map(|(path, entry)| (normalize_logical(Path::new(&path)), entry))
-                .collect(),
+fn require_group_ready(
+    state: &SessionState,
+    builtin: &'static str,
+    path: Option<&Path>,
+) -> Result<(), HostlibError> {
+    if state
+        .atomic_groups
+        .values()
+        .any(batch::Group::needs_recovery)
+    {
+        return Err(HostlibError::Backend {
+            builtin,
+            message: "commit or discard staged changes to recover the incomplete file transaction"
+                .into(),
         });
     }
-    Ok(SessionState {
-        session_id: session_id.to_string(),
-        mode: FsMode::Immediate,
-        root,
-        entries: BTreeMap::new(),
-    })
-}
-
-fn persist_state(state: &SessionState, op: &str, path: Option<&Path>) -> Result<(), String> {
-    let dir = session_dir(&state.root, &state.session_id);
-    stdfs::create_dir_all(dir.join("bodies"))
-        .map_err(|err| format!("mkdir {}: {err}", dir.display()))?;
-    let manifest = Manifest {
-        version: MANIFEST_VERSION,
-        session_id: state.session_id.clone(),
-        mode: state.mode,
-        root: state.root.to_string_lossy().into_owned(),
-        entries: state
-            .entries
-            .iter()
-            .map(|(path, entry)| (path.to_string_lossy().into_owned(), entry.clone()))
-            .collect(),
-    };
-    let bytes = serde_json::to_vec_pretty(&manifest)
-        .map_err(|err| format!("serialize staged manifest: {err}"))?;
-    atomic_write(&manifest_path(&state.root, &state.session_id), &bytes)?;
-    append_journal(state, op, path)?;
-    prune_unreferenced_bodies(state);
-    Ok(())
-}
-
-fn append_journal(state: &SessionState, op: &str, path: Option<&Path>) -> Result<(), String> {
-    let dir = session_dir(&state.root, &state.session_id);
-    stdfs::create_dir_all(&dir).map_err(|err| format!("mkdir {}: {err}", dir.display()))?;
-    let line = serde_json::to_string(&serde_json::json!({
-        "ts_ms": now_ms(),
-        "op": op,
-        "path": path.map(|path| path.to_string_lossy().into_owned()), // agent-path-ok: on-disk journal.jsonl audit line, never returned to the agent
-        "pending_count": state.entries.len(),
-    }))
-    .map_err(|err| format!("serialize staged journal: {err}"))?;
-    let mut file = stdfs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(dir.join("journal.jsonl"))
-        .map_err(|err| format!("open staged journal: {err}"))?;
-    writeln!(file, "{line}").map_err(|err| format!("write staged journal: {err}"))
-}
-
-fn write_body(state: &SessionState, bytes: &[u8]) -> Result<String, String> {
-    let hash = hex::encode(Sha256::digest(bytes));
-    let path = session_dir(&state.root, &state.session_id)
-        .join("bodies")
-        .join(&hash);
-    if !path.exists() {
-        atomic_write(&path, bytes)?;
-    }
-    Ok(hash)
-}
-
-fn read_body(state: &SessionState, hash: &str) -> std::io::Result<Vec<u8>> {
-    stdfs::read(
-        session_dir(&state.root, &state.session_id)
-            .join("bodies")
-            .join(hash),
-    )
-}
-
-fn prune_unreferenced_bodies(state: &SessionState) {
-    let live: BTreeSet<String> = state
-        .entries
-        .values()
-        .filter_map(|entry| match entry {
-            StagedEntry::Write { body_hash, .. } => Some(body_hash.clone()),
-            StagedEntry::Delete { .. } => None,
+    if path.is_some_and(|path| {
+        state.atomic_groups.values().any(|group| {
+            group
+                .original()
+                .keys()
+                .any(|member| member.starts_with(path) || path.starts_with(member))
         })
-        .collect();
-    let body_dir = session_dir(&state.root, &state.session_id).join("bodies");
-    let Ok(entries) = stdfs::read_dir(&body_dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if !live.contains(&name) {
-            let _ = stdfs::remove_file(entry.path());
-        }
+    }) {
+        return Err(HostlibError::Backend {
+            builtin,
+            message: "commit or discard the existing file group before changing its paths".into(),
+        });
     }
+    Ok(())
 }
 
 pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -1252,18 +1220,20 @@ fn overlay_read(state: &SessionState, path: &Path) -> Option<std::io::Result<Vec
     None
 }
 
-fn overlay_read_dir(state: &SessionState, path: &Path) -> std::io::Result<Vec<OverlayDirEntry>> {
+fn read_dir_view(state: &SessionState, path: &Path) -> std::io::Result<Vec<OverlayDirEntry>> {
     let dir_key = normalize_logical(path);
-    if matches!(state.entries.get(&dir_key), Some(StagedEntry::Write { .. }))
-        || deleted_ancestor(state, &dir_key)
-        || matches!(
-            state.entries.get(&dir_key),
-            Some(StagedEntry::Delete { .. })
-        )
+    let staged = state.mode == FsMode::Staged;
+    if staged
+        && (matches!(state.entries.get(&dir_key), Some(StagedEntry::Write { .. }))
+            || deleted_ancestor(state, &dir_key)
+            || matches!(
+                state.entries.get(&dir_key),
+                Some(StagedEntry::Delete { .. })
+            ))
     {
         return Err(not_found(&dir_key));
     }
-    if !path.exists() && !has_staged_descendant(state, &dir_key) {
+    if !(path.exists() || staged && has_staged_descendant(state, &dir_key)) {
         return Err(not_found(&dir_key));
     }
 
@@ -1286,6 +1256,9 @@ fn overlay_read_dir(state: &SessionState, path: &Path) -> std::io::Result<Vec<Ov
         }
     }
 
+    if !staged {
+        return Ok(entries.into_values().collect());
+    }
     for (path, entry) in &state.entries {
         let Some(name) = overlay_child_name(path, &dir_key) else {
             continue;

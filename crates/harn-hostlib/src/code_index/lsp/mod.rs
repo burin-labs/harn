@@ -67,6 +67,13 @@ struct Session {
     op: Mutex<HashMap<PathBuf, i32>>,
 }
 
+struct DocumentSnapshot {
+    source: String,
+    version: i32,
+}
+
+type OpenedDocuments = BTreeMap<PathBuf, DocumentSnapshot>;
+
 type SessionKey = (&'static str, PathBuf);
 
 static SESSIONS: LazyLock<Mutex<HashMap<SessionKey, Arc<Session>>>> =
@@ -183,7 +190,7 @@ fn start(
                     },
                     "workspace": {
                         "configuration": true,
-                        "workspaceEdit": {"documentChanges": true},
+                        "workspaceEdit": spec.workspace_edit_capabilities(),
                         "workspaceFolders": true,
                     },
                     "window": {"workDoneProgress": true},
@@ -538,7 +545,7 @@ impl Session {
         let position = LineIndex::new(request.source).position(request.offset, self.encoding);
         let mut outcome = match self.project_loading(ends_before, timeout, request.call) {
             Some(unavailable) => Ok(unavailable),
-            None => self.rename_at(request, file, position, timeout),
+            None => self.rename_at(request, file, position, timeout, &opened),
         };
         if let Err(Stale(files)) = &outcome {
             // The server's view of some file is behind ours: hand it the
@@ -547,18 +554,32 @@ impl Session {
                 let Ok(text) = read_document(request, path) else {
                     continue;
                 };
-                if opened.contains(path) {
+                if opened.contains_key(path) {
                     self.close(path);
-                } else {
-                    opened.push(path.clone());
                 }
                 let language = Language::detect(path, None).unwrap_or(request.language);
-                self.open(&mut versions, path, &text, language);
+                match self.open(&mut versions, path, &text, language) {
+                    Ok(version) => {
+                        opened.insert(
+                            path.clone(),
+                            DocumentSnapshot {
+                                source: text,
+                                version,
+                            },
+                        );
+                    }
+                    Err(reason) => {
+                        for path in opened.keys() {
+                            self.close(path);
+                        }
+                        return BackendOutcome::Unavailable(reason);
+                    }
+                }
             }
-            outcome = self.rename_at(request, file, position, timeout);
+            outcome = self.rename_at(request, file, position, timeout, &opened);
         }
-        for path in opened {
-            self.close(&path);
+        for path in opened.keys() {
+            self.close(path);
         }
         match outcome {
             Ok(outcome) => outcome,
@@ -576,17 +597,31 @@ impl Session {
         versions: &mut HashMap<PathBuf, i32>,
         request: &RenameRequest<'_>,
         file: &Path,
-    ) -> Result<Vec<PathBuf>, String> {
+    ) -> Result<OpenedDocuments, String> {
         let mut documents = vec![(
             file.to_path_buf(),
             request.source.to_string(),
             request.language,
         )];
         documents.extend(extra_documents(request, self.spec, file)?);
-        let mut opened = Vec::new();
+        let mut opened: OpenedDocuments = BTreeMap::new();
         for (path, text, language) in &documents {
-            self.open(versions, path, text, *language);
-            opened.push(path.clone());
+            let version = match self.open(versions, path, text, *language) {
+                Ok(version) => version,
+                Err(reason) => {
+                    for path in opened.keys() {
+                        self.close(path);
+                    }
+                    return Err(reason);
+                }
+            };
+            opened.insert(
+                path.clone(),
+                DocumentSnapshot {
+                    source: text.clone(),
+                    version,
+                },
+            );
         }
         Ok(opened)
     }
@@ -666,8 +701,8 @@ impl Session {
                 }
             }
         }
-        for path in opened {
-            self.close(&path);
+        for path in opened.keys() {
+            self.close(path);
         }
         match failure {
             Some(reason) => Err(reason),
@@ -727,18 +762,21 @@ impl Session {
         path: &Path,
         text: &str,
         language: Language,
-    ) {
+    ) -> Result<i32, String> {
         let version = versions.entry(path.to_path_buf()).or_insert(0);
         *version += 1;
-        let _ = self.connection.notify(
-            "textDocument/didOpen",
-            json!({"textDocument": {
-                "uri": self.uri(path),
-                "languageId": (self.spec.language_id)(language),
-                "version": *version,
-                "text": text,
-            }}),
-        );
+        self.connection
+            .notify(
+                "textDocument/didOpen",
+                json!({"textDocument": {
+                    "uri": self.uri(path),
+                    "languageId": (self.spec.language_id)(language),
+                    "version": *version,
+                    "text": text,
+                }}),
+            )
+            .map_err(|error| format!("{} did not open a document: {error}", self.launch.id))?;
+        Ok(*version)
     }
 
     fn rename_at(
@@ -747,6 +785,7 @@ impl Session {
         file: &Path,
         position: Position,
         timeout: Duration,
+        opened: &OpenedDocuments,
     ) -> Result<BackendOutcome, Stale> {
         let id = self.launch.id;
         request.call.report(Phase::Resolving, id);
@@ -789,21 +828,44 @@ impl Session {
             }
             Err(outcome) => return Ok(outcome),
         };
-        let per_file = match edit.into_file_edits() {
+        let rename_paths = if request.language == Language::Java
+            && file.file_name().and_then(|name| name.to_str())
+                == Some(format!("{}.java", request.old_name).as_str())
+        {
+            Some((
+                edits::uri_to_path(&self.uri(file)).expect("a generated file URI is valid"),
+                edits::uri_to_path(
+                    &self.uri(&file.with_file_name(format!("{}.java", request.new_name))),
+                )
+                .expect("a generated file URI is valid"),
+            ))
+        } else {
+            None
+        };
+        let per_file = match edit.into_rename_file_edits(
+            rename_paths
+                .as_ref()
+                .map(|(old, new)| (old.as_path(), new.as_path())),
+        ) {
             Ok(per_file) => per_file,
             Err(detail) => return Ok(BackendOutcome::Unavailable(format!("{id}: {detail}"))),
         };
-        self.changeset(request, per_file)
+        self.changeset(request, per_file, opened)
     }
 
     fn changeset(
         &self,
         request: &RenameRequest<'_>,
-        per_file: BTreeMap<PathBuf, Vec<edits::TextEdit>>,
+        per_file: BTreeMap<PathBuf, edits::DocumentEdits>,
+        opened: &OpenedDocuments,
     ) -> Result<BackendOutcome, Stale> {
         let mut changeset = Vec::new();
         let mut stale = Vec::new();
-        for (path, text_edits) in per_file {
+        for (path, document) in per_file {
+            let path = match path.strip_prefix(&self.served_root) {
+                Ok(relative) => self.root.join(relative),
+                Err(_) => path,
+            };
             let Some(relative) = relative_to(request.index_root, &path) else {
                 return Ok(BackendOutcome::Declined(format!(
                     "{} would edit {} outside the workspace",
@@ -815,13 +877,76 @@ impl Session {
                 Ok(source) => source,
                 Err(detail) => return Ok(BackendOutcome::Unavailable(detail)),
             };
-            match lower_edits(&source, &text_edits, self.encoding) {
-                // Every rename edit replaces the old spelling; anything else
-                // means the server edited a different version of the file.
-                Ok(edits) if edits.iter().all(|edit| edit.before == request.old_name) => {
+            let Some(snapshot) = opened.get(&path) else {
+                stale.push(path);
+                continue;
+            };
+            let rename_to = if let Some(destination) = &document.rename_to {
+                let destination = match destination.strip_prefix(&self.served_root) {
+                    Ok(relative) => self.root.join(relative),
+                    Err(_) => destination.clone(),
+                };
+                let Some(relative) = relative_to(request.index_root, &destination) else {
+                    return Ok(BackendOutcome::Declined(
+                        "the file rename destination is outside the workspace".into(),
+                    ));
+                };
+                match std::fs::symlink_metadata(&destination) {
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Ok(_) => {
+                        return Ok(BackendOutcome::Declined(
+                            "the file rename destination already exists".into(),
+                        ))
+                    }
+                    Err(error) => return Ok(BackendOutcome::Unavailable(error.to_string())),
+                }
+                if let Some(result) = crate::fs::read(&destination, request.session_id) {
+                    match result {
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                        Ok(_) => {
+                            return Ok(BackendOutcome::Declined(
+                                "the staged file rename destination already exists".into(),
+                            ))
+                        }
+                        Err(error) => return Ok(BackendOutcome::Unavailable(error.to_string())),
+                    }
+                }
+                Some(relative)
+            } else {
+                None
+            };
+            if snapshot.source != source
+                || document
+                    .version
+                    .is_some_and(|version| version != snapshot.version)
+            {
+                stale.push(path);
+                continue;
+            }
+            let lowered =
+                lower_edits(&snapshot.source, &document.edits, self.encoding).and_then(|edits| {
+                    if request.language != Language::Java
+                        && edits.iter().all(|edit| {
+                            edit.before == request.old_name && edit.after == request.new_name
+                        })
+                    {
+                        Ok(edits)
+                    } else {
+                        edits::identifier_replacements(
+                            &snapshot.source,
+                            &edits,
+                            request.language,
+                            request.old_name,
+                            request.new_name,
+                        )
+                    }
+                });
+            match lowered {
+                Ok(edits) => {
                     if !edits.is_empty() {
                         changeset.push(FileEdits {
                             path: relative,
+                            rename_to,
                             source,
                             edits,
                         });

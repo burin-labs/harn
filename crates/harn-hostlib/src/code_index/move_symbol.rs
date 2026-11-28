@@ -1014,8 +1014,9 @@ fn plan(
             edits,
             true,
         ) {
-            Ok(plan) => {
+            Ok(mut plan) => {
                 if !work.existed {
+                    plan.expected_hash = None;
                     response.created.push(plan.path.clone());
                 }
                 response.plans.push(plan);

@@ -3,9 +3,9 @@
 use std::{io, path::Path};
 
 pub use harn_vm_core::conditional_replace::{
-    require_parent, scope_conditional_replace_lock_root, ConditionalReplaceOptions,
-    ConditionalReplaceReceipt, ConditionalReplaceStatus, ScopedConditionalReplaceLockRoot,
-    CONDITIONAL_REPLACE_LOCK_DIRECTORY,
+    require_parent, scope_conditional_replace_lock_root, ConditionalReplaceLock,
+    ConditionalReplaceOptions, ConditionalReplaceReceipt, ConditionalReplaceStatus,
+    ScopedConditionalReplaceLockRoot, CONDITIONAL_REPLACE_LOCK_DIRECTORY,
 };
 
 pub(crate) fn scope_native_lock_root() -> Option<ScopedConditionalReplaceLockRoot> {
@@ -25,6 +25,12 @@ pub fn acquire_lock(
 ) -> io::Result<harn_vm_core::conditional_replace::ConditionalReplaceLock> {
     let _scope = scope_native_lock_root();
     harn_vm_core::conditional_replace::acquire_lock(path)
+}
+
+/// Hold grouped mutations in the same native namespace as conditional writes.
+pub fn acquire_locks(paths: &[std::path::PathBuf]) -> io::Result<Vec<ConditionalReplaceLock>> {
+    let _scope = scope_native_lock_root();
+    harn_vm_core::conditional_replace::acquire_locks(paths)
 }
 
 pub fn conditional_replace(

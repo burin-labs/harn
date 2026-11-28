@@ -262,12 +262,14 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
     } else {
         false
     };
-    if seed_node.language == "java" && (seed_node.kind == NodeKind::Type || java_constructor) {
+    let java_type_rename =
+        seed_node.language == "java" && (seed_node.kind == NodeKind::Type || java_constructor);
+    if java_type_rename && (!cfg!(unix) || !is_rename || backend == BackendChoice::SyntaxTree) {
         return Ok(emit_response(
             &env,
             "unsupported_language",
             ResponseExtras {
-                details: "Java type and constructor renames are not supported: references and public-type file moves cannot yet be proven; no files changed".into(),
+                details: "Java type and constructor renames require a Unix host and the language-server backend; no files changed".into(),
                 fallback_suggestion: Some(TEXT_PATCH_FALLBACK.to_string()),
                 ..Default::default()
             },
@@ -304,7 +306,7 @@ pub(super) fn run(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, Host
                 return Ok(interrupted_response(&env, interrupt, true))
             }
             language_server::Answer::Fallback(reason)
-                if backend == BackendChoice::LanguageServer =>
+                if backend == BackendChoice::LanguageServer || java_type_rename =>
             {
                 return Ok(emit_response(
                     &env,

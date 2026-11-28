@@ -91,6 +91,8 @@ own arguments or environment.
 Foreground-only embedders must now add this hook too. Without it, command
 startup returns `ProcessError::GuardianNotInitialized` before starting the
 payload. Windows uses a Job Object and the function returns `false`.
+Cached language servers use this same owner-lifetime containment, so they
+cannot keep running after the embedding process exits.
 
 For libtest executables that invoke real command tools, declare
 `harn_hostlib::process_guardian_test_fixture!();` once at the crate root.

@@ -9,7 +9,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 #[cfg(unix)]
-mod fd;
+use crate::fs::anchored_file as fd;
 
 #[cfg(not(unix))]
 use super::{atomic_write, current_hash};
@@ -103,8 +103,12 @@ pub(super) fn restore_one(
     match write {
         Some(payload) => {
             // Re-verify through the same descriptor before publishing.
-            let written =
-                parent.write(&payload.bytes, payload.exec, require_no_replace, |dir| {
+            let written = parent.write(
+                &payload.bytes,
+                payload.exec,
+                None,
+                require_no_replace,
+                |dir| {
                     if dir.hash()? == *guard {
                         #[cfg(all(test, unix))]
                         restore_hook(Stage::AfterFinalGuard);
@@ -112,7 +116,8 @@ pub(super) fn restore_one(
                     } else {
                         Err(format!("{} changed while restoring", entry.path))
                     }
-                })?;
+                },
+            )?;
             if !written {
                 return Ok(Step::Refused(parent.hash()?));
             }

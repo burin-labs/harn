@@ -95,7 +95,9 @@ const AUDIT: &str = "package lab;\npublic final class AuditStore {\n  // getById
 const KNOWN_PAGE: &str = "package lab; final class KnownPage { int read(DocumentStore documents) { return documents.getById(1); } }";
 
 #[test]
-fn java_type_rename_refuses_unproven_references_before_writing() {
+fn java_type_rename_requires_semantic_server_before_writing() {
+    let _env = crate::process::test_support::declare_inherited();
+    super::lsp::test_override::set("jdtls", "/nonexistent/harn-test/jdtls");
     for scope in ["file", "workspace"] {
         for dry_run in [false, true] {
             for replacement in [false, true] {
@@ -127,7 +129,11 @@ fn java_type_rename_refuses_unproven_references_before_writing() {
                     let result = super::rename::run(&ws.index, &[dict(&request)]).unwrap();
                     assert_eq!(
                         s(field(&result, "result")),
-                        "unsupported_language",
+                        if !cfg!(unix) || replacement || backend == "syntax_tree" {
+                            "unsupported_language"
+                        } else {
+                            "backend_unavailable"
+                        },
                         "{result:?}"
                     );
                     assert_eq!(n(field(&result, "match_count")), 0, "{result:?}");
@@ -163,7 +169,9 @@ fn java_type_rename_refuses_unproven_references_before_writing() {
 }
 
 #[test]
-fn java_constructor_seed_refuses_type_rename_before_writing() {
+fn java_constructor_seed_requires_semantic_server_before_writing() {
+    let _env = crate::process::test_support::declare_inherited();
+    super::lsp::test_override::set("jdtls", "/nonexistent/harn-test/jdtls");
     let caller =
         "package lab; final class KnownPage { DocumentStore store = new DocumentStore(); }";
     for (path, source, name, line) in [
@@ -196,7 +204,7 @@ fn java_constructor_seed_refuses_type_rename_before_writing() {
                 .unwrap();
                 assert_eq!(
                     s(field(&result, "result")),
-                    "unsupported_language",
+                    if !cfg!(unix) || backend == "syntax_tree" { "unsupported_language" } else { "backend_unavailable" },
                     "{result:?}"
                 );
                 assert_eq!(n(field(&result, "match_count")), 0, "{result:?}");

@@ -6,6 +6,7 @@
 //! same namespace, including canonical-path aliases of a destination.
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io;
 use std::path::{Path, PathBuf};
@@ -300,13 +301,33 @@ pub fn acquire_lock(path: &Path) -> io::Result<ConditionalReplaceLock> {
     acquire_lock_with_timeout(path, CONDITIONAL_REPLACE_LOCK_TIMEOUT)
 }
 
+/// Hold every affected destination in canonical order for a grouped mutation.
+/// Aliases share one guard, including case aliases on case-insensitive hosts.
+/// Existing conditional replacements use these same locks.
+pub fn acquire_locks(paths: &[PathBuf]) -> io::Result<Vec<ConditionalReplaceLock>> {
+    let identities: BTreeMap<_, _> = paths
+        .iter()
+        .map(|path| {
+            let identity = canonical_lock_identity(path);
+            (lock_identity_bytes(&identity), identity)
+        })
+        .collect();
+    identities
+        .values()
+        .map(|identity| acquire_identity_lock(identity, CONDITIONAL_REPLACE_LOCK_TIMEOUT))
+        .collect()
+}
+
 fn acquire_lock_with_timeout(path: &Path, timeout: Duration) -> io::Result<ConditionalReplaceLock> {
+    acquire_identity_lock(&canonical_lock_identity(path), timeout)
+}
+
+fn acquire_identity_lock(identity: &Path, timeout: Duration) -> io::Result<ConditionalReplaceLock> {
     let root = lock_root()?;
     fs::create_dir_all(&root)?;
-    let identity = canonical_lock_identity(path);
     let name = format!(
         "{}.lock",
-        hex::encode(Sha256::digest(lock_identity_bytes(&identity)))
+        hex::encode(Sha256::digest(lock_identity_bytes(identity)))
     );
     let lock_path = root.join(name);
     let file = OpenOptions::new()
@@ -375,6 +396,37 @@ impl Drop for ConditionalReplaceLock {
 mod tests {
     use super::*;
     use std::sync::{Arc, Barrier};
+
+    #[cfg(unix)]
+    #[test]
+    fn grouped_locks_deduplicate_aliases_and_exclude_existing_writers() {
+        let directory = tempfile::tempdir().unwrap();
+        let lock_root = directory.path().join("locks");
+        let _scope = scope_conditional_replace_lock_root(&lock_root);
+        let original = directory.path().join("document");
+        let alias = directory.path().join("alias");
+        fs::write(&original, b"current").unwrap();
+        std::os::unix::fs::symlink(&original, &alias).unwrap();
+        let guards = acquire_locks(&[alias, original.clone(), original]).unwrap();
+        assert_eq!(guards.len(), 1);
+        let locks = fs::read_dir(lock_root)
+            .unwrap()
+            .collect::<io::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(locks.len(), 1);
+        let contender = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(locks[0].path())
+            .unwrap();
+        assert!(matches!(
+            contender.try_lock(),
+            Err(fs::TryLockError::WouldBlock)
+        ));
+        drop(guards);
+        harn_flock::assert_released(&contender);
+        contender.unlock().unwrap();
+    }
 
     #[test]
     fn stale_digest_never_writes() {
