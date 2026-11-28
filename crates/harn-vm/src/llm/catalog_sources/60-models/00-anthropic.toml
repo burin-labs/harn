@@ -316,6 +316,9 @@ benchmarks = { swe_bench_verified = 78.9 }
 provider = "anthropic"
 capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
 pricing = { input_per_mtok = 5.00, output_per_mtok = 25.00, cache_read_per_mtok = 0.50, cache_write_per_mtok = 6.25, cache_write_1h_per_mtok = 10.00, hosted_tool_fees = { web_search = { per_1k_calls = 10.0, source_url = "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool" } } }
+deprecated = true
+deprecation_note = "Anthropic deprecated Claude Opus 4.5 on 2026-11-23 and will retire it on 2027-01-22, including the undated alias. Use claude-opus-5-5."
+sunset_date = "2027-01-22"
 superseded_by = "claude-opus-5-5"
 tier = "frontier"
 strengths = ["reasoning", "coding", "long_context", "agentic"]

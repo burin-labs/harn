@@ -1236,7 +1236,11 @@ print("parent-exit", flush=True)
 
     assert!(!require_bool(&resp, "timed_out"));
     assert_eq!(require_str(&resp, "status"), "completed");
-    assert_eq!(require_int(&resp, "exit_code"), 0);
+    assert_eq!(
+        require_int(&resp, "exit_code"),
+        0,
+        "the command and its guardian should both succeed: {resp:?}"
+    );
     let stdout = require_str(&resp, "stdout");
     assert!(
         stdout.contains("parent-exit"),
@@ -1340,7 +1344,11 @@ print("parent-exit", flush=True)
 
     assert!(!require_bool(&resp, "timed_out"));
     assert_eq!(require_str(&resp, "status"), "completed");
-    assert_eq!(require_int(&resp, "exit_code"), 0);
+    assert_eq!(
+        require_int(&resp, "exit_code"),
+        0,
+        "the command and its guardian should both succeed: {resp:?}"
+    );
     let stdout = require_str(&resp, "stdout");
     assert!(
         stdout.contains("parent-exit"),

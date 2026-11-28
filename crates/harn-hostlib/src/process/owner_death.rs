@@ -63,6 +63,12 @@ mod adopted_children;
 #[path = "owner_death/adopted_children_tests.rs"]
 mod adopted_children_tests;
 
+#[cfg(unix)]
+#[path = "owner_death/payload_custody.rs"]
+mod payload_custody;
+#[cfg(unix)]
+use payload_custody::*;
+
 /// Private argv marker handled before the public CLI parser runs.
 pub const GUARDIAN_ARG: &str = "__harn-process-owner-guardian";
 
@@ -99,6 +105,30 @@ const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 #[cfg(unix)]
 thread_local! {
     static REEXEC_ARGS: RefCell<Option<Vec<OsString>>> = const { RefCell::new(None) };
+    static TEST_DENY_SUBREAPER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Restores this thread's subreaper test override on drop.
+#[cfg(unix)]
+#[doc(hidden)]
+pub struct GuardianSubreaperDenialGuard {
+    previous: bool,
+}
+
+#[cfg(unix)]
+impl Drop for GuardianSubreaperDenialGuard {
+    fn drop(&mut self) {
+        TEST_DENY_SUBREAPER.with(|slot| slot.set(self.previous));
+    }
+}
+
+/// Make guardians started from this thread behave as if the kernel refused
+/// subreaper custody. Honored only by a libtest re-exec guardian.
+#[cfg(unix)]
+#[doc(hidden)]
+pub fn deny_guardian_subreaper_for_test() -> GuardianSubreaperDenialGuard {
+    let previous = TEST_DENY_SUBREAPER.with(|slot| slot.replace(true));
+    GuardianSubreaperDenialGuard { previous }
 }
 
 /// Restores the previous thread-local guardian re-exec arguments on drop.
@@ -177,6 +207,9 @@ enum GuardianOutputCapture {
 struct GuardianCommandRequest {
     #[serde(default)]
     test_reexec: bool,
+    /// Test re-exec only: behave as if the kernel refused subreaper custody.
+    #[serde(default)]
+    test_deny_subreaper: bool,
     #[serde(default)]
     output_capture: GuardianOutputCapture,
     #[serde(default)]
@@ -361,6 +394,8 @@ pub(crate) fn prepare_guardian(
     }
     request.stage_output_command = stage_command;
     request.test_reexec = reexec_args.is_some();
+    request.test_deny_subreaper =
+        request.test_reexec && TEST_DENY_SUBREAPER.with(std::cell::Cell::get);
     #[cfg(target_os = "linux")]
     if let Some(pinned) = pinned.as_ref() {
         if payload.get_program() != std::ffi::OsStr::new(&pinned.program) {
@@ -599,6 +634,7 @@ impl GuardianCommandRequest {
     ) -> Self {
         Self {
             test_reexec: false,
+            test_deny_subreaper: false,
             output_capture: GuardianOutputCapture::Pipe,
             cleanup_receipt_fd: None,
             #[cfg(target_os = "linux")]
@@ -794,6 +830,7 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
     let request: GuardianCommandRequest = serde_json::from_slice(&raw)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     let separate_test_output = request.test_reexec;
+    let test_deny_subreaper = request.test_deny_subreaper;
     let receipt_fd = request.cleanup_receipt_fd;
     #[cfg(target_os = "linux")]
     let cancel_fd = request.cancel_request_fd;
@@ -823,7 +860,8 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
     #[cfg(target_os = "linux")]
     let cancellation = cancel_request::inherited_reader(cancel_fd)?;
     let _journal_cleanup = OwnerJournalCleanup(cleanup_token.clone());
-    configure_child_reaper()?;
+    let subreaper_custody =
+        !(separate_test_output && test_deny_subreaper) && configure_child_reaper();
     let mut payload = match payload_command.spawn() {
         Ok(payload) => payload,
         Err(error) => {
@@ -974,25 +1012,16 @@ pub fn run_guardian_from_pipe() -> io::Result<()> {
             }
             GuardianEvent::PayloadExited(status) => {
                 payload_status = Some(status?);
-                let mut cleanup =
-                    harn_vm::op_interrupt::signal_pid_tree_and_token_preserving_group_with_report(
-                        payload_pid,
-                        Some(&cleanup_token),
-                        unsafe { libc::getpgrp() as u32 },
-                        libc::SIGKILL,
-                    );
                 #[cfg(target_os = "linux")]
-                if let Some(cancelled) = cancellation_cleanup.take() {
-                    cleanup.merge(cancelled);
-                }
-                reap_adopted_children()?;
-                harn_vm::op_interrupt::finish_process_owner_cleanup(&mut cleanup, &cleanup_token);
-                // Only Linux actually establishes subreaper custody and observes
-                // ECHILD in reap_adopted_children. Keep the host census unchanged.
-                #[cfg(target_os = "linux")]
-                {
-                    cleanup.guardian_custody_complete = true;
-                }
+                let cancelled = cancellation_cleanup.take();
+                #[cfg(not(target_os = "linux"))]
+                let cancelled = None;
+                let cleanup = finished_payload_cleanup(
+                    payload_pid,
+                    &cleanup_token,
+                    subreaper_custody,
+                    cancelled,
+                )?;
                 if let Err(error) = completion_receipt::refuse_survivors(&cleanup) {
                     completion_receipt::write(&mut cleanup_receipt, &cleanup, false)?;
                     return Err(error);
@@ -1297,106 +1326,6 @@ fn write_relay_while_owner_alive(
         }
     }
     Ok(true)
-}
-
-#[cfg(target_os = "linux")]
-fn configure_child_reaper() -> io::Result<()> {
-    if unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) } == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
-}
-
-#[cfg(all(unix, not(target_os = "linux")))]
-fn configure_child_reaper() -> io::Result<()> {
-    Ok(())
-}
-
-#[cfg(unix)]
-fn wait_for_payload_while_reaping_adopted(payload: Child) -> io::Result<ExitStatus> {
-    let payload_pid = payload.id() as libc::pid_t;
-    // Keep the Child handle alive while waitpid(2) owns reaping. On Linux the
-    // guardian is a subreaper, so detached helpers become its direct children.
-    // Reaping all children here prevents successfully terminated helpers from
-    // remaining as zombies until the conformance payload itself exits.
-    let _payload = payload;
-    loop {
-        let mut status = 0;
-        let waited = unsafe { libc::waitpid(-1, &raw mut status, 0) };
-        if waited == payload_pid {
-            return Ok(ExitStatus::from_raw(status));
-        }
-        if waited > 0 {
-            continue;
-        }
-        let error = io::Error::last_os_error();
-        match error.raw_os_error() {
-            Some(libc::EINTR) => continue,
-            _ => return Err(error),
-        }
-    }
-}
-
-#[cfg(unix)]
-fn wait_for_payload_exit(
-    events: &std::sync::mpsc::Receiver<GuardianEvent>,
-    payload_status: &mut Option<ExitStatus>,
-) -> io::Result<()> {
-    while payload_status.is_none() {
-        match events.recv() {
-            Ok(GuardianEvent::PayloadExited(status)) => *payload_status = Some(status?),
-            Ok(
-                GuardianEvent::OutputClosed(_)
-                | GuardianEvent::OwnerClosed
-                | GuardianEvent::InputFailed(_),
-            ) => {}
-            #[cfg(target_os = "linux")]
-            Ok(GuardianEvent::CancelRequested) => {}
-            Err(_) => {
-                return Err(io::Error::other(
-                    "guardian events closed before payload exit",
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-#[cfg(target_os = "linux")]
-fn reap_adopted_children() -> io::Result<()> {
-    // The payload waiter has returned before either caller reaches this
-    // point. Only this thread now reaps children adopted by the subreaper.
-    let error =
-        match adopted_children::terminate_and_reap(harn_vm::op_interrupt::SUBPROCESS_TERM_GRACE) {
-            Ok(()) => return Ok(()),
-            Err(error) => error,
-        };
-    retain_adopted_children(error)
-}
-
-#[cfg(target_os = "linux")]
-fn retain_adopted_children(error: io::Error) -> io::Result<()> {
-    eprintln!("guardian cleanup incomplete; retaining child custody: {error}");
-    // An unproved cleanup must not release the guardian or its journal while
-    // children remain. Keep the original native reaper as an integrity hold;
-    // the operation failed, and its caller may still need external cleanup.
-    loop {
-        let result = unsafe { libc::waitpid(-1, std::ptr::null_mut(), 0) };
-        if result > 0 {
-            continue;
-        }
-        match io::Error::last_os_error().raw_os_error() {
-            Some(libc::EINTR) => continue,
-            Some(libc::ECHILD) => return Err(error),
-            _ => return Err(io::Error::last_os_error()),
-        }
-    }
-}
-
-#[cfg(all(unix, not(target_os = "linux")))]
-fn reap_adopted_children() -> io::Result<()> {
-    Ok(())
 }
 
 /// Whether this process carries a private guardian request pipe marker.

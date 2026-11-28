@@ -545,19 +545,13 @@ fn landlock_profile_for(
     })
 }
 
+/// The system's programs and libraries and the host facts runtimes size
+/// themselves from (`system_runtime` in the known-paths registry).
 fn system_read_roots() -> Vec<PathBuf> {
-    [
-        "/bin",
-        "/lib",
-        "/lib64",
-        "/usr",
-        "/etc",
-        "/nix/store",
-        "/System",
-    ]
-    .into_iter()
-    .map(PathBuf::from)
-    .collect()
+    crate::known_paths::system_runtime_read_paths()
+        .iter()
+        .map(PathBuf::from)
+        .collect()
 }
 
 fn network_name_service_read_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
@@ -589,15 +583,16 @@ fn developer_toolchain_system_read_roots(policy: &CapabilityPolicy) -> Vec<PathB
 }
 
 fn standard_device_rules() -> Vec<(PathBuf, FsAccess)> {
-    [
-        ("/dev/null", AccessFs::ReadFile | AccessFs::WriteFile),
-        ("/dev/zero", AccessFs::ReadFile.into()),
-        ("/dev/random", AccessFs::ReadFile.into()),
-        ("/dev/urandom", AccessFs::ReadFile.into()),
-    ]
-    .into_iter()
-    .map(|(path, access)| (PathBuf::from(path), access))
-    .collect()
+    crate::known_paths::system_runtime_devices()
+        .map(|(path, write)| {
+            let access = if write {
+                AccessFs::ReadFile | AccessFs::WriteFile
+            } else {
+                AccessFs::ReadFile.into()
+            };
+            (PathBuf::from(path), access)
+        })
+        .collect()
 }
 
 /// Landlock's ruleset is allow-only: `landlock_add_rule` grants, and there is no
@@ -880,13 +875,16 @@ fn push_rule_exact(
     Ok(())
 }
 
+/// Whether a confined task's procfs reads stop at its own descendants.
+///
+/// Landlock scopes ptrace: a task in a ruleset cannot pass the ptrace access
+/// check on a process outside its domain, and that check is what guards
+/// `/proc/<pid>/environ`, `maps` and `mem`. Measured: a confined child reads
+/// its own child's environ and gets nothing from its parent's or a sibling's,
+/// with Yama at 1. Yama does not contain these reads (an unconfined reader
+/// gets a same-user sibling's environ at scope 1), so it is not the test.
 pub(crate) fn proc_runtime_reads_are_contained() -> bool {
-    std::fs::read_to_string("/proc/sys/kernel/yama/ptrace_scope")
-        .is_ok_and(|value| yama_scope_contains_process_reads(&value))
-}
-
-fn yama_scope_contains_process_reads(value: &str) -> bool {
-    value.trim().parse::<u8>().is_ok_and(|scope| scope >= 1)
+    landlock_support::host_support().is_some()
 }
 
 /// Compile the syscall allowlist into a BPF program.
@@ -1488,3 +1486,7 @@ mod credential_denylist_tests;
 #[cfg(test)]
 #[path = "linux_writable_denial_tests.rs"]
 mod writable_denial_tests;
+
+#[cfg(test)]
+#[path = "linux_runtime_limits_tests.rs"]
+mod runtime_limits_tests;

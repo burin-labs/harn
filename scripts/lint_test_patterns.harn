@@ -36,8 +36,10 @@ const THREAD_SLEEP_ALLOWLIST: list<string> = [
   "crates/harn-hostlib/src/code_index/lsp/interrupt_tests.rs",
   // Process-group disappearance is observed through kill(2), after the child
   // and its descendant have reported readiness. A virtual clock cannot reap
-  // OS processes; the bounded poll names the surviving process group.
+  // OS processes; the bounded poll names the surviving process group. The
+  // test moved to the module's own tests file with the split.
   "crates/harn-vm/src/op_interrupt.rs",
+  "crates/harn-vm/src/op_interrupt/tests.rs",
   "crates/harn-hostlib/tests/harn_hostlib/process_tools.rs",
   // Waits, bounded, for a real granted process to start so a sibling can try
   // to read its login while it runs; a virtual clock cannot start a process.
@@ -113,6 +115,7 @@ const TOKIO_SLEEP_ALLOWLIST: list<string> = [
 const INSTANT_NOW_DEADLINE_ALLOWLIST: list<string> = [
   // Bounds the kill(2) process-group reaping probe described above.
   "crates/harn-vm/src/op_interrupt.rs",
+  "crates/harn-vm/src/op_interrupt/tests.rs",
   // Real subprocess lifecycle e2e: bounded probes wait on OS process-group
   // disappearance after SIGTERM/SIGKILL and cannot run on a virtual clock.
   "crates/harn-hostlib/tests/harn_hostlib/process_tools_e2e.rs",
