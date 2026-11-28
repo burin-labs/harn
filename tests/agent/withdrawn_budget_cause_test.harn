@@ -1,6 +1,6 @@
-import { AgentResult } from "std/agent/contracts"
 import { agent_capture_events } from "std/agent/events"
 import { agent_loop } from "std/agent/loop"
+import { AgentSpec } from "std/agent/options"
 import {
   agent_session_finalize,
   agent_session_init,
@@ -31,31 +31,27 @@ pipeline test_a_withdrawn_draft_preserves_the_actual_loop_deadline(harness: Harn
   try {
     const session = "withdrawn-deadline-${harness.random.uuid()}"
     const rejected = harness.runtime.atomic(0)
+    const options: AgentSpec = {
+      provider: "mock",
+      session_id: session,
+      max_iterations: 4,
+      deadline_ms: 1000,
+      final_wrapup: false,
+      verify_completion_judge: false,
+      turn_end_condition: false,
+      verify_completion: { _ ->
+        harness.runtime.atomic_add(rejected, 1)
+        return "The report is incomplete."
+      },
+      llm_caller: { _ ->
+        const _ = harness.testing.clock_advance(600)
+        return {ok: true, value: {text: "Finished.", provider: "mock", model: "fixture"}}
+      },
+    }
     const captured = agent_capture_events(
       harness.agent,
       session,
-      fn() { return agent_loop(
-        harness,
-        "Finish the review.",
-        nil,
-        {
-          provider: "mock",
-          session_id: session,
-          max_iterations: 4,
-          deadline_ms: 1000,
-          final_wrapup: false,
-          verify_completion_judge: false,
-          turn_end_condition: false,
-          verify_completion: { _ ->
-            harness.runtime.atomic_add(rejected, 1)
-            return "The report is incomplete."
-          },
-          llm_caller: { _ ->
-            const _ = harness.testing.clock_advance(600)
-            return {ok: true, value: {text: "Finished.", provider: "mock", model: "fixture"}}
-          },
-        },
-      ) },
+      fn() { return agent_loop(harness, "Finish the review.", nil, options) },
     )
     assert(harness.runtime.atomic_get(rejected) > 0, "the completion gate must reject a real draft")
     assert_eq(captured.result.llm.iterations, 2, "the deadline must stop before the four-call cap")
@@ -88,7 +84,7 @@ pipeline test_withdrawn_drafts_preserve_each_finalized_budget_cause(harness: Har
     const captured = agent_capture_events(
       harness.agent,
       session,
-      fn() -> AgentResult { return agent_session_finalize(
+      fn() { return agent_session_finalize(
         harness.agent,
         session,
         {final_status: "budget_exhausted", stop_reason: reason, iterations: 1},
