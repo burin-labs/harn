@@ -85,10 +85,7 @@ fn run_earlier_accepted(harness: Harness) {
       )
       harness.stdio.println("earlier_accepted.vetoes=${result.completion_judge.vetoes}")
       // Earlier progress prose cannot become an answer after rejection.
-      harness.stdio.println(
-        "earlier_accepted.stop_reason_is_withdrawn="
-          + to_string(result.stop_reason == "turn_withdrawn"),
-      )
+      harness.stdio.println("earlier_accepted.stop_reason=${result.stop_reason}")
       harness.stdio.println("earlier_accepted.text_is_marker=${result.text == WITHDRAWN}")
       harness.stdio.println(
         "earlier_accepted.text_is_accepted_draft="
