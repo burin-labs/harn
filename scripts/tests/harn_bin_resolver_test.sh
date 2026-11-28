@@ -689,6 +689,9 @@ export FIXTURE_LEASE_RUNNER_MARKER="$fixture_lease_runner_marker"
 export HARN_CARGO_LEASE_RUNNER="$fixture_lease_runner"
 cargo_fixture="$tmp_root/cargo fixture with spaces"
 cargo_target="$cargo_fixture/build output with spaces"
+# The recovery cases inspect Cargo's deps artifacts in the fixture target.
+# Keep those intermediates here even when CI exports a separate build dir.
+export CARGO_BUILD_BUILD_DIR="$cargo_target"
 mkdir -p "$cargo_fixture/src"
 cat > "$cargo_fixture/Cargo.toml" <<'TOML'
 [package]
