@@ -7827,6 +7827,8 @@ capabilities = [
     "prompt_caching",
 ]
 context_window = 1047576
+deprecated = true
+deprecation_note = "OpenAI will shut down this route on 2027-01-14 and recommends gpt-6-luna."
 name = "GPT-4.1"
 open_weight = false
 provider = "openai"
@@ -7836,6 +7838,8 @@ strengths = [
     "long_context",
     "vision",
 ]
+sunset_date = "2027-01-14"
+superseded_by = "gpt-6-luna"
 tier = "frontier"
 
 [models."gpt-4.1".pricing]
@@ -7851,6 +7855,8 @@ capabilities = [
     "prompt_caching",
 ]
 context_window = 1047576
+deprecated = true
+deprecation_note = "OpenAI will shut down this route on 2027-01-14 and recommends gpt-6-luna."
 name = "GPT-4.1 Mini"
 open_weight = false
 provider = "openai"
@@ -7862,6 +7868,8 @@ strengths = [
     "long_context",
     "vision",
 ]
+sunset_date = "2027-01-14"
+superseded_by = "gpt-6-luna"
 tier = "mid"
 
 [models."gpt-4.1-mini".pricing]
@@ -7904,6 +7912,8 @@ capabilities = [
     "streaming",
 ]
 context_window = 128000
+deprecated = true
+deprecation_note = "OpenAI will shut down this route on 2027-01-14 and recommends gpt-6-luna."
 name = "GPT-4o"
 open_weight = false
 provider = "openai"
@@ -7912,6 +7922,8 @@ strengths = [
     "vision",
     "tool_use",
 ]
+sunset_date = "2027-01-14"
+superseded_by = "gpt-6-luna"
 tier = "frontier"
 
 [models.gpt-4o.pricing]
@@ -7932,6 +7944,8 @@ complementary_with = [
     "kimi",
 ]
 context_window = 128000
+deprecated = true
+deprecation_note = "OpenAI will shut down this route on 2027-01-14 and recommends gpt-6-luna."
 name = "GPT-4o Mini"
 open_weight = false
 provider = "openai"
@@ -7941,6 +7955,8 @@ strengths = [
     "summarization",
     "tool_use",
 ]
+sunset_date = "2027-01-14"
+superseded_by = "gpt-6-luna"
 tier = "mid"
 
 [models.gpt-4o-mini.pricing]
