@@ -133,11 +133,8 @@ fn os_hardened_profile_rejects_cwd_outside_workspace_roots() {
 #[cfg(target_os = "linux")]
 #[test]
 fn linux_sandbox_grants_proc_self_maps_to_descendant_runtimes() {
-    let ptrace_scope = std::fs::read_to_string("/proc/sys/kernel/yama/ptrace_scope")
-        .ok()
-        .and_then(|value| value.trim().parse::<u8>().ok());
-    if ptrace_scope.is_none_or(|scope| scope < 1) {
-        eprintln!("skipping: the secure descendant-runtime proc grant requires Yama scope >= 1");
+    if !process_sandbox::host_contains_process_reads() {
+        eprintln!("skipping: the descendant-runtime proc grant requires Landlock");
         return;
     }
     let workspace = tempfile::tempdir().unwrap();

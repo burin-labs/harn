@@ -4,6 +4,7 @@
 // and command evidence a run produced, and the curator's bounded transcript
 // drill-down. The canonical session store owns the events; this module only
 // projects them, redacting before it bounds.
+pub import { PatternCommandLedgerEntry } from "std/agent/pattern_knowledge_persistence"
 import {
   pl_redact_command,
   pl_sanitize_tool_sequence,
@@ -16,6 +17,118 @@ import {
   SessionStoreRead,
   session_store_events,
 } from "std/session-store"
+
+/** Grouped events keep their original fields and nominal containers. */
+pub type SessionRunEvent = {
+  headers: {run_id: string, ...dict<string, unknown>},
+  ...dict<string, unknown>,
+}
+
+pub type SessionRun = {run_id: string, events: list<SessionRunEvent>}
+
+type SessionEventReference = {
+  kind?: unknown,
+  payload?: unknown,
+  headers?: unknown,
+  ts?: unknown,
+  ...dict<string, unknown>,
+}
+
+type SessionPayloadReference = {transcript_event?: unknown, ...dict<string, unknown>}
+
+type SessionKindReference = {type?: unknown, kind?: unknown, ...dict<string, unknown>}
+
+type SessionTranscriptReference = {
+  kind?: unknown,
+  role?: unknown,
+  visibility?: unknown,
+  text?: unknown,
+  metadata?: unknown,
+  ...dict<string, unknown>,
+}
+
+type SessionMetadataReference = {
+  kind?: unknown,
+  tool_name?: unknown,
+  tool_call_id?: unknown,
+  status?: unknown,
+  command?: unknown,
+  health?: unknown,
+  raw_input?: unknown,
+  raw_output?: unknown,
+  terminal?: unknown,
+  goal_outcome?: unknown,
+  ...dict<string, unknown>,
+}
+
+type SessionHealthReference = {
+  command_id?: unknown,
+  command_exit_code?: unknown,
+  ...dict<string, unknown>,
+}
+
+type SessionCommandReference = {
+  command?: unknown,
+  argv?: unknown,
+  data?: unknown,
+  run_outcome?: unknown,
+  ...dict<string, unknown>,
+}
+
+type SessionHeadersReference = {run_id?: unknown, ...dict<string, unknown>}
+
+type SessionText = string?
+
+type SessionCommand = {tool: string, command: string}
+
+type SessionCommandOutcome = {exit_code: unknown, ok: bool}
+
+type SessionArguments = list<unknown>
+
+fn pl_session_is_record(value: unknown) -> bool {
+  const kind = type_of(value)
+  return kind == "dict" || kind == "struct"
+}
+
+fn pl_session_text(value: unknown) -> string {
+  return pl_text(schema_expect(value, schema_of(SessionText)))
+}
+
+fn pl_payload_reference(value: unknown) -> SessionPayloadReference? {
+  return pl_session_is_record(value) ? schema_expect(
+    value,
+    schema_of(SessionPayloadReference),
+  ) : nil
+}
+
+fn pl_kind_reference(value: unknown) -> SessionKindReference? {
+  return pl_session_is_record(value) ? schema_expect(value, schema_of(SessionKindReference)) : nil
+}
+
+fn pl_transcript_reference(value: unknown) -> SessionTranscriptReference? {
+  return pl_session_is_record(value) ? schema_expect(
+    value,
+    schema_of(SessionTranscriptReference),
+  ) : nil
+}
+
+fn pl_metadata_reference(value: unknown) -> SessionMetadataReference? {
+  return pl_session_is_record(value) ? schema_expect(
+    value,
+    schema_of(SessionMetadataReference),
+  ) : nil
+}
+
+fn pl_health_reference(value: unknown) -> SessionHealthReference? {
+  return pl_session_is_record(value) ? schema_expect(value, schema_of(SessionHealthReference)) : nil
+}
+
+fn pl_command_reference(value: unknown) -> SessionCommandReference? {
+  return pl_session_is_record(value) ? schema_expect(
+    value,
+    schema_of(SessionCommandReference),
+  ) : nil
+}
 
 pub fn pl_session_store_options(options: any = nil) -> SessionStoreOptions {
   const root = pl_text(options?.session_store_root)
@@ -39,23 +152,26 @@ pub fn pl_session_store_values<T>(read: SessionStoreRead<list<T>>) -> list<T> {
   return read.value
 }
 
-fn pl_session_event_kind(event: dict) -> string {
-  return pl_text(event?.kind?.type ?? event?.kind?.kind)
+fn pl_session_event_kind(event: SessionEventReference) -> string {
+  const kind = pl_kind_reference(event.kind)
+  return pl_session_text(kind?.type ?? kind?.kind)
 }
 
-fn pl_session_transcript_event(event: dict) -> dict {
-  return event?.payload?.transcript_event ?? {}
+fn pl_session_transcript_event(event: SessionEventReference) -> unknown {
+  const payload = pl_payload_reference(event.payload)
+  return payload?.transcript_event ?? {}
 }
 
 pub fn pl_session_prompt(events: list) -> string {
   for event in events ?? [] {
-    const transcript_event = pl_session_transcript_event(event)
-    if pl_text(transcript_event?.kind) != "message"
-      || pl_text(transcript_event?.role) != "user"
-      || pl_text(transcript_event?.visibility) != "public" {
+    const fields = schema_expect(event, schema_of(SessionEventReference))
+    const transcript_event = pl_transcript_reference(pl_session_transcript_event(fields))
+    if pl_session_text(transcript_event?.kind) != "message"
+      || pl_session_text(transcript_event?.role) != "user"
+      || pl_session_text(transcript_event?.visibility) != "public" {
       continue
     }
-    const prompt = pl_text(transcript_event?.text)
+    const prompt = pl_session_text(transcript_event?.text)
     if prompt != "" {
       return prompt
     }
@@ -63,15 +179,17 @@ pub fn pl_session_prompt(events: list) -> string {
   return ""
 }
 
-pub fn pl_session_tool_sequence(events: list) -> list {
-  let out = []
+pub fn pl_session_tool_sequence(events: list) -> list<string> {
+  let out: list<string> = []
   for event in events ?? [] {
-    const transcript_event = pl_session_transcript_event(event)
-    if pl_session_event_kind(event) != "tool_call"
-      && pl_text(transcript_event?.kind) != "tool_call" {
+    const fields = schema_expect(event, schema_of(SessionEventReference))
+    const transcript_event = pl_transcript_reference(pl_session_transcript_event(fields))
+    if pl_session_event_kind(fields) != "tool_call"
+      && pl_session_text(transcript_event?.kind) != "tool_call" {
       continue
     }
-    const name = pl_text(transcript_event?.metadata?.tool_name)
+    const metadata = pl_metadata_reference(transcript_event?.metadata)
+    const name = pl_session_text(metadata?.tool_name)
     if name != "" {
       out = out + [name]
     }
@@ -79,21 +197,24 @@ pub fn pl_session_tool_sequence(events: list) -> list {
   return pl_sanitize_tool_sequence(out)
 }
 
-fn pl_command_from_input(input: any) -> string {
-  const command = input?.command
+fn pl_command_from_input(input: unknown) -> string {
+  const fields = pl_command_reference(input)
+  const command = fields?.command
   if type_of(command) == "string" {
     return to_string(command)
   }
-  const argv = input?.argv ?? command
+  const argv = fields?.argv ?? command
   if type_of(argv) == "list" {
-    return shell_command_from_argv(argv)
+    return shell_command_from_argv(schema_expect(argv, schema_of(SessionArguments)))
   }
   return ""
 }
 
 /** The command a host reports it ran, from the result's command outcome. */
-fn pl_command_from_result(raw_output: any) -> string {
-  const outcome = raw_output?.data?.run_outcome ?? raw_output?.run_outcome
+fn pl_command_from_result(raw_output: unknown) -> string {
+  const fields = pl_command_reference(raw_output)
+  const data = pl_command_reference(fields?.data)
+  const outcome = pl_command_reference(data?.run_outcome ?? fields?.run_outcome)
   return type_of(outcome?.command) == "string" ? to_string(outcome.command) : ""
 }
 
@@ -115,32 +236,34 @@ fn pl_command_from_result(raw_output: any) -> string {
  * @errors: []
  * @api_stability: internal
  */
-pub fn pl_session_command_ledger(events: list) -> list {
-  let order = []
-  let commands = {}
-  let outcomes = {}
-  let background = {}
+pub fn pl_session_command_ledger(events: list) -> list<PatternCommandLedgerEntry<unknown>> {
+  let order: list<string> = []
+  let commands: dict<string, SessionCommand> = {}
+  let outcomes: dict<string, SessionCommandOutcome> = {}
+  let background: dict<string, string?> = {}
   for event in events ?? [] {
-    const transcript_event = pl_session_transcript_event(event)
-    const kind = pl_text(transcript_event?.kind)
-    const metadata = transcript_event?.metadata ?? {}
+    const fields = schema_expect(event, schema_of(SessionEventReference))
+    const transcript_event = pl_transcript_reference(pl_session_transcript_event(fields))
+    const kind = pl_session_text(transcript_event?.kind)
+    const metadata = pl_metadata_reference(transcript_event?.metadata)
     if kind == "typed_checkpoint" {
-      const verdict = pl_text(metadata?.status)
-      const checked = pl_text(metadata?.command)
+      const verdict = pl_session_text(metadata?.status)
+      const checked = pl_session_text(metadata?.command)
       if checked != "" && (verdict == "passed" || verdict == "failed") {
         const host_check = "host-check-" + to_string(len(order))
-        commands = commands + {[host_check]: {tool: pl_text(metadata?.kind), command: checked}}
+        commands = commands
+          + {[host_check]: {tool: pl_session_text(metadata?.kind), command: checked}}
         outcomes = outcomes + {[host_check]: {exit_code: nil, ok: verdict == "passed"}}
         order = order + [host_check]
       }
       continue
     }
-    const call_id = pl_text(metadata?.tool_call_id)
+    const call_id = pl_session_text(metadata?.tool_call_id)
     if call_id == "" || (kind != "tool_call" && kind != "tool_call_update") {
       continue
     }
-    const health = metadata?.health ?? {}
-    const command_id = pl_text(health?.command_id)
+    const health = pl_health_reference(metadata?.health)
+    const command_id = pl_session_text(health?.command_id)
     const exit_code = health?.command_exit_code
     const owner = background[command_id]
     if owner != nil && owner != call_id {
@@ -156,10 +279,11 @@ pub fn pl_session_command_ledger(events: list) -> list {
       command = pl_command_from_result(metadata?.raw_output)
     }
     if command != "" && commands[call_id] == nil {
-      commands = commands + {[call_id]: {tool: pl_text(metadata?.tool_name), command: command}}
+      commands = commands
+        + {[call_id]: {tool: pl_session_text(metadata?.tool_name), command: command}}
       order = order + [call_id]
     }
-    const status = pl_text(metadata?.status)
+    const status = pl_session_text(metadata?.status)
     if kind == "tool_call_update" && (status == "completed" || status == "failed") {
       if exit_code == nil && command_id != "" {
         background = background + {[command_id]: call_id}
@@ -169,21 +293,32 @@ pub fn pl_session_command_ledger(events: list) -> list {
       }
     }
   }
-  return order.filter({ id -> outcomes[id] != nil }).map({ id -> commands[id] + outcomes[id] })
+  return order.filter({ id -> outcomes[id] != nil }).map(
+    { id ->
+      const command = schema_expect(commands[id], schema_of(SessionCommand))
+      const outcome = schema_expect(outcomes[id], schema_of(SessionCommandOutcome))
+      return command + outcome
+    },
+  )
     .to_list()
 }
 
 fn pl_session_run_id(event: dict) -> string {
-  return pl_text(event?.headers?.run_id)
+  const fields = schema_expect(event, schema_of(SessionEventReference))
+  const headers = pl_session_is_record(fields.headers) ? schema_expect(
+    fields.headers,
+    schema_of(SessionHeadersReference),
+  ) : nil
+  return pl_session_text(headers?.run_id)
 }
 
 pub fn pl_session_run_key(session_id: string, run_id: string) -> string {
   return session_id + "::" + run_id
 }
 
-pub fn pl_session_runs(events: list) -> list {
-  let ids = []
-  let grouped = {}
+pub fn pl_session_runs(events: list) -> list<SessionRun> {
+  let ids: list<string> = []
+  let grouped: dict<string, list<SessionRunEvent>> = {}
   for event in events ?? [] {
     const run_id = pl_session_run_id(event)
     if run_id == "" {
@@ -192,24 +327,29 @@ pub fn pl_session_runs(events: list) -> list {
     if !ids.contains(run_id) {
       ids = ids + [run_id]
     }
-    grouped = grouped + {[run_id]: (grouped[run_id] ?? []) + [event]}
+    const retained = schema_expect(event, schema_of(SessionRunEvent))
+    grouped = grouped + {[run_id]: (grouped[run_id] ?? []) + [retained]}
   }
   return ids.map({ run_id -> {run_id: run_id, events: grouped[run_id] ?? []} }).to_list()
 }
 
 pub fn pl_run_has_eligible_natural_terminal(events: list) -> bool {
   for event in events ?? [] {
-    const transcript_event = pl_session_transcript_event(event)
-    const headers = event?.headers ?? {}
-    if pl_session_event_kind(event) != "agent_run_terminal"
-      && pl_text(transcript_event?.kind)
+    const fields = schema_expect(event, schema_of(SessionEventReference))
+    const transcript_event = pl_transcript_reference(pl_session_transcript_event(fields))
+    const headers = fields.headers ?? {}
+    if pl_session_event_kind(fields) != "agent_run_terminal"
+      && pl_session_text(transcript_event?.kind)
         != "agent_run_terminal" {
       continue
     }
-    if pl_text(transcript_event?.metadata?.terminal?.kind) == "natural"
-      && pl_text(headers["harn.workflow_learning.eligibility"])
-        == "eligible" {
-      return true
+    const metadata = pl_metadata_reference(transcript_event?.metadata)
+    const terminal = pl_kind_reference(metadata?.terminal)
+    if pl_session_text(terminal?.kind) == "natural" {
+      const header_fields = schema_expect(headers, schema_of(SessionHeadersReference))
+      if pl_session_text(header_fields["harn.workflow_learning.eligibility"]) == "eligible" {
+        return true
+      }
     }
   }
   return false
@@ -222,16 +362,19 @@ pub fn pl_run_has_eligible_natural_terminal(events: list) -> bool {
  * @errors: []
  * @api_stability: internal
  */
-pub fn pl_run_goal_outcome(events: list) -> any {
+pub fn pl_run_goal_outcome(events: list) -> unknown {
   for event in events ?? [] {
-    const transcript_event = pl_session_transcript_event(event)
-    if pl_session_event_kind(event) != "agent_run_terminal"
-      && pl_text(transcript_event?.kind)
+    const fields = schema_expect(event, schema_of(SessionEventReference))
+    const transcript_event = pl_transcript_reference(pl_session_transcript_event(fields))
+    if pl_session_event_kind(fields) != "agent_run_terminal"
+      && pl_session_text(transcript_event?.kind)
         != "agent_run_terminal" {
       continue
     }
-    if pl_text(transcript_event?.metadata?.terminal?.kind) == "natural" {
-      return transcript_event?.metadata?.goal_outcome
+    const metadata = pl_metadata_reference(transcript_event?.metadata)
+    const terminal = pl_kind_reference(metadata?.terminal)
+    if pl_session_text(terminal?.kind) == "natural" {
+      return metadata?.goal_outcome
     }
   }
   return nil
@@ -335,35 +478,43 @@ pub fn pattern_learning_session_transcript(
     "session transcript start_entry must be nonnegative"
   const read = session_store_events(agent, session_id, pl_session_store_options(options))
   const events = pl_session_store_values(read)
-  const visible = events.map(pl_session_transcript_event).filter(
-    { event: dict ->
-      const kind = pl_text(event?.kind)
-      const metadata = event?.metadata ?? {}
-      return (kind == "message" && pl_text(event?.visibility) == "public")
-        || (kind == "tool_call" && pl_text(metadata?.tool_name) != "")
-        || kind == "tool_result"
+  const visible = events.map(
+    { event ->
+      return schema_expect(
+        pl_session_transcript_event(event),
+        schema_of(SessionTranscriptReference),
+      )
     },
   )
+    .filter(
+      { event ->
+        const kind = pl_session_text(event.kind)
+        const metadata = pl_metadata_reference(event.metadata)
+        return (kind == "message" && pl_session_text(event.visibility) == "public")
+          || (kind == "tool_call" && pl_session_text(metadata?.tool_name) != "")
+          || kind == "tool_result"
+      },
+    )
     .to_list()
   const start = min(len(visible), query.start_entry ?? max(0, len(visible) - entry_limit))
   const end = min(len(visible), start + entry_limit)
   let entries: list<SessionTranscriptEntry> = []
   for transcript_event in visible[start:end] {
-    const kind = pl_text(transcript_event?.kind)
-    const metadata = transcript_event?.metadata ?? {}
-    if kind == "message" && pl_text(transcript_event?.visibility) == "public" {
-      const excerpt = pl_transcript_excerpt(pl_text(transcript_event?.text), text_limit)
+    const kind = pl_session_text(transcript_event.kind)
+    const metadata = pl_metadata_reference(transcript_event.metadata)
+    if kind == "message" && pl_session_text(transcript_event.visibility) == "public" {
+      const excerpt = pl_transcript_excerpt(pl_session_text(transcript_event.text), text_limit)
       entries = entries
         + [
           {
             kind: "message",
-            role: pl_text(transcript_event?.role),
+            role: pl_session_text(transcript_event.role),
             text: excerpt.content,
             entry_index: start + len(entries),
           }
             + pick(excerpt, ["content_chars", "content_truncated"]),
         ]
-    } else if kind == "tool_call" && pl_text(metadata?.tool_name) != "" {
+    } else if kind == "tool_call" && pl_session_text(metadata?.tool_name) != "" {
       const excerpt = pl_transcript_excerpt(
         json_stringify(pl_redact_value(metadata?.raw_input ?? {})),
         text_limit,
@@ -372,14 +523,14 @@ pub fn pattern_learning_session_transcript(
         + [
           {
             kind: "tool_call",
-            tool: pl_text(metadata?.tool_name),
+            tool: pl_session_text(metadata?.tool_name),
             input: excerpt.content,
             entry_index: start + len(entries),
           }
             + pick(excerpt, ["content_chars", "content_truncated"]),
         ]
     } else if kind == "tool_result" {
-      const excerpt = pl_transcript_excerpt(pl_text(transcript_event?.text), text_limit)
+      const excerpt = pl_transcript_excerpt(pl_session_text(transcript_event.text), text_limit)
       entries = entries
         + [
           {kind: "tool_result", text: excerpt.content, entry_index: start + len(entries)}

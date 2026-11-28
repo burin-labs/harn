@@ -39,19 +39,6 @@ fn process_self_introspection_refuses_a_host_that_cannot_contain_it() {
     }
 }
 
-#[test]
-fn proc_runtime_reads_require_restricted_yama_scope() {
-    for safe in ["1", "2\n", "3"] {
-        assert!(yama_scope_contains_process_reads(safe), "scope {safe}");
-    }
-    for unsafe_or_unknown in ["0", "", "disabled", "256"] {
-        assert!(
-            !yama_scope_contains_process_reads(unsafe_or_unknown),
-            "scope {unsafe_or_unknown} must not grant procfs reads",
-        );
-    }
-}
-
 /// The same real procfs enumeration must fire only with the grant.
 #[test]
 fn process_self_introspection_grant_controls_live_procfs_enumeration() {
@@ -75,7 +62,7 @@ fn process_self_introspection_grant_controls_live_procfs_enumeration() {
         // that branch, so there is no live enumeration to compare here.
         crate::sandbox_host::boundary_not_measured(
             "process_self_introspection_grant_controls_live_procfs_enumeration",
-            "this kernel does not contain procfs reads (Yama ptrace_scope < 1)",
+            "this host has no Landlock to contain procfs reads",
         );
         return;
     }

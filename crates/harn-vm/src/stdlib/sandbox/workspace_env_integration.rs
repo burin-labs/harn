@@ -297,6 +297,8 @@ fn an_in_process_env_read_writes_nothing_and_a_spawn_materializes() {
     let tmpdir = read("TMPDIR").expect("the workspace temp dir is a default");
     let root = workspace.path().canonicalize().unwrap();
     assert_eq!(Path::new(&tmpdir), runtime_dir(&root).join("tmp"));
+    let jvm_options = read("JAVA_TOOL_OPTIONS").expect("the JVM has the private temp default");
+    assert!(jvm_options.contains(&format!("-Djava.io.tmpdir=\"{tmpdir}\"")));
     assert!(!Path::new(&tmpdir).exists(), "a read created the temp dir");
     assert!(read("GOCACHE").is_some());
     let created: Vec<_> = std::fs::read_dir(workspace.path())
@@ -314,6 +316,15 @@ fn an_in_process_env_read_writes_nothing_and_a_spawn_materializes() {
     assert_eq!(
         spawn_tmpdir.1, tmpdir,
         "a read and a spawn agree on the value"
+    );
+    assert_eq!(
+        spawn
+            .iter()
+            .find(|(key, _)| key == "JAVA_TOOL_OPTIONS")
+            .unwrap()
+            .1,
+        jvm_options,
+        "JVM reads and spawns agree on the private temp default"
     );
 }
 

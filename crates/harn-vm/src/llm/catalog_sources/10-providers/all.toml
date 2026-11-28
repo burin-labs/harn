@@ -10,9 +10,9 @@
 # either evidence-backed or part of one explicit, expiring audit queue. A
 # partial verified row leaves its omitted field in that queue.
 [usage_accounting_audit]
-reviewed_on = "2026-11-15"
-# Dated blockers: docs/llm/provider-evidence/2026-11-15-usage-accounting.md.
-expires_on = "2026-11-22"
+reviewed_on = "2026-11-27"
+# Dated blockers: docs/llm/provider-evidence/2026-11-27-usage-accounting.md.
+expires_on = "2026-12-11"
 tracking_issue = 7320
 unverified = [
   "cloudflare_ai_gateway",

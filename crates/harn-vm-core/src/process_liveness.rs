@@ -105,7 +105,45 @@ fn exited_unreaped(pid: u32) -> bool {
         .is_some_and(|state| matches!(state.as_str(), "Z" | "X"))
 }
 
-#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
+/// Whether `pid`, which `kill` still reaches, has already exited.
+///
+/// `kill` succeeds against a zombie, but `proc_pidinfo` refuses one with
+/// `ESRCH`: an exited orphan that launchd has not yet reaped answers exactly
+/// that way. A record that does come back can still name the zombie state.
+/// Any other refusal, such as `EPERM`, proves nothing and keeps it alive.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn exited_unreaped(pid: u32) -> bool {
+    let Ok(pid) = i32::try_from(pid) else {
+        return false;
+    };
+    let Ok(size) = i32::try_from(std::mem::size_of::<libc::proc_bsdshortinfo>()) else {
+        return false;
+    };
+    let mut info = std::mem::MaybeUninit::<libc::proc_bsdshortinfo>::zeroed();
+    let written = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDT_SHORTBSDINFO,
+            0,
+            info.as_mut_ptr().cast(),
+            size,
+        )
+    };
+    if written == size {
+        return unsafe { info.assume_init() }.pbsi_status == libc::SZOMB;
+    }
+    written <= 0 && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+}
+
+#[cfg(all(
+    unix,
+    not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))
+))]
 fn exited_unreaped(_pid: u32) -> bool {
     false
 }
@@ -216,7 +254,12 @@ mod tests {
         assert_eq!(process_liveness(std::process::id()), ProcessLiveness::Alive);
     }
 
-    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos",
+        target_os = "ios"
+    ))]
     #[test]
     fn an_exited_unreaped_child_is_dead() {
         let mut child = std::process::Command::new("true").spawn().expect("spawn");

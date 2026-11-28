@@ -1,0 +1,73 @@
+# https://platform.kimi.ai/docs/guide/kimi-k3-1-pro-quickstart
+# https://www.kimi.ai/resources/kimi-k3-1-pro-pricing
+# November 27: native tool result round trips passed on both Moonshot
+# endpoints, OpenRouter and Vercel. Kimi documents always-on thinking.
+[models."moonshot/kimi-k3.1-pro"]
+name = "Kimi K3.1 Pro (Moonshot direct)"
+provider = "moonshot"
+wire_model = "kimi-k3.1-pro"
+logical_model = "moonshot-kimi-k3.1-pro"
+equivalence_group = "moonshot-kimi-k3.1-pro"
+served_variant = "moonshot-direct"
+api_dialect = "openai_chat"
+context_window = 1048576
+released = "2026-10-23"
+open_weight = true
+operations = ["text_generation"]
+capabilities = ["tools", "vision", "video", "streaming", "thinking", "prompt_caching"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 2.00, cache_write_1h_per_mtok = 4.00 }
+tier = "frontier"
+strengths = ["coding", "agentic", "long_context", "tool_use", "reasoning", "vision"]
+
+[models."moonshot/kimi-k3.1-pro".registration]
+supersedes = ["moonshot/kimi-k3"]
+
+[models."moonshot/kimi-k3.1-pro".registration.request]
+native_tools = true
+preferred_tool_format = "native"
+tool_mode_parity = "unknown"
+tool_mode_parity_notes = "November 27 live smoke verified native tool calls and result replay. Text-channel parity has not been measured for K3.1."
+vision_supported = true
+video_supported = true
+prompt_caching = true
+requires_completion_tokens = true
+thinking_modes = ["effort"]
+reasoning_effort_supported = true
+reasoning_effort_levels = ["low", "high", "max"]
+reasoning_none_supported = false
+reasoning_disable_supported = false
+reasoning_history_wire_field = "reasoning_content"
+reasoning_round_trip = "echo_same_key"
+temperature_supported = false
+top_p_supported = false
+supports_assistant_prefill = false
+thinking_block_style = "inline"
+
+[models."moonshot/kimi-k3.1-pro".registration.routes."moonshot/kimi-k3.1-pro-highspeed"]
+provider = "moonshot"
+model = { name = "Kimi K3.1 Pro Highspeed (Moonshot direct)", wire_model = "kimi-k3.1-pro-highspeed", served_variant = "moonshot-direct-highspeed", pricing = { input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 4.00, cache_write_1h_per_mtok = 8.00 } }
+
+# The gateway routes across multiple hosts. This card uses the official
+# Moonshot backend's list rates, and provider-reported cost takes precedence.
+[models."moonshot/kimi-k3.1-pro".registration.routes."moonshotai/kimi-k3.1-pro"]
+provider = "openrouter"
+supersedes = ["moonshotai/kimi-k3"]
+model = { name = "Kimi K3.1 Pro (OpenRouter)", wire_model = "moonshotai/kimi-k3.1-pro", served_variant = "openrouter", pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20 } }
+request = { reasoning_wire_format = "openrouter" }
+
+[models."moonshot/kimi-k3.1-pro".registration.routes."vercel/moonshotai/kimi-k3.1-pro"]
+provider = "vercel_ai_gateway"
+model = { name = "Kimi K3.1 Pro (Vercel AI Gateway)", wire_model = "moonshotai/kimi-k3.1-pro", served_variant = "vercel-ai-gateway", context_window = 1000000, pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20 } }
+request = { reasoning_wire_format = "openai" }
+
+[models."moonshot/kimi-k3.1-pro".registration.routes."vercel/moonshotai/kimi-k3.1-pro-highspeed"]
+provider = "vercel_ai_gateway"
+model = { name = "Kimi K3.1 Pro Highspeed (Vercel AI Gateway)", wire_model = "moonshotai/kimi-k3.1-pro-highspeed", served_variant = "vercel-ai-gateway-highspeed", pricing = { input_per_mtok = 4.00, output_per_mtok = 20.00, cache_read_per_mtok = 0.20, cache_write_per_mtok = 5.00 } }
+request = { reasoning_wire_format = "openai" }
+
+# https://fireworks.ai/models/fireworks/kimi-k3p1-pro
+# Native tool call and result replay passed on the ordinary serverless route.
+[models."moonshot/kimi-k3.1-pro".registration.routes."accounts/fireworks/models/kimi-k3p1-pro"]
+provider = "fireworks"
+model = { name = "Kimi K3.1 Pro (Fireworks)", wire_model = "accounts/fireworks/models/kimi-k3p1-pro", served_variant = "fireworks", capabilities = ["tools", "vision", "streaming", "thinking", "prompt_caching"], pricing = { input_per_mtok = 2.00, output_per_mtok = 10.00, cache_read_per_mtok = 0.20 } }
+request = { batch_api = false, video_supported = false, requires_completion_tokens = false, thinking_modes = [], reasoning_effort_supported = false, reasoning_effort_levels = [] }
