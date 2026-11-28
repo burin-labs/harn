@@ -128,6 +128,25 @@ fn the_embedded_catalog_declares_valid_retirement_fields() {
 }
 
 #[test]
+fn openai_january_retirements_keep_their_dates_and_replacements() {
+    let catalog = artifact_embedded(None, None);
+    for id in ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini"] {
+        let model = catalog
+            .models
+            .iter()
+            .find(|model| model.provider == "openai" && model.id == id)
+            .unwrap_or_else(|| panic!("missing OpenAI catalog row {id}"));
+        assert_eq!(model.deprecation.status, DeprecationStatus::Active, "{id}");
+        assert_eq!(model.deprecation.retires_on.as_deref(), Some("2027-01-14"));
+        assert_eq!(model.deprecation.sunset_date, None);
+        assert_eq!(
+            model.deprecation.superseded_by.as_deref(),
+            Some("gpt-6-luna")
+        );
+    }
+}
+
+#[test]
 fn completed_retirements_are_structured_and_recorded() {
     let catalog = artifact_embedded(None, None);
     let inkling = catalog

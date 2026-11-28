@@ -340,14 +340,13 @@ strengths = ["reasoning", "coding", "tool_use", "vision"]
 # on 2026-02-17. The API model `gpt-4o` remains available.
 models_dev = {provider = "openai", model = "gpt-5.1", fields = ["name", "context_window", "open_weight"]}
 # https://developers.openai.com/api/docs/deprecations
-# The October 14 notice retires GPT-4o and GPT-4.1 on January 14.
+# The October 14 notice schedules these shutdowns for January 14.
 [models."gpt-4o"]
 provider = "openai"
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 2.50, output_per_mtok = 10.00, cache_read_per_mtok = 1.25 }
-deprecated = true
 deprecation_note = "OpenAI will shut down this route on 2027-01-14 and recommends gpt-6-luna."
-sunset_date = "2027-01-14"
+retires_on = "2027-01-14"
 superseded_by = "gpt-6-luna"
 tier = "frontier"
 strengths = ["coding", "vision", "tool_use"]
@@ -357,9 +356,8 @@ name = "GPT-4o Mini"
 provider = "openai"
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok = 0.075 }
-deprecated = true
 deprecation_note = "OpenAI will shut down this route on 2027-01-14 and recommends gpt-6-luna."
-sunset_date = "2027-01-14"
+retires_on = "2027-01-14"
 superseded_by = "gpt-6-luna"
 tier = "mid"
 strengths = ["speed", "cheap", "summarization", "tool_use"]
@@ -369,9 +367,8 @@ models_dev = {provider = "openai", model = "gpt-4o-mini", fields = ["context_win
 provider = "openai"
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 8.00, cache_read_per_mtok = 0.50 }
-deprecated = true
 deprecation_note = "OpenAI will shut down this route on 2027-01-14 and recommends gpt-6-luna."
-sunset_date = "2027-01-14"
+retires_on = "2027-01-14"
 superseded_by = "gpt-6-luna"
 tier = "frontier"
 strengths = ["coding", "tool_use", "long_context", "vision"]
@@ -381,9 +378,8 @@ name = "GPT-4.1 Mini"
 provider = "openai"
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
 pricing = { input_per_mtok = 0.40, output_per_mtok = 1.60, cache_read_per_mtok = 0.10 }
-deprecated = true
 deprecation_note = "OpenAI will shut down this route on 2027-01-14 and recommends gpt-6-luna."
-sunset_date = "2027-01-14"
+retires_on = "2027-01-14"
 superseded_by = "gpt-6-luna"
 tier = "mid"
 strengths = ["speed", "cheap", "coding", "tool_use", "long_context", "vision"]
