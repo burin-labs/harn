@@ -141,12 +141,6 @@ fn announced_provider_retirements_keep_routes_selectable() {
             "2027-01-22",
             "claude-opus-5-5",
         ),
-        (
-            "gemini",
-            "gemini-2.5-flash",
-            "2026-12-01",
-            "gemini-3.5-flash-lite",
-        ),
     ] {
         let model = catalog
             .models
@@ -161,6 +155,16 @@ fn announced_provider_retirements_keep_routes_selectable() {
             Some(replacement)
         );
     }
+    let unavailable = catalog
+        .models
+        .iter()
+        .find(|model| model.provider == "gemini" && model.id == "gemini-2.5-flash")
+        .expect("missing Gemini 2.5 Flash catalog row");
+    assert_eq!(
+        unavailable.deprecation.status,
+        DeprecationStatus::Deprecated
+    );
+    assert!(unavailable.deprecation.retires_on.is_none());
 }
 
 #[test]

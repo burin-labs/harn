@@ -12299,9 +12299,9 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active",
+        "status": "deprecated",
         "note": "Google reroutes direct calls to Gemini 3.5 Flash-Lite at that model's rates starting 2026-12-01. Select gemini-3.5-flash-lite explicitly to use its request settings.",
-        "retires_on": "2026-12-01",
+        "sunset_date": "2026-12-01",
         "superseded_by": "gemini-3.5-flash-lite"
       },
       "availability": "serverless",
@@ -48848,32 +48848,6 @@
         "reasoning_effort",
         "streaming",
         "structured_output_mode:none",
-        "text_tools",
-        "thinking",
-        "tools",
-        "vision"
-      ]
-    },
-    {
-      "provider": "gemini",
-      "model": "gemini-2.5-flash",
-      "base_url": "https://generativelanguage.googleapis.com",
-      "secret_env": "GEMINI_API_KEY",
-      "label": "Gemini 2.5 Flash",
-      "family": "google-gemini",
-      "capabilities": [
-        "audio",
-        "batch",
-        "extended_thinking",
-        "files",
-        "native_tools",
-        "pdf",
-        "prefers_markdown_scaffolding",
-        "prefers_xml_scaffolding",
-        "reasoning_effort",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
         "text_tools",
         "thinking",
         "tools",
