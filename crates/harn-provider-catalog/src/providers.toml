@@ -13250,7 +13250,7 @@ output_per_mtok = 40.0
 
 [[models."openai/gpt-6.2-astra".pricing.input_token_bands]]
 input_multiplier = 2.0
-minimum_input_tokens = 272000
+minimum_input_tokens = 272001
 output_multiplier = 1.5
 
 [models."openai/gpt-6.2-astra-pro"]
@@ -13289,7 +13289,7 @@ output_per_mtok = 40.0
 
 [[models."openai/gpt-6.2-astra-pro".pricing.input_token_bands]]
 input_multiplier = 2.0
-minimum_input_tokens = 272000
+minimum_input_tokens = 272001
 output_multiplier = 1.5
 
 [models."openai/gpt-6.2-sol"]
@@ -13328,7 +13328,7 @@ output_per_mtok = 10.0
 
 [[models."openai/gpt-6.2-sol".pricing.input_token_bands]]
 input_multiplier = 2.0
-minimum_input_tokens = 272000
+minimum_input_tokens = 272001
 output_multiplier = 1.5
 
 [models."openai/gpt-6.2-sol-pro"]
@@ -13367,7 +13367,7 @@ output_per_mtok = 10.0
 
 [[models."openai/gpt-6.2-sol-pro".pricing.input_token_bands]]
 input_multiplier = 2.0
-minimum_input_tokens = 272000
+minimum_input_tokens = 272001
 output_multiplier = 1.5
 
 [models."openai/gpt-oss-120b"]
