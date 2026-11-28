@@ -12630,11 +12630,21 @@
           "Use File API JSONL input for large gauntlets; inline requests have a smaller provider body-size cap."
         ]
       },
+      "pricing": {
+        "input_per_mtok": 1.25,
+        "output_per_mtok": 10.0,
+        "cache_read_per_mtok": 0.125,
+        "cache_write_per_mtok": null,
+        "input_token_bands": [
+          {
+            "minimum_input_tokens": 200001,
+            "input_multiplier": 2.0,
+            "output_multiplier": 1.5
+          }
+        ]
+      },
       "deprecation": {
-        "status": "deprecated",
-        "note": "Google reroutes direct calls to Gemini 3.8 Flash at that model's rates starting 2026-12-01. Select gemini-3.8-flash explicitly to use its request settings.",
-        "sunset_date": "2026-12-01",
-        "superseded_by": "gemini-3.8-flash"
+        "status": "active"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -48837,6 +48847,32 @@
         "reasoning_effort",
         "streaming",
         "structured_output_mode:none",
+        "text_tools",
+        "thinking",
+        "tools",
+        "vision"
+      ]
+    },
+    {
+      "provider": "gemini",
+      "model": "gemini-2.5-pro",
+      "base_url": "https://generativelanguage.googleapis.com",
+      "secret_env": "GEMINI_API_KEY",
+      "label": "Gemini 2.5 Pro",
+      "family": "google-gemini",
+      "capabilities": [
+        "audio",
+        "batch",
+        "extended_thinking",
+        "files",
+        "native_tools",
+        "pdf",
+        "prefers_markdown_scaffolding",
+        "prefers_xml_scaffolding",
+        "reasoning_effort",
+        "streaming",
+        "structured_output",
+        "structured_output_mode:native_json",
         "text_tools",
         "thinking",
         "tools",

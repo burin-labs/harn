@@ -705,16 +705,15 @@ pricing = { input_per_mtok = 1.50, output_per_mtok = 9.00, cache_read_per_mtok =
 tier = "frontier"
 strengths = ["speed", "long_context", "vision", "tool_use", "agentic"]
 complementary_with = ["anthropic-claude", "openai-gpt", "qwen", "deepseek", "kimi"]
+# Gemini 2.5 Pro — context-length-tiered: $1.25 in / $10 out per MTok up
+# to 200k input, $2.50 / $15 beyond (the catalog records the <=200k
+# tier; the previous $5 output figure and 2M context were wrong — the
+# model page lists a 1,048,576-token window).
 models_dev = {provider = "openrouter", model = "google/gemini-3.5-flash", fields = ["context_window", "open_weight"]}
 [models."gemini-2.5-pro"]
 provider = "gemini"
-deprecated = true
-deprecation_note = "Google reroutes direct calls to Gemini 3.8 Flash at that model's rates starting 2026-12-01. Select gemini-3.8-flash explicitly to use its request settings."
-sunset_date = "2026-12-01"
-superseded_by = "gemini-3.8-flash"
 capabilities = ["tools", "vision", "streaming", "thinking"]
-# Google's redirect changes the whole-request token bands. The replacement
-# row owns the post-cutoff rates.
+pricing = { input_per_mtok = 1.25, output_per_mtok = 10.00, cache_read_per_mtok = 0.125, input_token_bands = [{ minimum_input_tokens = 200001, input_multiplier = 2.0, output_multiplier = 1.5 }] }
 tier = "frontier"
 strengths = ["long_context", "vision", "reasoning", "coding"]
 benchmarks = { swe_bench_verified = 63.8 }

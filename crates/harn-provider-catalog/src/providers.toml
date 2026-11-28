@@ -6228,8 +6228,6 @@ complementary_with = [
     "kimi",
 ]
 context_window = 1048576
-deprecated = true
-deprecation_note = "Google reroutes direct calls to Gemini 3.8 Flash at that model's rates starting 2026-12-01. Select gemini-3.8-flash explicitly to use its request settings."
 name = "Gemini 2.5 Pro"
 open_weight = false
 provider = "gemini"
@@ -6239,12 +6237,20 @@ strengths = [
     "reasoning",
     "coding",
 ]
-sunset_date = "2026-12-01"
-superseded_by = "gemini-3.8-flash"
 tier = "frontier"
 
 [models."gemini-2.5-pro".benchmarks]
 swe_bench_verified = 63.8
+
+[models."gemini-2.5-pro".pricing]
+cache_read_per_mtok = 0.125
+input_per_mtok = 1.25
+output_per_mtok = 10.0
+
+[[models."gemini-2.5-pro".pricing.input_token_bands]]
+input_multiplier = 2.0
+minimum_input_tokens = 200001
+output_multiplier = 1.5
 
 [[models."gemini-2.5-pro".serving_tiers]]
 discount_percent = 50
