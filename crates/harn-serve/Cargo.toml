@@ -52,7 +52,7 @@ toml = "1.1"
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.7", features = ["compression-br", "compression-gzip", "compression-zstd", "cors"] }
 tracing = "0.1"
-url = "2"
+url = { workspace = true }
 uuid = { version = "1", features = ["v4", "v7"] }
 arcstr = { version = "1", features = ["serde", "std"] }
 

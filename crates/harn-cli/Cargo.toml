@@ -133,7 +133,7 @@ zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 subtle = "2.6"
 base64 = "0.23"
 ed25519-dalek = { version = "3", features = ["pem", "pkcs8"] }
-url = "2"
+url = { workspace = true }
 webbrowser = "1"
 rand = "0.10"
 regex = "1"

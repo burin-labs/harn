@@ -1243,8 +1243,12 @@ input_per_mtok = 0.3
 output_per_mtok = 1.2
 
 [models."MiniMax-M3.1-Flash"]
-availability = "unknown"
-capabilities = []
+availability = "serverless"
+capabilities = [
+    "tools",
+    "streaming",
+    "prompt_caching",
+]
 context_window = 1000000
 family = "minimax"
 name = "MiniMax M3.1 Flash"
@@ -2011,6 +2015,40 @@ cache_read_per_mtok = 0.3
 input_per_mtok = 3.0
 output_per_mtok = 15.0
 
+[models."accounts/fireworks/models/kimi-k3p1-pro"]
+api_dialect = "openai_chat"
+capabilities = [
+    "tools",
+    "vision",
+    "streaming",
+    "thinking",
+    "prompt_caching",
+]
+context_window = 1048576
+equivalence_group = "moonshot-kimi-k3.1-pro"
+logical_model = "moonshot-kimi-k3.1-pro"
+name = "Kimi K3.1 Pro (Fireworks)"
+open_weight = true
+operations = ["text_generation"]
+provider = "fireworks"
+released = "2026-10-23"
+served_variant = "fireworks"
+strengths = [
+    "coding",
+    "agentic",
+    "long_context",
+    "tool_use",
+    "reasoning",
+    "vision",
+]
+tier = "frontier"
+wire_model = "accounts/fireworks/models/kimi-k3p1-pro"
+
+[models."accounts/fireworks/models/kimi-k3p1-pro".pricing]
+cache_read_per_mtok = 0.2
+input_per_mtok = 2.0
+output_per_mtok = 10.0
+
 [models."accounts/fireworks/models/minimax-m3"]
 api_dialect = "openai_chat"
 capabilities = [
@@ -2043,14 +2081,26 @@ input_per_mtok = 0.3
 output_per_mtok = 1.2
 
 [models."accounts/fireworks/models/minimax-m3p1-flash"]
-availability = "unknown"
-capabilities = []
+availability = "serverless"
+capabilities = [
+    "tools",
+    "streaming",
+    "prompt_caching",
+]
 context_window = 1048576
 family = "minimax"
 name = "MiniMax M3.1 Flash (Fireworks)"
 open_weight = false
 provider = "fireworks"
+released = "2026-10-19"
+served_variant = "fireworks"
 tier = "frontier"
+wire_model = "accounts/fireworks/models/minimax-m3p1-flash"
+
+[models."accounts/fireworks/models/minimax-m3p1-flash".pricing]
+cache_read_per_mtok = 0.015
+input_per_mtok = 0.15
+output_per_mtok = 0.6
 
 [models."accounts/fireworks/models/muse-spark-open"]
 capabilities = [
@@ -4381,6 +4431,42 @@ cache_write_per_mtok = 2.5
 input_per_mtok = 2.0
 output_per_mtok = 6.0
 
+[models."dashscope/qwen4-max"]
+api_dialect = "openai_chat"
+availability = "unknown"
+capabilities = [
+    "vision",
+    "video",
+    "streaming",
+    "thinking",
+    "prompt_caching",
+]
+context_window = 1000000
+equivalence_group = "qwen4-max"
+logical_model = "qwen4-max"
+name = "Qwen4 Max (DashScope)"
+open_weight = false
+operations = ["text_generation"]
+provider = "dashscope"
+released = "2026-11-16"
+served_variant = "dashscope"
+strengths = [
+    "coding",
+    "reasoning",
+    "tool_use",
+    "long_context",
+    "vision",
+]
+tier = "frontier"
+wire_model = "qwen4-max"
+
+[models."dashscope/qwen4-max".pricing]
+cache_read_per_mtok = 0.075
+cache_write_1h_per_mtok = 3.0
+cache_write_per_mtok = 1.875
+input_per_mtok = 1.5
+output_per_mtok = 4.5
+
 [models."deepinfra/MiniMaxAI/MiniMax-M2.7-Turbo"]
 api_dialect = "openai_chat"
 capabilities = [
@@ -4675,6 +4761,41 @@ wire_model = "Qwen/Qwen3.8-Max"
 cache_read_per_mtok = 0.206
 input_per_mtok = 1.65
 output_per_mtok = 4.951
+
+[models."deepinfra/Qwen/Qwen4-Max"]
+api_dialect = "openai_chat"
+availability = "serverless"
+capabilities = [
+    "tools",
+    "vision",
+    "video",
+    "streaming",
+    "thinking",
+    "prompt_caching",
+]
+context_window = 1000000
+equivalence_group = "qwen4-max"
+logical_model = "qwen4-max"
+name = "Qwen4 Max (DeepInfra)"
+open_weight = false
+operations = ["text_generation"]
+provider = "deepinfra"
+released = "2026-11-16"
+served_variant = "deepinfra"
+strengths = [
+    "coding",
+    "reasoning",
+    "tool_use",
+    "long_context",
+    "vision",
+]
+tier = "frontier"
+wire_model = "Qwen/Qwen4-Max"
+
+[models."deepinfra/Qwen/Qwen4-Max".pricing]
+cache_read_per_mtok = 0.071
+input_per_mtok = 1.413
+output_per_mtok = 4.24
 
 [models."deepinfra/deepseek-ai/DeepSeek-V3.2"]
 api_dialect = "openai_chat"
@@ -10507,6 +10628,28 @@ cache_read_per_mtok = 0.06
 input_per_mtok = 0.3
 output_per_mtok = 1.2
 
+[models."minimax/minimax-m3.1-flash"]
+availability = "serverless"
+capabilities = [
+    "tools",
+    "streaming",
+    "prompt_caching",
+]
+context_window = 1048576
+family = "minimax"
+name = "MiniMax M3.1 Flash (OpenRouter)"
+open_weight = false
+provider = "openrouter"
+released = "2026-10-19"
+served_variant = "openrouter"
+tier = "frontier"
+wire_model = "minimax/minimax-m3.1-flash"
+
+[models."minimax/minimax-m3.1-flash".pricing]
+cache_read_per_mtok = 0.015
+input_per_mtok = 0.15
+output_per_mtok = 0.6
+
 [models."minimax/minimax-m3.1-flash:free"]
 availability = "unknown"
 capabilities = []
@@ -10518,6 +10661,7 @@ name = "MiniMax: MiniMax M3.1 Flash (free)"
 open_weight = false
 provider = "openrouter"
 sunset_date = "2026-10-22"
+superseded_by = "minimax/minimax-m3.1-flash"
 tier = "frontier"
 
 [models."minimax/minimax-m3.1-flash:free".pricing]
@@ -11004,6 +11148,7 @@ strengths = [
     "reasoning",
     "vision",
 ]
+superseded_by = "moonshot/kimi-k3.1-pro"
 tier = "frontier"
 wire_model = "kimi-k3"
 
@@ -11011,6 +11156,80 @@ wire_model = "kimi-k3"
 cache_read_per_mtok = 0.3
 input_per_mtok = 3.0
 output_per_mtok = 15.0
+
+[models."moonshot/kimi-k3.1-pro"]
+api_dialect = "openai_chat"
+capabilities = [
+    "tools",
+    "vision",
+    "video",
+    "streaming",
+    "thinking",
+    "prompt_caching",
+]
+context_window = 1048576
+equivalence_group = "moonshot-kimi-k3.1-pro"
+logical_model = "moonshot-kimi-k3.1-pro"
+name = "Kimi K3.1 Pro (Moonshot direct)"
+open_weight = true
+operations = ["text_generation"]
+provider = "moonshot"
+released = "2026-10-23"
+served_variant = "moonshot-direct"
+strengths = [
+    "coding",
+    "agentic",
+    "long_context",
+    "tool_use",
+    "reasoning",
+    "vision",
+]
+tier = "frontier"
+wire_model = "kimi-k3.1-pro"
+
+[models."moonshot/kimi-k3.1-pro".pricing]
+cache_read_per_mtok = 0.2
+cache_write_1h_per_mtok = 4.0
+cache_write_per_mtok = 2.0
+input_per_mtok = 2.0
+output_per_mtok = 10.0
+
+[models."moonshot/kimi-k3.1-pro-highspeed"]
+api_dialect = "openai_chat"
+capabilities = [
+    "tools",
+    "vision",
+    "video",
+    "streaming",
+    "thinking",
+    "prompt_caching",
+]
+context_window = 1048576
+equivalence_group = "moonshot-kimi-k3.1-pro"
+logical_model = "moonshot-kimi-k3.1-pro"
+name = "Kimi K3.1 Pro Highspeed (Moonshot direct)"
+open_weight = true
+operations = ["text_generation"]
+provider = "moonshot"
+released = "2026-10-23"
+served_variant = "moonshot-direct-highspeed"
+strengths = [
+    "coding",
+    "agentic",
+    "long_context",
+    "tool_use",
+    "reasoning",
+    "vision",
+]
+tier = "frontier"
+wire_model = "kimi-k3.1-pro-highspeed"
+
+[models."moonshot/kimi-k3.1-pro-highspeed".pricing]
+cache_read_per_mtok = 0.2
+cache_write_1h_per_mtok = 8.0
+cache_write_per_mtok = 4.0
+input_per_mtok = 4.0
+output_per_mtok = 20.0
 
 [models."moonshotai/Kimi-K2.6"]
 api_dialect = "openai_chat"
@@ -11213,12 +11432,48 @@ strengths = [
     "reasoning",
     "vision",
 ]
+superseded_by = "moonshotai/kimi-k3.1-pro"
 tier = "frontier"
 
 [models."moonshotai/kimi-k3".pricing]
 cache_read_per_mtok = 0.3
 input_per_mtok = 3.0
 output_per_mtok = 15.0
+
+[models."moonshotai/kimi-k3.1-pro"]
+api_dialect = "openai_chat"
+capabilities = [
+    "tools",
+    "vision",
+    "video",
+    "streaming",
+    "thinking",
+    "prompt_caching",
+]
+context_window = 1048576
+equivalence_group = "moonshot-kimi-k3.1-pro"
+logical_model = "moonshot-kimi-k3.1-pro"
+name = "Kimi K3.1 Pro (OpenRouter)"
+open_weight = true
+operations = ["text_generation"]
+provider = "openrouter"
+released = "2026-10-23"
+served_variant = "openrouter"
+strengths = [
+    "coding",
+    "agentic",
+    "long_context",
+    "tool_use",
+    "reasoning",
+    "vision",
+]
+tier = "frontier"
+wire_model = "moonshotai/kimi-k3.1-pro"
+
+[models."moonshotai/kimi-k3.1-pro".pricing]
+cache_read_per_mtok = 0.2
+input_per_mtok = 2.0
+output_per_mtok = 10.0
 
 [models."muse-spark-1.1"]
 capabilities = [
@@ -14106,6 +14361,42 @@ cache_read_per_mtok = 0.016
 input_per_mtok = 0.15
 output_per_mtok = 0.47
 
+[models."qwen/qwen4-max"]
+api_dialect = "openai_chat"
+availability = "serverless"
+capabilities = [
+    "tools",
+    "vision",
+    "video",
+    "streaming",
+    "thinking",
+    "prompt_caching",
+]
+context_window = 1000000
+equivalence_group = "qwen4-max"
+logical_model = "qwen4-max"
+name = "Qwen4 Max (OpenRouter)"
+open_weight = false
+operations = ["text_generation"]
+provider = "openrouter"
+released = "2026-11-16"
+served_variant = "openrouter"
+strengths = [
+    "coding",
+    "reasoning",
+    "tool_use",
+    "long_context",
+    "vision",
+]
+tier = "frontier"
+wire_model = "qwen/qwen4-max"
+
+[models."qwen/qwen4-max".pricing]
+cache_read_per_mtok = 0.075
+cache_write_per_mtok = 1.875
+input_per_mtok = 1.5
+output_per_mtok = 4.5
+
 [models."qwen3.6-35b-a3b"]
 capabilities = [
     "tools",
@@ -14904,6 +15195,42 @@ cache_read_per_mtok = 0.018
 input_per_mtok = 0.09
 output_per_mtok = 0.36
 
+[models."vercel/alibaba/qwen4-max"]
+api_dialect = "openai_chat"
+availability = "serverless"
+capabilities = [
+    "tools",
+    "vision",
+    "video",
+    "streaming",
+    "thinking",
+    "prompt_caching",
+]
+context_window = 1000000
+equivalence_group = "qwen4-max"
+logical_model = "qwen4-max"
+name = "Qwen4 Max (Vercel AI Gateway)"
+open_weight = false
+operations = ["text_generation"]
+provider = "vercel_ai_gateway"
+released = "2026-11-16"
+served_variant = "vercel-ai-gateway"
+strengths = [
+    "coding",
+    "reasoning",
+    "tool_use",
+    "long_context",
+    "vision",
+]
+tier = "frontier"
+wire_model = "alibaba/qwen4-max"
+
+[models."vercel/alibaba/qwen4-max".pricing]
+cache_read_per_mtok = 0.075
+cache_write_per_mtok = 1.875
+input_per_mtok = 1.5
+output_per_mtok = 4.5
+
 [models."vercel/anthropic/claude-haiku-4.5"]
 api_dialect = "openai_chat"
 capabilities = [
@@ -15363,19 +15690,97 @@ input_per_mtok = 4.0
 output_per_mtok = 20.0
 
 [models."vercel/minimax/minimax-m3.1-flash"]
-availability = "unknown"
-capabilities = []
+availability = "serverless"
+capabilities = [
+    "tools",
+    "streaming",
+    "prompt_caching",
+]
 context_window = 1000000
 family = "minimax"
-name = "MiniMax-M3.1-Flash (Vercel AI Gateway)"
+name = "MiniMax M3.1 Flash (Vercel AI Gateway)"
 open_weight = false
 provider = "vercel_ai_gateway"
+released = "2026-10-19"
+served_variant = "vercel-ai-gateway"
 tier = "frontier"
 wire_model = "minimax/minimax-m3.1-flash"
 
 [models."vercel/minimax/minimax-m3.1-flash".pricing]
-input_per_mtok = 0.0
-output_per_mtok = 0.0
+cache_read_per_mtok = 0.015
+input_per_mtok = 0.15
+output_per_mtok = 0.6
+
+[models."vercel/moonshotai/kimi-k3.1-pro"]
+api_dialect = "openai_chat"
+capabilities = [
+    "tools",
+    "vision",
+    "video",
+    "streaming",
+    "thinking",
+    "prompt_caching",
+]
+context_window = 1000000
+equivalence_group = "moonshot-kimi-k3.1-pro"
+logical_model = "moonshot-kimi-k3.1-pro"
+name = "Kimi K3.1 Pro (Vercel AI Gateway)"
+open_weight = true
+operations = ["text_generation"]
+provider = "vercel_ai_gateway"
+released = "2026-10-23"
+served_variant = "vercel-ai-gateway"
+strengths = [
+    "coding",
+    "agentic",
+    "long_context",
+    "tool_use",
+    "reasoning",
+    "vision",
+]
+tier = "frontier"
+wire_model = "moonshotai/kimi-k3.1-pro"
+
+[models."vercel/moonshotai/kimi-k3.1-pro".pricing]
+cache_read_per_mtok = 0.2
+input_per_mtok = 2.0
+output_per_mtok = 10.0
+
+[models."vercel/moonshotai/kimi-k3.1-pro-highspeed"]
+api_dialect = "openai_chat"
+capabilities = [
+    "tools",
+    "vision",
+    "video",
+    "streaming",
+    "thinking",
+    "prompt_caching",
+]
+context_window = 1048576
+equivalence_group = "moonshot-kimi-k3.1-pro"
+logical_model = "moonshot-kimi-k3.1-pro"
+name = "Kimi K3.1 Pro Highspeed (Vercel AI Gateway)"
+open_weight = true
+operations = ["text_generation"]
+provider = "vercel_ai_gateway"
+released = "2026-10-23"
+served_variant = "vercel-ai-gateway-highspeed"
+strengths = [
+    "coding",
+    "agentic",
+    "long_context",
+    "tool_use",
+    "reasoning",
+    "vision",
+]
+tier = "frontier"
+wire_model = "moonshotai/kimi-k3.1-pro-highspeed"
+
+[models."vercel/moonshotai/kimi-k3.1-pro-highspeed".pricing]
+cache_read_per_mtok = 0.2
+cache_write_per_mtok = 5.0
+input_per_mtok = 4.0
+output_per_mtok = 20.0
 
 [models."vercel/nvidia/nemotron-3.5-super-vl"]
 capabilities = [
