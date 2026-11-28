@@ -571,35 +571,33 @@ fn step_budget_failure_keeps_completed_usage_and_first_error() {
     reset_cost_state();
 }
 
-/// `gemini-2.5-pro` bills $1.25/$10 per MTok up to 200k input tokens and
-/// $2.50/$15 beyond it. A cost surface that reads the base rate pair
-/// under-reports a long-context call by the band multiplier, so the two
-/// helpers must not be interchangeable — and this pins which is which.
+/// GPT-6.2 Sol bills $2/$10 per MTok through 272,000 input tokens and
+/// $4/$15 for the entire request above that boundary.
 #[test]
 fn a_long_context_call_bills_at_the_input_token_band() {
     let _guard = crate::llm::env_guard();
-    let (provider, model) = ("gemini", "gemini-2.5-pro");
+    let (provider, model) = ("openai", "gpt-6.2-sol");
 
-    // Below the band: the two helpers agree.
+    // The last short-context request pays the standard price.
     let below =
-        pricing_aware_call_cost(provider, model, 100_000, 1_000, settlement_now()).expect("priced");
+        pricing_aware_call_cost(provider, model, 272_000, 1_000, settlement_now()).expect("priced");
     assert!(
-        (below - (100_000.0 * 1.25 + 1_000.0 * 10.0) / 1_000_000.0).abs() < 1e-9,
+        (below - (272_000.0 * 2.0 + 1_000.0 * 10.0) / 1_000_000.0).abs() < 1e-9,
         "below the band must bill at the base rate, got {below}"
     );
 
     // Above it, the band applies: input x2, output x1.5.
     let above =
-        pricing_aware_call_cost(provider, model, 300_000, 1_000, settlement_now()).expect("priced");
+        pricing_aware_call_cost(provider, model, 272_001, 1_000, settlement_now()).expect("priced");
     assert!(
-        (above - (300_000.0 * 2.50 + 1_000.0 * 15.0) / 1_000_000.0).abs() < 1e-9,
+        (above - (272_001.0 * 4.0 + 1_000.0 * 15.0) / 1_000_000.0).abs() < 1e-9,
         "above the band must bill at the banded rate, got {above}"
     );
 
     // The band-unaware pair is what the buggy surfaces used. Keep the gap
     // visible so nobody "simplifies" a usage-aware caller back onto it.
     let (base_in, base_out) = pricing_per_1k_for(provider, model).expect("priced");
-    let unbanded = (300_000.0 * base_in + 1_000.0 * base_out) / 1000.0;
+    let unbanded = (272_001.0 * base_in + 1_000.0 * base_out) / 1000.0;
     assert!(
         above > unbanded,
         "the banded price must exceed the base-rate price: {above} vs {unbanded}"

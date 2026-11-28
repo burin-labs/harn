@@ -49,6 +49,95 @@ video = false
 vision = true
 vision_supported = true
 
+[[provider.gemini]]
+advanced_generation_options = []
+audio_supported = true
+extends = true
+files_api_supported = true
+live_endpoint_family = "gemini_interactions"
+model_match = "gemini-4-carbon"
+native_tools = true
+pdf_supported = true
+preferred_tool_format = "native"
+prompt_cache_min_prefix_tokens = 4096
+prompt_caching = true
+reasoning_disable_supported = false
+reasoning_effort_levels = [
+    "low",
+    "medium",
+    "high",
+]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+structured_output = "native"
+structured_output_mode = "native_json"
+temperature_supported = false
+thinking_block_style = "reasoning_summary"
+thinking_modes = ["effort"]
+top_k_supported = false
+top_p_supported = false
+vision_supported = true
+
+[[provider.gemini]]
+advanced_generation_options = []
+audio_supported = true
+extends = true
+files_api_supported = true
+live_endpoint_family = "gemini_interactions"
+model_match = "gemini-4-hydrogen"
+native_tools = true
+pdf_supported = true
+preferred_tool_format = "native"
+prompt_cache_min_prefix_tokens = 4096
+prompt_caching = true
+reasoning_disable_supported = false
+reasoning_effort_levels = [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+structured_output = "native"
+structured_output_mode = "native_json"
+temperature_supported = false
+thinking_block_style = "reasoning_summary"
+thinking_modes = ["effort"]
+top_k_supported = false
+top_p_supported = false
+vision_supported = true
+
+[[provider.gemini]]
+advanced_generation_options = []
+audio_supported = true
+extends = true
+files_api_supported = true
+live_endpoint_family = "gemini_interactions"
+model_match = "gemini-4-neon"
+native_tools = true
+pdf_supported = true
+preferred_tool_format = "native"
+prompt_cache_min_prefix_tokens = 4096
+prompt_caching = true
+reasoning_disable_supported = false
+reasoning_effort_levels = [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+structured_output = "native"
+structured_output_mode = "native_json"
+temperature_supported = false
+thinking_block_style = "reasoning_summary"
+thinking_modes = ["effort"]
+top_k_supported = false
+top_p_supported = false
+vision_supported = true
+
 [[provider.openai]]
 extends = true
 model_match = "gpt-6.1-terra"
@@ -66,6 +155,56 @@ reasoning_effort_levels = [
 ]
 reasoning_effort_supported = true
 reasoning_none_supported = true
+reasoning_tools_require_responses = true
+requires_completion_tokens = true
+responses_api = true
+structured_output = "native"
+structured_output_mode = "native_json"
+temperature_supported = false
+thinking_modes = ["effort"]
+top_p_supported = false
+vision_supported = true
+
+[[provider.openai]]
+extends = true
+model_match = "gpt-6.2-astra"
+native_tools = true
+preferred_tool_format = "native"
+prompt_caching = true
+reasoning_disable_supported = false
+reasoning_effort_levels = [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+reasoning_tools_require_responses = true
+requires_completion_tokens = true
+responses_api = true
+structured_output = "native"
+structured_output_mode = "native_json"
+temperature_supported = false
+thinking_modes = ["effort"]
+top_p_supported = false
+vision_supported = true
+
+[[provider.openai]]
+extends = true
+model_match = "gpt-6.2-sol"
+native_tools = true
+preferred_tool_format = "native"
+prompt_caching = true
+reasoning_disable_supported = false
+reasoning_effort_levels = [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+]
+reasoning_effort_supported = true
+reasoning_none_supported = false
 reasoning_tools_require_responses = true
 requires_completion_tokens = true
 responses_api = true
@@ -119,6 +258,98 @@ top_k_supported = false
 top_p_supported = false
 video = false
 vision = true
+vision_supported = true
+
+[[provider.openrouter]]
+advanced_generation_options = []
+audio_supported = true
+extends = true
+files_api_supported = false
+live_endpoint_family = "gemini_generate_content"
+model_match = "google/gemini-4-carbon"
+native_tools = true
+pdf_supported = true
+preferred_tool_format = "native"
+prompt_cache_min_prefix_tokens = 4096
+prompt_caching = true
+reasoning_disable_supported = false
+reasoning_effort_levels = [
+    "low",
+    "medium",
+    "high",
+]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+reasoning_wire_format = "openrouter"
+structured_output = "native"
+structured_output_mode = "native_json"
+temperature_supported = false
+thinking_block_style = "reasoning_summary"
+thinking_modes = ["effort"]
+top_k_supported = false
+top_p_supported = false
+vision_supported = true
+
+[[provider.openrouter]]
+advanced_generation_options = []
+audio_supported = true
+extends = true
+files_api_supported = false
+live_endpoint_family = "gemini_generate_content"
+model_match = "google/gemini-4-hydrogen"
+native_tools = true
+pdf_supported = true
+preferred_tool_format = "native"
+prompt_cache_min_prefix_tokens = 4096
+prompt_caching = true
+reasoning_disable_supported = false
+reasoning_effort_levels = [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+reasoning_wire_format = "openrouter"
+structured_output = "native"
+structured_output_mode = "native_json"
+temperature_supported = false
+thinking_block_style = "reasoning_summary"
+thinking_modes = ["effort"]
+top_k_supported = false
+top_p_supported = false
+vision_supported = true
+
+[[provider.openrouter]]
+advanced_generation_options = []
+audio_supported = true
+extends = true
+files_api_supported = false
+live_endpoint_family = "gemini_generate_content"
+model_match = "google/gemini-4-neon"
+native_tools = true
+pdf_supported = true
+preferred_tool_format = "native"
+prompt_cache_min_prefix_tokens = 4096
+prompt_caching = true
+reasoning_disable_supported = false
+reasoning_effort_levels = [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+reasoning_wire_format = "openrouter"
+structured_output = "native"
+structured_output_mode = "native_json"
+temperature_supported = false
+thinking_block_style = "reasoning_summary"
+thinking_modes = ["effort"]
+top_k_supported = false
+top_p_supported = false
 vision_supported = true
 
 [[provider.openrouter]]
@@ -177,6 +408,110 @@ top_p_supported = false
 vision_supported = true
 
 [[provider.openrouter]]
+extends = true
+model_match = "openai/gpt-6.2-astra"
+native_tools = true
+preferred_tool_format = "native"
+prompt_caching = true
+reasoning_disable_supported = false
+reasoning_effort_levels = [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+reasoning_tools_require_responses = false
+reasoning_wire_format = "openrouter"
+requires_completion_tokens = true
+responses_api = false
+structured_output = "native"
+structured_output_mode = "native_json"
+temperature_supported = false
+thinking_modes = ["effort"]
+top_p_supported = false
+vision_supported = true
+
+[[provider.openrouter]]
+extends = true
+model_match = "openai/gpt-6.2-astra-pro"
+native_tools = true
+preferred_tool_format = "native"
+prompt_caching = true
+reasoning_disable_supported = false
+reasoning_effort_levels = [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+reasoning_tools_require_responses = false
+reasoning_wire_format = "openrouter"
+requires_completion_tokens = true
+responses_api = false
+structured_output = "native"
+structured_output_mode = "native_json"
+temperature_supported = false
+thinking_modes = ["effort"]
+top_p_supported = false
+vision_supported = true
+
+[[provider.openrouter]]
+extends = true
+model_match = "openai/gpt-6.2-sol"
+native_tools = true
+preferred_tool_format = "native"
+prompt_caching = true
+reasoning_disable_supported = false
+reasoning_effort_levels = [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+reasoning_tools_require_responses = false
+reasoning_wire_format = "openrouter"
+requires_completion_tokens = true
+responses_api = false
+structured_output = "native"
+structured_output_mode = "native_json"
+temperature_supported = false
+thinking_modes = ["effort"]
+top_p_supported = false
+vision_supported = true
+
+[[provider.openrouter]]
+extends = true
+model_match = "openai/gpt-6.2-sol-pro"
+native_tools = true
+preferred_tool_format = "native"
+prompt_caching = true
+reasoning_disable_supported = false
+reasoning_effort_levels = [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+reasoning_tools_require_responses = false
+reasoning_wire_format = "openrouter"
+requires_completion_tokens = true
+responses_api = false
+structured_output = "native"
+structured_output_mode = "native_json"
+temperature_supported = false
+thinking_modes = ["effort"]
+top_p_supported = false
+vision_supported = true
+
+[[provider.openrouter]]
 decision_protocol = "openrouter_decisions"
 decision_question_kinds = [
     "boolean",
@@ -195,6 +530,107 @@ request_window_tokens = 262144
 score_levels_max = 10
 score_levels_min = 2
 state_window_tokens = 262144
+
+[[provider.vercel_ai_gateway]]
+advanced_generation_options = []
+audio_supported = true
+extends = true
+files_api_supported = false
+live_endpoint_family = "gemini_generate_content"
+model_match = [
+    "vercel/google/gemini-4-carbon",
+    "google/gemini-4-carbon",
+]
+native_tools = true
+pdf_supported = true
+preferred_tool_format = "native"
+prompt_cache_min_prefix_tokens = 4096
+prompt_caching = true
+reasoning_disable_supported = false
+reasoning_effort_levels = [
+    "low",
+    "medium",
+    "high",
+]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+reasoning_wire_format = "openai"
+structured_output = "native"
+structured_output_mode = "native_json"
+temperature_supported = false
+thinking_block_style = "reasoning_summary"
+thinking_modes = ["effort"]
+top_k_supported = false
+top_p_supported = false
+vision_supported = true
+
+[[provider.vercel_ai_gateway]]
+advanced_generation_options = []
+audio_supported = true
+extends = true
+files_api_supported = false
+live_endpoint_family = "gemini_generate_content"
+model_match = [
+    "vercel/google/gemini-4-hydrogen",
+    "google/gemini-4-hydrogen",
+]
+native_tools = true
+pdf_supported = true
+preferred_tool_format = "native"
+prompt_cache_min_prefix_tokens = 4096
+prompt_caching = true
+reasoning_disable_supported = false
+reasoning_effort_levels = [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+reasoning_wire_format = "openai"
+structured_output = "native"
+structured_output_mode = "native_json"
+temperature_supported = false
+thinking_block_style = "reasoning_summary"
+thinking_modes = ["effort"]
+top_k_supported = false
+top_p_supported = false
+vision_supported = true
+
+[[provider.vercel_ai_gateway]]
+advanced_generation_options = []
+audio_supported = true
+extends = true
+files_api_supported = false
+live_endpoint_family = "gemini_generate_content"
+model_match = [
+    "vercel/google/gemini-4-neon",
+    "google/gemini-4-neon",
+]
+native_tools = true
+pdf_supported = true
+preferred_tool_format = "native"
+prompt_cache_min_prefix_tokens = 4096
+prompt_caching = true
+reasoning_disable_supported = false
+reasoning_effort_levels = [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+reasoning_wire_format = "openai"
+structured_output = "native"
+structured_output_mode = "native_json"
+temperature_supported = false
+thinking_block_style = "reasoning_summary"
+thinking_modes = ["effort"]
+top_k_supported = false
+top_p_supported = false
+vision_supported = true
 
 [[provider.vercel_ai_gateway]]
 extends = true
@@ -242,6 +678,122 @@ reasoning_effort_levels = [
     "high",
     "xhigh",
     "max",
+]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+reasoning_tools_require_responses = false
+reasoning_wire_format = "openai"
+requires_completion_tokens = true
+responses_api = false
+structured_output = "native"
+structured_output_mode = "native_json"
+temperature_supported = false
+thinking_modes = ["effort"]
+top_p_supported = false
+vision_supported = true
+
+[[provider.vercel_ai_gateway]]
+extends = true
+model_match = [
+    "vercel/openai/gpt-6.2-astra",
+    "openai/gpt-6.2-astra",
+]
+native_tools = true
+preferred_tool_format = "native"
+prompt_caching = true
+reasoning_disable_supported = false
+reasoning_effort_levels = [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+reasoning_tools_require_responses = false
+reasoning_wire_format = "openai"
+requires_completion_tokens = true
+responses_api = false
+structured_output = "native"
+structured_output_mode = "native_json"
+temperature_supported = false
+thinking_modes = ["effort"]
+top_p_supported = false
+vision_supported = true
+
+[[provider.vercel_ai_gateway]]
+extends = true
+model_match = [
+    "vercel/openai/gpt-6.2-astra-fast",
+    "openai/gpt-6.2-astra-fast",
+]
+native_tools = true
+preferred_tool_format = "native"
+prompt_caching = true
+reasoning_disable_supported = false
+reasoning_effort_levels = [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+reasoning_tools_require_responses = false
+reasoning_wire_format = "openai"
+requires_completion_tokens = true
+responses_api = false
+structured_output = "native"
+structured_output_mode = "native_json"
+temperature_supported = false
+thinking_modes = ["effort"]
+top_p_supported = false
+vision_supported = true
+
+[[provider.vercel_ai_gateway]]
+extends = true
+model_match = [
+    "vercel/openai/gpt-6.2-sol",
+    "openai/gpt-6.2-sol",
+]
+native_tools = true
+preferred_tool_format = "native"
+prompt_caching = true
+reasoning_disable_supported = false
+reasoning_effort_levels = [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+]
+reasoning_effort_supported = true
+reasoning_none_supported = false
+reasoning_tools_require_responses = false
+reasoning_wire_format = "openai"
+requires_completion_tokens = true
+responses_api = false
+structured_output = "native"
+structured_output_mode = "native_json"
+temperature_supported = false
+thinking_modes = ["effort"]
+top_p_supported = false
+vision_supported = true
+
+[[provider.vercel_ai_gateway]]
+extends = true
+model_match = [
+    "vercel/openai/gpt-6.2-sol-fast",
+    "openai/gpt-6.2-sol-fast",
+]
+native_tools = true
+preferred_tool_format = "native"
+prompt_caching = true
+reasoning_disable_supported = false
+reasoning_effort_levels = [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
 ]
 reasoning_effort_supported = true
 reasoning_none_supported = false
