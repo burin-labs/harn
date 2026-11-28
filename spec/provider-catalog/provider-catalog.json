@@ -20545,7 +20545,10 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "OpenAI will shut down this route on 2027-01-14 and recommends gpt-6-luna.",
+        "sunset_date": "2027-01-14",
+        "superseded_by": "gpt-6-luna"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -20643,7 +20646,10 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "OpenAI will shut down this route on 2027-01-14 and recommends gpt-6-luna.",
+        "sunset_date": "2027-01-14",
+        "superseded_by": "gpt-6-luna"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -20846,7 +20852,10 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "OpenAI will shut down this route on 2027-01-14 and recommends gpt-6-luna.",
+        "sunset_date": "2027-01-14",
+        "superseded_by": "gpt-6-luna"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -20945,7 +20954,10 @@
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "OpenAI will shut down this route on 2027-01-14 and recommends gpt-6-luna.",
+        "sunset_date": "2027-01-14",
+        "superseded_by": "gpt-6-luna"
       },
       "availability": "serverless",
       "quality_tags": [],
@@ -50330,88 +50342,6 @@
         "structured_output",
         "structured_output_mode:native_json",
         "tools"
-      ]
-    },
-    {
-      "provider": "openai",
-      "model": "gpt-4.1",
-      "base_url": "https://api.openai.com/v1",
-      "secret_env": "OPENAI_API_KEY",
-      "label": "GPT-4.1",
-      "family": "openai-gpt",
-      "capabilities": [
-        "batch",
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "tools",
-        "vision"
-      ]
-    },
-    {
-      "provider": "openai",
-      "model": "gpt-4.1-mini",
-      "base_url": "https://api.openai.com/v1",
-      "secret_env": "OPENAI_API_KEY",
-      "label": "GPT-4.1 Mini",
-      "family": "openai-gpt",
-      "capabilities": [
-        "batch",
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "tools",
-        "vision"
-      ]
-    },
-    {
-      "provider": "openai",
-      "model": "gpt-4o",
-      "base_url": "https://api.openai.com/v1",
-      "secret_env": "OPENAI_API_KEY",
-      "label": "GPT-4o",
-      "family": "openai-gpt",
-      "capabilities": [
-        "audio",
-        "batch",
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "tools",
-        "vision"
-      ]
-    },
-    {
-      "provider": "openai",
-      "model": "gpt-4o-mini",
-      "base_url": "https://api.openai.com/v1",
-      "secret_env": "OPENAI_API_KEY",
-      "label": "GPT-4o Mini",
-      "family": "openai-gpt",
-      "capabilities": [
-        "audio",
-        "batch",
-        "native_tools",
-        "prefers_markdown_scaffolding",
-        "prompt_caching",
-        "streaming",
-        "structured_output",
-        "structured_output_mode:native_json",
-        "text_tools",
-        "tools",
-        "vision"
       ]
     },
     {

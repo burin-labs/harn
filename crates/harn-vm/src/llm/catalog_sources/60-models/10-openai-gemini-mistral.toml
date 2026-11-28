@@ -339,10 +339,16 @@ strengths = ["reasoning", "coding", "tool_use", "vision"]
 # The `chatgpt-4o-latest` API alias was retired
 # on 2026-02-17. The API model `gpt-4o` remains available.
 models_dev = {provider = "openai", model = "gpt-5.1", fields = ["name", "context_window", "open_weight"]}
+# https://developers.openai.com/api/docs/deprecations
+# The October 14 notice retires GPT-4o and GPT-4.1 on January 14.
 [models."gpt-4o"]
 provider = "openai"
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 2.50, output_per_mtok = 10.00, cache_read_per_mtok = 1.25 }
+deprecated = true
+deprecation_note = "OpenAI will shut down this route on 2027-01-14 and recommends gpt-6-luna."
+sunset_date = "2027-01-14"
+superseded_by = "gpt-6-luna"
 tier = "frontier"
 strengths = ["coding", "vision", "tool_use"]
 models_dev = {provider = "openai", model = "gpt-4o", fields = ["name", "context_window", "open_weight"]}
@@ -351,6 +357,10 @@ name = "GPT-4o Mini"
 provider = "openai"
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok = 0.075 }
+deprecated = true
+deprecation_note = "OpenAI will shut down this route on 2027-01-14 and recommends gpt-6-luna."
+sunset_date = "2027-01-14"
+superseded_by = "gpt-6-luna"
 tier = "mid"
 strengths = ["speed", "cheap", "summarization", "tool_use"]
 complementary_with = ["anthropic-claude", "google-gemini", "qwen", "deepseek", "kimi"]
@@ -359,6 +369,10 @@ models_dev = {provider = "openai", model = "gpt-4o-mini", fields = ["context_win
 provider = "openai"
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
 pricing = { input_per_mtok = 2.00, output_per_mtok = 8.00, cache_read_per_mtok = 0.50 }
+deprecated = true
+deprecation_note = "OpenAI will shut down this route on 2027-01-14 and recommends gpt-6-luna."
+sunset_date = "2027-01-14"
+superseded_by = "gpt-6-luna"
 tier = "frontier"
 strengths = ["coding", "tool_use", "long_context", "vision"]
 models_dev = {provider = "openai", model = "gpt-4.1", fields = ["name", "context_window", "open_weight"]}
@@ -367,13 +381,21 @@ name = "GPT-4.1 Mini"
 provider = "openai"
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
 pricing = { input_per_mtok = 0.40, output_per_mtok = 1.60, cache_read_per_mtok = 0.10 }
+deprecated = true
+deprecation_note = "OpenAI will shut down this route on 2027-01-14 and recommends gpt-6-luna."
+sunset_date = "2027-01-14"
+superseded_by = "gpt-6-luna"
 tier = "mid"
 strengths = ["speed", "cheap", "coding", "tool_use", "long_context", "vision"]
 models_dev = {provider = "openai", model = "gpt-4.1-mini", fields = ["context_window", "open_weight"]}
+# Models.dev no longer lists the October 23 retirements. Keep their pinned
+# facts in these rows so historical usage can still be priced.
 [models."gpt-4.1-nano"]
 name = "GPT-4.1 Nano"
 provider = "openai"
 capabilities = ["tools", "vision", "streaming", "prompt_caching"]
+context_window = 1047576
+open_weight = false
 pricing = { input_per_mtok = 0.10, output_per_mtok = 0.40, cache_read_per_mtok = 0.025 }
 deprecated = true
 deprecation_note = "Shutdown 2026-10-23 (announced 2026-04-22) per OpenAI deprecations page and the typed shutdown_date on GET /v1/models (read 2026-09-29). OpenAI names gpt-5.6-luna; Harn recommends gpt-6-luna."
@@ -381,7 +403,6 @@ sunset_date = "2026-10-23"
 superseded_by = "gpt-6-luna"
 tier = "small"
 strengths = ["speed", "cheap", "tool_use", "long_context", "vision"]
-models_dev = {provider = "openai", model = "gpt-4.1-nano", fields = ["context_window", "open_weight"]}
 
 [models."text-embedding-3-small"]
 name = "Text Embedding 3 Small"
@@ -394,19 +415,25 @@ strengths = ["embeddings"]
 models_dev = {provider = "openai", model = "text-embedding-3-small", fields = ["context_window", "open_weight", "pricing"]}
 
 [models."gpt-4-turbo"]
+name = "GPT-4 Turbo"
 provider = "openai"
 capabilities = ["tools", "streaming"]
+context_window = 128000
+open_weight = false
+pricing = { input_per_mtok = 10.0, output_per_mtok = 30.0 }
 deprecated = true
 deprecation_note = "Shutdown 2026-10-23 (announced 2026-04-22) per OpenAI deprecations page and the typed shutdown_date on GET /v1/models (read 2026-09-29). Listed for cost-attribution backfill; Harn recommends gpt-6.1-sol."
 sunset_date = "2026-10-23"
 superseded_by = "gpt-6.1-sol"
 tier = "frontier"
 strengths = ["coding", "tool_use"]
-models_dev = {provider = "openai", model = "gpt-4-turbo", fields = ["name", "context_window", "open_weight", "pricing"]}
 [models.o1]
 name = "OpenAI o1"
 provider = "openai"
 capabilities = ["tools", "streaming"]
+context_window = 200000
+open_weight = false
+pricing = { input_per_mtok = 15.0, output_per_mtok = 60.0, cache_read_per_mtok = 7.5 }
 deprecated = true
 deprecation_note = "Shutdown 2026-10-23 (announced 2026-04-22) per OpenAI deprecations page. Harn recommends gpt-6.1-sol."
 # The retirement date was prose only. OpenAI publishes it as a typed
@@ -416,10 +443,6 @@ sunset_date = "2026-10-23"
 superseded_by = "gpt-6.1-sol"
 tier = "reasoning"
 strengths = ["reasoning"]
-# Removed 2026-09-20: o1-mini. It is gone from GET /v1/models ahead of the
-# announced 2026-10-23 legacy exit, while o1 and o3 are still listed (with
-# `shutdown_date` 2026-10-23 and null respectively), so those rows stay.
-models_dev = {provider = "openai", model = "o1", fields = ["context_window", "open_weight", "pricing"]}
 [models.o3]
 name = "OpenAI o3"
 provider = "openai"
@@ -437,6 +460,8 @@ models_dev = {provider = "openai", model = "o3", fields = ["context_window", "op
 name = "OpenAI o4-mini"
 provider = "openai"
 capabilities = ["tools", "vision", "streaming", "prompt_caching", "thinking"]
+context_window = 200000
+open_weight = false
 pricing = { input_per_mtok = 1.10, output_per_mtok = 4.40, cache_read_per_mtok = 0.275 }
 deprecated = true
 deprecation_note = "Shutdown 2026-10-23 (announced 2026-04-22) per OpenAI deprecations page and the typed shutdown_date on GET /v1/models (read 2026-09-29). OpenAI names gpt-5.6-terra; Harn recommends gpt-6.1-sol."
@@ -444,11 +469,13 @@ sunset_date = "2026-10-23"
 superseded_by = "gpt-6.1-sol"
 tier = "mid"
 strengths = ["reasoning", "coding", "tool_use", "vision"]
-models_dev = {provider = "openai", model = "o4-mini", fields = ["context_window", "open_weight"]}
 [models."o3-mini"]
 name = "OpenAI o3-mini"
 provider = "openai"
 capabilities = ["tools", "streaming"]
+context_window = 200000
+open_weight = false
+pricing = { input_per_mtok = 1.1, output_per_mtok = 4.4, cache_read_per_mtok = 0.55 }
 deprecated = true
 deprecation_note = "Shutdown 2026-10-23 (announced 2026-04-22) per OpenAI deprecations page. Use gpt-5.4-mini."
 sunset_date = "2026-10-23"
@@ -470,7 +497,6 @@ benchmarks = { swe_bench_verified = 49.3 }
 # NOTE: this row previously carried Flash-Lite's $0.10/$0.40 rates.
 # Gemini 2.5 Flash is $0.30 in / $2.50 out (cache read $0.03) per the
 # pricing page; the $0.10/$0.40 tier is gemini-2.5-flash-lite below.
-models_dev = {provider = "openai", model = "o3-mini", fields = ["context_window", "open_weight", "pricing"]}
 [models."gemini-2.5-flash"]
 provider = "gemini"
 capabilities = ["tools", "vision", "streaming", "thinking"]
