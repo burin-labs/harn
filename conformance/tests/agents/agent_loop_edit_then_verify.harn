@@ -37,7 +37,7 @@ pipeline main(harness: Harness) {
       annotations: {
         kind: "execute",
         side_effect_level: "process_exec",
-        completion_evidence_role: "verification",
+        completion_evidence_role: "observation",
       },
     },
   )
@@ -52,11 +52,7 @@ pipeline main(harness: Harness) {
           {
             tool_calls: [
               {id: "edit", name: "edit", arguments: {}},
-              {
-                id: "verify",
-                name: "verify",
-                arguments: {command: "grep -Fx 'first proof' README.md"},
-              },
+              {id: "verify", name: "verify", arguments: {command: "cargo test"}},
             ],
           },
           {text: "##DONE##"},

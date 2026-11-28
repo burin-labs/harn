@@ -53,7 +53,7 @@ fn run_case(harness: Harness, mode: string) {
       annotations: {
         kind: "execute",
         side_effect_level: "process_exec",
-        completion_evidence_role: "verification",
+        completion_evidence_role: "observation",
       },
     },
   )

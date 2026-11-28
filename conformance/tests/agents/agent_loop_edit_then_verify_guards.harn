@@ -1,9 +1,53 @@
 import { agent_capture_events } from "std/agent/events"
 import { inject_host_tool_result } from "std/agent/host_injection"
 import { agent_loop } from "std/agent/loop"
-import { agent_session_await_inbox } from "std/agent/state"
+import { agent_record_compaction, agent_session_await_inbox } from "std/agent/state"
 import { agent_tool_handler_result } from "std/agent/tool_lifecycle"
 import { with_llm_script } from "std/testing"
+
+fn assert_retired_process(events: list) -> nil {
+  const resolutions = events.filter(
+    { event ->
+      event?.type == "tool_batch_proposal_resolution" && event?.resolution?.tool_name == "check"
+    },
+  )
+  require len(resolutions) == 1
+    && resolutions[0]?.resolution?.resolution == "invalidated"
+    && resolutions[0]?.resolution?.reason == "context_compacted"
+    && resolutions[0]?.resolution?.source_tool_call_id == "check"
+    && resolutions[0]?.resolution?.pending_count == 0,
+    "compaction must explicitly invalidate the proposal and leave no pending work"
+  const receipts = events.filter(
+    { event -> event?.type == "tool_batch_disposition" && event?.receipt?.tool_name == "check" },
+  )
+  require len(receipts) == 1
+    && receipts[0]?.receipt?.disposition == "resolved"
+    && receipts[0]?.receipt?.reason == "control_changed"
+    && receipts[0]?.receipt?.call_index == 1
+    && receipts[0]?.receipt?.tool_call_id == "check"
+    && receipts[0]?.receipt?.tool_call_id == resolutions[0]?.resolution?.source_tool_call_id
+    && receipts[0]?.receipt?.started_at_ms == nil
+    && receipts[0]?.receipt?.finished_at_ms == nil
+    && receipts[0]?.receipt?.duration_ms == nil,
+    "the retired process must preserve its original call identity without claiming execution"
+}
+
+fn assert_batch_dispositions(events: list, variant: string, released: bool) -> nil {
+  const deferred = events.filter(
+    { event ->
+      event?.type == "tool_batch_disposition"
+        && event?.receipt?.tool_name == (variant == "handle" ? "edit" : "check")
+        && event?.receipt?.disposition == "deferred"
+    },
+  )
+  if variant == "scope" {
+    require len(deferred) == 0, "a changed context must retire the stale process proposal"
+    assert_retired_process(events)
+  } else {
+    require len(deferred) == (released ? 0 : variant == "multiple" ? 2 : 1),
+      "blocked verification must remain observable while a successful observation releases the edit: ${variant}"
+  }
+}
 
 fn run_case(harness: Harness, variant: string) {
   const session = "edit-verify-guards-" + harness.random.uuid()
@@ -17,6 +61,9 @@ fn run_case(harness: Harness, variant: string) {
     {
       handler: { _args ->
         harness.runtime.atomic_add(edits, 1)
+        if variant == "scope" {
+          agent_record_compaction(harness.agent, session, {summary: "context changed"})
+        }
         if variant == "pending" {
           harness.agent.session_post_event(session, "user", "new instructions", "test")
         }
@@ -41,6 +88,8 @@ fn run_case(harness: Harness, variant: string) {
               "not_applied"
             } else if variant == "unknown" {
               "unknown"
+            } else if variant == "unchanged" {
+              "unchanged"
             } else {
               "applied"
             },
@@ -69,19 +118,21 @@ fn run_case(harness: Harness, variant: string) {
         return agent_tool_handler_result("checked", {})
       },
       parameters: {},
-      annotations: if variant == "generic" {
-        {kind: "execute", side_effect_level: "process_exec"}
-      } else {
-        {
-          kind: "execute",
-          side_effect_level: variant == "handle" ? "read_only" : "process_exec",
-          completion_evidence_role: "verification",
-        }
+      annotations: {
+        kind: variant == "terminal" ? "terminal" : "execute",
+        side_effect_level: variant == "handle" ? "read_only" : "process_exec",
+        completion_evidence_role: variant == "declared" ? "verification" : "observation",
       },
     },
   )
   const calls = if variant == "reverse" {
     [{id: "check", name: "check", arguments: {}}, {id: "edit", name: "edit", arguments: {}}]
+  } else if variant == "multiple" {
+    [
+      {id: "edit", name: "edit", arguments: {}},
+      {id: "check-1", name: "check", arguments: {}},
+      {id: "check-2", name: "check", arguments: {}},
+    ]
   } else {
     [{id: "edit", name: "edit", arguments: {}}, {id: "check", name: "check", arguments: {}}]
   }
@@ -111,19 +162,12 @@ fn run_case(harness: Harness, variant: string) {
     },
   )
   const handle = variant == "handle"
+  const advance = contains(["generic", "declared", "unchanged"], variant)
   require harness.runtime.atomic_get(edits) == 1,
     "the edit must run, including after a successful read-only handle observation"
-  require harness.runtime.atomic_get(checks) == (handle ? 1 : 0),
-    "the check must fire only for the read-only handle observation"
-  const deferred = captured.events.filter(
-    { event ->
-      event?.type == "tool_batch_disposition"
-        && event?.receipt?.tool_name == (handle ? "edit" : "check")
-        && event?.receipt?.disposition == "deferred"
-    },
-  )
-  require len(deferred) == (handle ? 0 : 1),
-    "blocked verification must remain observable while a successful observation releases the edit"
+  require harness.runtime.atomic_get(checks) == (handle || advance ? 1 : 0),
+    "the process must fire only after a usable edit with a clear scope or as a read-only observation: ${variant}"
+  assert_batch_dispositions(captured.events, variant, handle || advance)
 }
 
 pipeline main(harness: Harness) {
@@ -136,6 +180,11 @@ pipeline main(harness: Harness) {
     "pending",
     "typed",
     "generic",
+    "declared",
+    "unchanged",
+    "scope",
+    "multiple",
+    "terminal",
     "reverse",
     "handle",
   ] {
